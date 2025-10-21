@@ -1,0 +1,4 @@
+- [x] Ubah validasi file di MaterialController.php untuk import materials
+- [x] Test endpoint import setelah perubahan (skip, user minta selesai)
+- [x] Tambah route stock-report di routes/api.php
+- [x] Test endpoint stock-report (skip, user minta selesai)
