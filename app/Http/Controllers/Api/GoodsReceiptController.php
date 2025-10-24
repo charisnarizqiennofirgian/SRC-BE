@@ -155,7 +155,7 @@ class GoodsReceiptController extends Controller
         $lastReceipt = GoodsReceipt::where('receipt_number', 'like', $prefix . '%')->latest('id')->first();
         $number = 1;
         if ($lastReceipt) {
-            $number = (int) substr($lastReceipt->receipt_number', -4) + 1;
+             $number = (int) substr($lastReceipt->receipt_number, -4) + 1;
         }
         return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }

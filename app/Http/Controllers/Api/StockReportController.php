@@ -3,83 +3,66 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\Item;
-use Illuminate\Support\Facades\DB;
+use App\Models\Category;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class StockReportController extends Controller
 {
-    /**
-     * ✅ Get Stock Report dengan Filter Jenis Barang
-     * 
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function index(Request $request)
     {
         try {
-            $search = $request->input('search');
-            $type = $request->input('type'); // ✅ TAMBAH: Filter jenis barang
-            $perPage = $request->input('per_page', 15);
-
-            $query = Item::query();
-
-            // ✅ SELECT dengan SUM stock dari stock_movements
-            $query->select(
-                'items.id',
-                'items.code',
-                'items.name',
-                'items.category_id',
-                'items.unit_id',
-                DB::raw('COALESCE((SELECT SUM(quantity) FROM stock_movements WHERE stock_movements.item_id = items.id), 0) as stock')
-            );
-
-            // ✅ EAGER LOAD: category dan unit
-            $query->with(['category', 'unit']);
-
-            // ✅ FILTER BERDASARKAN TYPE
-            if ($type === 'bahan_baku') {
-                // Filter: Bahan Baku, Bahan Penolong, Bahan Operasional
-                $query->whereHas('category', function($q) {
-                    $q->where('name', 'like', '%Bahan%')
-                      ->orWhere('name', 'like', '%Penolong%')
-                      ->orWhere('name', 'like', '%Operasional%');
-                });
-            } elseif ($type === 'produk_jadi') {
-                // Filter: Produk Jadi
-                $query->whereHas('category', function($q) {
-                    $q->where('name', 'like', '%Produk Jadi%');
-                });
+            if (!$request->has('categories')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Filter kategori diperlukan.'
+                ], 400);
             }
-            // Jika type kosong/null, tampilkan semua
 
-            // ✅ SEARCH: Berdasarkan nama atau kode
-            if ($search) {
+            $categoryNames = explode(',', $request->query('categories'));
+
+            $categoryIds = Category::where(function ($query) use ($categoryNames) {
+                foreach ($categoryNames as $name) {
+                    $query->orWhereRaw('LOWER(name) = ?', [strtolower(trim($name))]);
+                }
+            })->pluck('id');
+
+            if ($categoryIds->isEmpty()) {
+                return response()->json(['success' => true, 'data' => []]);
+            }
+
+            $query = Item::with(['unit:id,name', 'category:id,name'])
+                         ->whereIn('category_id', $categoryIds);
+
+            if ($request->has('search') && $request->input('search')) {
+                $search = $request->input('search');
                 $query->where(function($q) use ($search) {
-                    $q->where('items.name', 'like', "%{$search}%")
-                      ->orWhere('items.code', 'like', "%{$search}%");
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('code', 'like', "%{$search}%");
                 });
             }
 
-            // ✅ ORDER BY: Urutkan berdasarkan nama
-            $query->orderBy('items.name');
+            $sortBy = $request->input('sort_by', 'name');
+            $sortOrder = $request->input('sort_order', 'asc');
+            
+            $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
+            if (in_array($sortBy, $allowedSortFields)) {
+                $query->orderBy($sortBy, $sortOrder);
+            } else {
+                $query->orderBy('name', 'asc');
+            }
 
-            // ✅ PAGINATION
-            $reportData = $query->paginate($perPage);
+            $perPage = min($request->input('per_page', 50), 100);
+            $items = $query->paginate($perPage);
 
-            return response()->json([
-                'success' => true,
-                'data' => $reportData
-            ]);
+            return response()->json(['success' => true, 'data' => $items]);
 
         } catch (\Exception $e) {
-            \Log::error('❌ Error saat mengambil laporan stok: ' . $e->getMessage());
-            \Log::error($e->getTraceAsString());
-            
+            Log::error('Gagal mengambil laporan stok: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan saat mengambil laporan stok.',
-                'error' => $e->getMessage()
+                'message' => 'Terjadi kesalahan pada server.'
             ], 500);
         }
     }

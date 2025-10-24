@@ -8,26 +8,19 @@ use Illuminate\Http\Request;
 
 class CategoryController extends Controller
 {
-    /**
-     * Menampilkan semua data kategori dengan pagination.
-     */
     public function index(Request $request)
     {
         try {
-            // Ambil parameter dari request
             $perPage = $request->input('per_page', 10);
             $search = $request->input('search');
             
-            // Query builder
             $query = Category::query();
             
-            // Jika ada parameter search
             if ($search) {
                 $query->where('name', 'like', "%{$search}%")
                       ->orWhere('description', 'like', "%{$search}%");
             }
             
-            // Paginate hasil query
             $categories = $query->paginate($perPage);
             
             return response()->json($categories, 200);
@@ -40,6 +33,7 @@ class CategoryController extends Controller
             ], 500);
         }
     }
+
     public function all()
     {
         try {
@@ -57,15 +51,11 @@ class CategoryController extends Controller
         }
     }
 
-
-    /**
-     * Menyimpan kategori baru ke database.
-     */
     public function store(Request $request)
     {
         try {
             $validatedData = $request->validate([
-                'name' => 'required|string|max:255|unique:categories',
+                'name' => 'required|string|max:255|unique:categories,name',
                 'description' => 'nullable|string',
             ]);
 
@@ -80,7 +70,7 @@ class CategoryController extends Controller
             \Log::error('Validation error saat menambah kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menambahkan kategori. ' . ($e->errors()['name'][0] ?? 'Data tidak valid.'),
+                'message' => $e->errors()['name'][0] ?? 'Gagal menambahkan kategori. Data tidak valid.',
             ], 422);
         } catch (\Exception $e) {
             \Log::error('Error saat menambah kategori: ' . $e->getMessage());
@@ -91,9 +81,6 @@ class CategoryController extends Controller
         }
     }
 
-    /**
-     * Mengupdate kategori yang ada di database.
-     */
     public function update(Request $request, Category $category)
     {
         try {
@@ -113,7 +100,7 @@ class CategoryController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal memperbarui kategori. ' . ($e->errors()['name'][0] ?? 'Data tidak valid.'),
+                'message' => $e->errors()['name'][0] ?? 'Gagal memperbarui kategori. Data tidak valid.',
             ], 422);
         } catch (\Exception $e) {
             \Log::error('Error saat update kategori: ' . $e->getMessage());
@@ -124,12 +111,18 @@ class CategoryController extends Controller
         }
     }
 
-    /**
-     * Menghapus kategori dari database.
-     */
     public function destroy(Category $category)
     {
         try {
+            $isUsed = \App\Models\Item::where('category_id', $category->id)->exists();
+            
+            if ($isUsed) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Gagal menghapus. Kategori ini sedang digunakan oleh Master Barang.'
+                ], 409); // 409 Conflict
+            }
+
             $category->delete();
 
             return response()->json([
