@@ -8,10 +8,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Item extends Model
 {
-    use HasFactory;
     use HasFactory, SoftDeletes;
 
-    // Kolom yang boleh diisi secara massal
     protected $fillable = [
         'name',
         'code',
@@ -20,19 +18,21 @@ class Item extends Model
         'stock',
         'description',
         'type',
+        'specifications',
+        'nw_per_box',
+        'gw_per_box',
+        'wood_consumed_per_pcs',
     ];
 
-    /**
-     * Relasi untuk mengambil data Kategori dari item ini.
-     */
+    protected $casts = [
+        'specifications' => 'array',
+    ];
+
     public function category()
     {
         return $this->belongsTo(Category::class);
     }
 
-    /**
-     * Relasi untuk mengambil data Satuan dari item ini.
-     */
     public function unit()
     {
         return $this->belongsTo(Unit::class);

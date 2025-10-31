@@ -48,7 +48,6 @@ class PurchaseBillController extends Controller
             }
             
             
-            // ✅ FIX: Ambil dari request, default 0 kalau tidak ada
             $ppnPercentage = $validatedData['ppn_percentage'] ?? 0;
             $ppnAmount = $subtotal * ($ppnPercentage / 100); 
             $totalAmount = $subtotal + $ppnAmount;

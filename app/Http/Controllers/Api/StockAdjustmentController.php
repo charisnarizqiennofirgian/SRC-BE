@@ -9,13 +9,14 @@ use App\Models\StockMovement;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Imports\KayuStockImport;
+use App\Exports\KayuTemplateExport;
 
 class StockAdjustmentController extends Controller
 {
-    /**
-     * Menyimpan data penyesuaian stok baru (VERSI FINAL & BERSIH).
-     */
-  public function store(Request $request)
+    public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'item_id' => 'required|integer|exists:items,id',
@@ -70,6 +71,94 @@ class StockAdjustmentController extends Controller
                 'success' => false, 
                 'message' => 'Terjadi kesalahan pada server.',
                 'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+   public function uploadSaldoAwalKayu(Request $request)
+    {
+        if (!$request->hasFile('file')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan. Pastikan field name adalah "file".',
+            ], 422);
+        }
+ 
+        $validator = Validator::make($request->all(), [
+            'file' => [
+                'required',
+                'file',
+                'mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'max:5120'
+            ]
+        ], [
+            'file.required' => 'File wajib di-upload.',
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
+        ]);
+ 
+        if ($validator->fails()) {
+            Log::warning('Validasi file kayu gagal:', [
+                'errors' => $validator->errors()->toArray(),
+                'file_info' => $request->hasFile('file') ? [
+                    'original_name' => $request->file('file')->getClientOriginalName(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
+                ] : 'No file uploaded'
+            ]);
+ 
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi file gagal.',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+ 
+        DB::beginTransaction();
+        try {
+            Excel::import(new KayuStockImport, $request->file('file'));
+             
+            DB::commit();
+             
+            return response()->json([
+                'success' => true,
+                'message' => 'Upload saldo awal kayu berhasil. Master data dan stok telah diperbarui.'
+            ], 201);
+ 
+        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+            DB::rollBack();
+            $failures = $e->failures();
+            Log::error('Gagal validasi Excel Kayu:', ['failures' => $failures]);
+             
+            return response()->json([
+                'success' => false,
+                'message' => 'Data di Excel tidak valid.',
+                'errors' => $failures,
+            ], 422);
+ 
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Gagal upload Saldo Awal Kayu: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+ 
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan internal saat memproses file.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+    
+    public function downloadTemplateKayu()
+    {
+        try {
+            return Excel::download(new KayuTemplateExport, 'template_saldo_awal_kayu.xlsx');
+        } catch (\Exception $e) {
+            Log::error('Gagal download template kayu: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mendownload template kayu.'
             ], 500);
         }
     }

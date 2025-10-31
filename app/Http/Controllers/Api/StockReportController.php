@@ -33,6 +33,8 @@ class StockReportController extends Controller
             }
 
             $query = Item::with(['unit:id,name', 'category:id,name'])
+                         
+                         ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock', 'specifications')
                          ->whereIn('category_id', $categoryIds);
 
             if ($request->has('search') && $request->input('search')) {
