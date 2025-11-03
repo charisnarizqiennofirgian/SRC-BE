@@ -24,7 +24,7 @@ class MaterialController extends Controller
             if ($request->has('include')) {
                 $relations = explode(',', $request->include);
 
-                
+            
                 if ($request->has('category_name') && !in_array('category', $relations)) {
                     $relations[] = 'category';
                 }
@@ -65,18 +65,16 @@ class MaterialController extends Controller
 
             
             if ($request->has('category_id') && $request->category_id) {
-                // Filter berdasarkan ID (untuk Stok Adjusment)
+                
                 $query->where('category_id', $request->category_id);
             } 
-            // Filter berdasarkan NAMA (untuk Laporan Karton Box & Produk Jadi Anda)
+        
             else if ($request->has('category_name') && $request->category_name) {
-                // "whereHas" adalah query "pintar" yang mencari item
-                // yang memiliki relasi 'category' dengan 'name' tertentu.
                 $query->whereHas('category', function ($q) use ($request) {
                     $q->where('name', 'like', '%' . $request->category_name . '%');
                 });
             }
-            
+        
 
             $sortBy = $request->input('sort_by', 'created_at');
             $sortOrder = $request->input('sort_order', 'desc');
@@ -114,12 +112,10 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
-
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
                 'specifications.p' => 'nullable|numeric|min:0',
-
                 'nw_per_box' => 'nullable|numeric|min:0',
                 'gw_per_box' => 'nullable|numeric|min:0',
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
@@ -142,7 +138,6 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
-
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -152,9 +147,7 @@ class MaterialController extends Controller
                     $itemData['specifications'] = null;
                 }
             }
-
             $item = Item::create($itemData);
-
             $item->load(['unit:id,name', 'category:id,name']);
             Cache::forget('materials_all');
 
@@ -179,7 +172,6 @@ class MaterialController extends Controller
     {
         try {
             $material->load(['unit:id,name', 'category:id,name']);
-
             return response()->json([
                 'success' => true,
                 'data' => $material,
@@ -207,12 +199,10 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
-
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
                 'specifications.p' => 'nullable|numeric|min:0',
-
                 'nw_per_box' => 'nullable|numeric|min:0',
                 'gw_per_box' => 'nullable|numeric|min:0',
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
@@ -235,7 +225,6 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
-
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -245,7 +234,6 @@ class MaterialController extends Controller
                     $itemData['specifications'] = null;
                 }
             }
-
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);
             Cache::forget('materials_all');
@@ -286,16 +274,36 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Download template CSV untuk import.
-     */
-    public function downloadTemplate(Request $request)
+        public function downloadTemplate(Request $request)
     {
         try {
-            $headers = 'kode;nama;kategori;satuan;stok_awal;deskripsi';
-            $example = 'BB-001;Kayu Jati;Bahan Baku;Lembar;50;Kayu jati kualitas A';
-            $content = $headers . "\n" . $example;
-            $fileName = 'template_bahan_baku_' . date('Ymd') . '.csv';
+            
+            $headers = [
+                'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'deskripsi',
+                'spec_p', 'spec_l', 'spec_t', 
+                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs' 
+            ];
+            
+           
+            $example1 = [
+                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'Produk KILT',
+                '', '', '', 
+                '27.0', '42.0', '0.0099' 
+            ];
+
+            // Contoh untuk Karton Box
+            $example2 = [
+                'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'Box untuk KILT',
+                '960', '940', '940', 
+                '', '', '' 
+            ];
+
+            $content = implode(';', $headers) . "\n";
+            $content .= implode(';', $example1) . "\n";
+            $content .= implode(';', $example2) . "\n";
+
+            $fileName = 'template_master_barang_all_' . date('Ymd') . '.csv';
+            
 
             return response($content)
                 ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -312,9 +320,7 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Import data Item/Material dari file Excel/CSV.
-     */
+    
     public function import(Request $request)
     {
         $validator = Validator::make(
@@ -359,7 +365,6 @@ class MaterialController extends Controller
             ], 200);
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             $failures = $e->failures();
-
             $errors = [];
             foreach ($failures as $failure) {
                 $errors[] = [
@@ -393,18 +398,14 @@ class MaterialController extends Controller
     {
         try {
             $search = $request->input('search');
-
             $query = Item::with(['unit:id,name', 'category:id,name']);
-
             if ($search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('code', 'like', "%{$search}%");
                 });
             }
-
             $items = $query->get();
-
             return response()->json([
                 'success' => false,
                 'message' => 'Fitur export belum diimplementasikan.',
