@@ -62,7 +62,7 @@ class DeliveryOrderController extends Controller
 
             // === Validasi barcode & rex_certificate_file
             $validated = $request->validate([
-                // ... validasi field lain tetap seperti kebutuhan
+                // ... validasi lain tetap seperti kebutuhan
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
             ]);
@@ -109,7 +109,7 @@ class DeliveryOrderController extends Controller
                 'consignee_info' => $request->consignee_info,
                 'applicant_info' => $request->applicant_info,
                 'notify_info' => $request->notify_info,
-                'barcode_image' => $barcodeImagePath, // baris baru simpan path barcode
+                'barcode_image' => $barcodeImagePath, // simpan path barcode
             ]);
 
             $details = $request->details;
@@ -159,6 +159,13 @@ class DeliveryOrderController extends Controller
                 $salesOrder->save();
             }
 
+            // PATCH: Load ulang untuk path barcode_image dalam bentuk URL
+            $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
+                ->find($deliveryOrder->id);
+            $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
+                ? asset('storage/' . $deliveryOrder->barcode_image)
+                : null;
+            
             DB::commit();
             return response()->json([
                 'success' => true,
@@ -176,36 +183,34 @@ class DeliveryOrderController extends Controller
     }
 
     public function show($id)
-{
-    try {
-        $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
-            ->findOrFail($id);
+    {
+        try {
+            $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
+                ->findOrFail($id);
 
-        // PATCH: JSON decode info alamat, agar frontend bisa akses .name/.address
-        $fields = ['consignee_info', 'applicant_info', 'notify_info'];
-        foreach ($fields as $f) {
-            $val = $deliveryOrder->$f;
-            // Jika sudah array/object, tetap, jika string, decode
-            $deliveryOrder->$f = $val && is_string($val) ? json_decode($val) : (object)[];
+            // PATCH: JSON decode info alamat, agar frontend bisa akses .name/.address
+            $fields = ['consignee_info', 'applicant_info', 'notify_info'];
+            foreach ($fields as $f) {
+                $val = $deliveryOrder->$f;
+                $deliveryOrder->$f = $val && is_string($val) ? json_decode($val) : (object)[];
+            }
+
+            // Generate url barcode path biar frontend tinggal pakai
+            $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
+                ? asset('storage/' . $deliveryOrder->barcode_image)
+                : null;
+
+            return response()->json([
+                'success' => true,
+                'data' => $deliveryOrder
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak ditemukan'
+            ], 404);
         }
-
-        // Generate url barcode path biar frontend tinggal pakai
-        $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
-            ? asset('storage/' . $deliveryOrder->barcode_image)
-            : null;
-
-        return response()->json([
-            'success' => true,
-            'data' => $deliveryOrder
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Data tidak ditemukan'
-        ], 404);
     }
-}
-
 
     public function update(Request $request, $id)
     {
@@ -214,12 +219,10 @@ class DeliveryOrderController extends Controller
             $do = DeliveryOrder::findOrFail($id);
 
             $validated = $request->validate([
-                // ... validasi field lain tetap
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
             ]);
 
-            // === Jika upload file barcode baru, hapus file lama
             if ($request->hasFile('barcode_image')) {
                 if ($do->barcode_image) {
                     Storage::disk('public')->delete($do->barcode_image);
@@ -228,7 +231,6 @@ class DeliveryOrderController extends Controller
                 $validated['barcode_image'] = $barcodeImagePath;
             }
 
-            // === Jika upload rex certificate baru:
             if ($request->hasFile('rex_certificate_file')) {
                 if ($do->rex_certificate_file) {
                     Storage::disk('public')->delete($do->rex_certificate_file);
@@ -240,6 +242,12 @@ class DeliveryOrderController extends Controller
             }
 
             $do->update($validated);
+
+            // RELOAD + path
+            $do = DeliveryOrder::find($do->id);
+            $do->barcode_image = $do->barcode_image
+                ? asset('storage/' . $do->barcode_image)
+                : null;
 
             DB::commit();
             return response()->json([
@@ -277,7 +285,6 @@ class DeliveryOrderController extends Controller
         try {
             $deliveryOrder = DeliveryOrder::with('details')->findOrFail($id);
 
-            // Hapus barcode & rex certificate file (opsional, kalau mau rapih)
             if ($deliveryOrder->barcode_image) {
                 Storage::disk('public')->delete($deliveryOrder->barcode_image);
             }
@@ -312,7 +319,6 @@ class DeliveryOrderController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollback();
-
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal membatalkan pengiriman: ' . $e->getMessage()

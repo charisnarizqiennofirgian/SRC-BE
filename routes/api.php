@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\PurchaseOrderController;
 use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
+use App\Http\Controllers\Api\DeliveryOrderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -105,6 +106,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- PENJUALAN ---
     Route::apiResource('sales-orders', SalesOrderController::class);
+    Route::get('sales-orders-open', [SalesOrderController::class, 'getOpenSalesOrders']);
+    
+    // --- PENGIRIMAN ---
+    Route::apiResource('delivery-orders', DeliveryOrderController::class);
 
     // --- UTILITAS DASHBOARD (INI MASIH DIPAKAI) ---
     Route::get('/dashboard-route', function (Request $request) {

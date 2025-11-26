@@ -19,7 +19,7 @@ class SalesOrderController extends Controller
         try {
             $query = SalesOrder::without('details')
                 ->with(['buyer:id,name', 'user:id,name'])
-                ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'delivery_date', 'grand_total', 'status', 'currency');
+                ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
 
             
             $salesOrders = $query->orderBy('so_date', 'desc')
@@ -127,6 +127,38 @@ class SalesOrderController extends Controller
             ], 500);
         }
     }
+   public function getOpenSalesOrders(Request $request)
+{
+    try {
+        $query = SalesOrder::with(['buyer:id,name', 'user:id,name', 'details' => function($q){
+            $q->whereColumn('quantity', '>', 'quantity_shipped');
+        }])
+        ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
+        ->where('status', '!=', 'Completed')
+        ->where('status', '!=', 'Cancelled')
+        // Tambah ini:
+        ->whereHas('details', function($q){
+            $q->whereColumn('quantity', '>', 'quantity_shipped');
+        })
+        ->orderBy('so_date', 'desc')
+        ->orderBy('id', 'desc');
+
+        $salesOrders = $query->paginate($request->input('per_page', 25));
+
+        return response()->json([
+            'success' => true,
+            'data' => $salesOrders
+        ], 200);
+
+    } catch (\Exception $e) {
+        \Log::error('Gagal mengambil daftar Sales Order terbuka: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal mengambil data.'
+        ], 500);
+    }
+}
+
 
     
     public function show(string $id)

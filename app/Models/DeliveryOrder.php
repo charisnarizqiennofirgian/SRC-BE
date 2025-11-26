@@ -41,6 +41,7 @@ class DeliveryOrder extends Model
     'rex_date',
     'rex_certificate_file', 
     'goods_description',
+    'barcode_image',
 ];
 
     protected $casts = [
