@@ -13,18 +13,22 @@ class SalesOrderDetail extends Model
     public $timestamps = false;
 
     
-    protected $fillable = [
-        'sales_order_id',
-        'item_id',
-        'quantity',
-        'quantity_shipped',
-        'item_name',
-        'item_unit',
-        'unit_price',
-        'discount',
-        'line_total',
-        'specifications',
-    ];
+   protected $fillable = [
+    'sales_order_id',
+    'item_id',
+    'quantity',
+    'quantity_shipped',
+    'item_name',
+    'item_unit',
+    'item_code',        
+    'unit_price',
+    'discount',
+    'line_total',
+    'specifications',
+    'delivery_date',    
+    'keterangan',       
+];
+
 
     
     protected $casts = [

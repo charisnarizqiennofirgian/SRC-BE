@@ -13,15 +13,17 @@ use Illuminate\Support\Facades\Log;
 
 class SalesOrderController extends Controller
 {
-    
     public function index(Request $request)
     {
         try {
-            $query = SalesOrder::without('details')
-                ->with(['buyer:id,name', 'user:id,name'])
+            $query = SalesOrder::with([
+                    'buyer:id,name', 
+                    'user:id,name',
+                    'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
+                    'details.item:id,name'
+                ])
                 ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
 
-            
             $salesOrders = $query->orderBy('so_date', 'desc')
                                 ->orderBy('id', 'desc')
                                 ->paginate($request->input('per_page', 25));
@@ -40,13 +42,11 @@ class SalesOrderController extends Controller
         }
     }
 
-    
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'buyer_id' => 'required|exists:buyers,id',
             'so_date' => 'required|date',
-            'delivery_date' => 'nullable|date|after_or_equal:so_date',
             'customer_po_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'status' => 'required|string|in:Draft,Confirmed',
@@ -57,6 +57,8 @@ class SalesOrderController extends Controller
             'details.*.unit_price' => 'required|numeric|min:0',
             'details.*.discount' => 'nullable|numeric|min:0',
             'details.*.specifications' => 'nullable|array',
+            'details.*.delivery_date' => 'nullable|date',
+            'details.*.keterangan' => 'nullable|string',
 
             'subtotal' => 'required|numeric',
             'discount' => 'nullable|numeric',
@@ -78,13 +80,13 @@ class SalesOrderController extends Controller
         DB::beginTransaction();
         try {
             $soData = $request->only([
-                'buyer_id', 'so_date', 'delivery_date', 'customer_po_number', 
+                'buyer_id', 'so_date', 'customer_po_number', 
                 'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
                 'currency', 'exchange_rate'
             ]);
             
             $soData['user_id'] = Auth::id();
-            $soData['so_number'] = $this->generateSoNumber(); 
+            $soData['so_number'] = $this->generateSoNumber();
 
             $salesOrder = SalesOrder::create($soData);
 
@@ -97,11 +99,14 @@ class SalesOrderController extends Controller
                     'quantity' => $detail['quantity'],
                     'quantity_shipped' => 0,
                     'item_name' => $item->name, 
-                    'item_unit' => $item->unit->name, 
+                    'item_unit' => $item->unit->name,
+                    'item_code' => $item->code ?? null,  
                     'unit_price' => $detail['unit_price'],
                     'discount' => $detail['discount'] ?? 0,
                     'line_total' => $lineTotal,
                     'specifications' => $detail['specifications'] ?? null,
+                    'delivery_date' => $detail['delivery_date'] ?? null,
+                    'keterangan' => $detail['keterangan'] ?? null,
                 ]);
             }
             
@@ -118,7 +123,7 @@ class SalesOrderController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal menyimpan Sales Order: ' . $e->getMessage());
-            Log::error('Stack Trace: ' . $e->getTraceAsString()); 
+            Log::error('Stack Trace: ' . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,
@@ -127,44 +132,62 @@ class SalesOrderController extends Controller
             ], 500);
         }
     }
-   public function getOpenSalesOrders(Request $request)
-{
-    try {
-        $query = SalesOrder::with(['buyer:id,name', 'user:id,name', 'details' => function($q){
-            $q->whereColumn('quantity', '>', 'quantity_shipped');
-        }])
-        ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
-        ->where('status', '!=', 'Completed')
-        ->where('status', '!=', 'Cancelled')
-        // Tambah ini:
-        ->whereHas('details', function($q){
-            $q->whereColumn('quantity', '>', 'quantity_shipped');
-        })
-        ->orderBy('so_date', 'desc')
-        ->orderBy('id', 'desc');
 
-        $salesOrders = $query->paginate($request->input('per_page', 25));
+    public function getOpenSalesOrders(Request $request)
+    {
+        try {
+            $query = SalesOrder::with(['buyer:id,name', 'user:id,name', 'details' => function($q){
+                $q->whereColumn('quantity', '>', 'quantity_shipped');
+            }])
+            ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
+            ->where('status', '!=', 'Completed')
+            ->where('status', '!=', 'Cancelled')
+            ->whereHas('details', function($q){
+                $q->whereColumn('quantity', '>', 'quantity_shipped');
+            })
+            ->orderBy('so_date', 'desc')
+            ->orderBy('id', 'desc');
 
-        return response()->json([
-            'success' => true,
-            'data' => $salesOrders
-        ], 200);
+            $salesOrders = $query->paginate($request->input('per_page', 25));
 
-    } catch (\Exception $e) {
-        \Log::error('Gagal mengambil daftar Sales Order terbuka: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal mengambil data.'
-        ], 500);
+            return response()->json([
+                'success' => true,
+                'data' => $salesOrders
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Gagal mengambil daftar Sales Order terbuka: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengambil data.'
+            ], 500);
+        }
     }
-}
 
-
-    
     public function show(string $id)
     {
         try {
-            $salesOrder = SalesOrder::with(['buyer', 'user', 'details.item'])->findOrFail($id);
+            $salesOrder = SalesOrder::with([
+                'buyer', 
+                'user', 
+                'details' => function($query) {
+                    $query->select(
+                        'id',
+                        'sales_order_id',
+                        'item_id',
+                        'item_name',
+                        'item_unit',
+                        'item_code',         
+                        'quantity',
+                        'unit_price',
+                        'discount',
+                        'line_total',
+                        'delivery_date',  
+                        'keterangan'      
+                    );
+                },
+                'details.item:id,name,code'
+            ])->findOrFail($id);
 
             return response()->json([
                 'success' => true,
@@ -179,13 +202,11 @@ class SalesOrderController extends Controller
         }
     }
 
-    
     public function update(Request $request, string $id)
     {
         $validator = Validator::make($request->all(), [
             'buyer_id' => 'required|exists:buyers,id',
             'so_date' => 'required|date',
-            'delivery_date' => 'nullable|date|after_or_equal:so_date',
             'customer_po_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'status' => 'required|string|in:Draft,Confirmed',
@@ -196,6 +217,8 @@ class SalesOrderController extends Controller
             'details.*.unit_price' => 'required|numeric|min:0',
             'details.*.discount' => 'nullable|numeric|min:0',
             'details.*.specifications' => 'nullable|array',
+            'details.*.delivery_date' => 'nullable|date',
+            'details.*.keterangan' => 'nullable|string',
 
             'subtotal' => 'required|numeric',
             'discount' => 'nullable|numeric',
@@ -219,7 +242,7 @@ class SalesOrderController extends Controller
             $salesOrder = SalesOrder::findOrFail($id);
 
             $soData = $request->only([
-                'buyer_id', 'so_date', 'delivery_date', 'customer_po_number', 
+                'buyer_id', 'so_date', 'customer_po_number', 
                 'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
                 'currency', 'exchange_rate'
             ]);
@@ -237,11 +260,14 @@ class SalesOrderController extends Controller
                     'quantity' => $detail['quantity'],
                     'quantity_shipped' => 0,
                     'item_name' => $item->name, 
-                    'item_unit' => $item->unit->name, 
+                    'item_unit' => $item->unit->name,
+                    'item_code' => $item->code ?? null,  
                     'unit_price' => $detail['unit_price'],
                     'discount' => $detail['discount'] ?? 0,
                     'line_total' => $lineTotal,
                     'specifications' => $detail['specifications'] ?? null,
+                    'delivery_date' => $detail['delivery_date'] ?? null,
+                    'keterangan' => $detail['keterangan'] ?? null,
                 ]);
             }
             
@@ -258,7 +284,7 @@ class SalesOrderController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal memperbarui Sales Order: ' . $e->getMessage());
-            Log::error('Stack Trace: ' . $e->getTraceAsString()); 
+            Log::error('Stack Trace: ' . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,
@@ -268,12 +294,26 @@ class SalesOrderController extends Controller
         }
     }
 
-    
     public function destroy(string $id)
     {
+        try {
+            $salesOrder = SalesOrder::findOrFail($id);
+            $salesOrder->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Sales Order berhasil dihapus.'
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Gagal menghapus Sales Order: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghapus Sales Order.'
+            ], 500);
+        }
     }
 
-    
     private function generateSoNumber()
     {
         $prefix = 'SO-' . date('Y') . '-' . date('m') . '-';
