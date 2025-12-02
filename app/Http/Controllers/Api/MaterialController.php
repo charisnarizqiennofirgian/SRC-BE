@@ -18,85 +18,83 @@ class MaterialController extends Controller
      * Menampilkan daftar resource (Item/Material).
      */
     public function index(Request $request)
-    {
-        try {
-            $relations = [];
-            if ($request->has('include')) {
-                $relations = explode(',', $request->include);
+{
+    try {
+        $relations = [];
+        if ($request->has('include')) {
+            $relations = explode(',', $request->include);
 
-            
-                if ($request->has('category_name') && !in_array('category', $relations)) {
-                    $relations[] = 'category';
-                }
-                $allowedRelations = ['unit', 'category'];
-                $relations = array_intersect($relations, $allowedRelations);
+            if ($request->has('category_name') && !in_array('category', $relations)) {
+                $relations[] = 'category';
             }
-
-            if ($request->query('all')) {
-                $items = Item::with($relations)->orderBy('name')->get();
-                return response()->json(['success' => true, 'data' => $items]);
-            }
-
-            $perPage = min($request->input('per_page', 50), 100);
-            $search = $request->input('search');
-
-            $query = Item::with($relations)
-                ->select(
-                    'id',
-                    'name',
-                    'code',
-                    'unit_id',
-                    'category_id',
-                    'stock',
-                    'description',
-                    'created_at',
-                    'specifications',
-                    'nw_per_box',
-                    'gw_per_box',
-                    'wood_consumed_per_pcs'
-                );
-
-            if ($search) {
-                $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('code', 'like', "%{$search}%");
-                });
-            }
-
-            
-            if ($request->has('category_id') && $request->category_id) {
-                
-                $query->where('category_id', $request->category_id);
-            } 
-        
-            else if ($request->has('category_name') && $request->category_name) {
-                $query->whereHas('category', function ($q) use ($request) {
-                    $q->where('name', 'like', '%' . $request->category_name . '%');
-                });
-            }
-        
-
-            $sortBy = $request->input('sort_by', 'created_at');
-            $sortOrder = $request->input('sort_order', 'desc');
-
-            $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
-            if (in_array($sortBy, $allowedSortFields)) {
-                $query->orderBy($sortBy, $sortOrder);
-            } else {
-                $query->latest();
-            }
-
-            $items = $query->paginate($perPage);
-
-            return response()->json(['success' => true, 'data' => $items]);
-        } catch (\Exception $e) {
-            Log::error('Error saat mengambil data barang: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan saat mengambil data barang.',
-            ], 500);
+            $allowedRelations = ['unit', 'category'];
+            $relations = array_intersect($relations, $allowedRelations);
         }
+
+        
+        if ($request->query('all')) {
+            $items = Item::with(['category:id,name', 'unit:id,name'])
+                ->orderBy('name')
+                ->get();
+            return response()->json(['success' => true, 'data' => $items]);
+        }
+
+        $perPage = min($request->input('per_page', 50), 100);
+        $search = $request->input('search');
+
+        $query = Item::with($relations)
+            ->select(
+                'id',
+                'name',
+                'code',
+                'unit_id',
+                'category_id',
+                'stock',
+                'description',
+                'created_at',
+                'specifications',
+                'nw_per_box',
+                'gw_per_box',
+                'wood_consumed_per_pcs'
+            );
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->has('category_id') && $request->category_id) {
+            $query->where('category_id', $request->category_id);
+        } else if ($request->has('category_name') && $request->category_name) {
+            $query->whereHas('category', function ($q) use ($request) {
+                $q->where('name', 'like', '%' . $request->category_name . '%');
+            });
+        }
+
+        $sortBy = $request->input('sort_by', 'created_at');
+        $sortOrder = $request->input('sort_order', 'desc');
+
+        $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
+        if (in_array($sortBy, $allowedSortFields)) {
+            $query->orderBy($sortBy, $sortOrder);
+        } else {
+            $query->latest();
+        }
+
+        $items = $query->paginate($perPage);
+
+        return response()->json(['success' => true, 'data' => $items]);
+    } catch (\Exception $e) {
+        Log::error('Error saat mengambil data barang: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Terjadi kesalahan saat mengambil data barang.',
+        ], 500);
     }
+}
+
 
     /**
      * Menyimpan resource baru (Item/Material).

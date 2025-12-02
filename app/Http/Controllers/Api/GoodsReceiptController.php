@@ -95,7 +95,11 @@ class GoodsReceiptController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $receipts = \App\Models\GoodsReceipt::where('status', '!=', 'Open')
+        // ✅ PERBAIKAN: Ganti "where('status', '!=', 'Open')" menjadi "whereIn('status', ['Open', 'Partial'])"
+        // Alasan: 
+        // 1. Kolom 'status' sudah ada di database (dari migration sebelumnya)
+        // 2. Logika bisnis: Faktur bisa dibuat untuk surat jalan yang statusnya "Open" (belum pernah difaktur) atau "Partial" (sebagian sudah difaktur)
+        $receipts = \App\Models\GoodsReceipt::whereIn('status', ['Open', 'Partial'])
             ->whereHas('purchaseOrder', function ($query) use ($request) {
                 $query->where('supplier_id', $request->supplier_id);
             })
