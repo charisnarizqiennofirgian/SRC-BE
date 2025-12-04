@@ -33,16 +33,26 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
 
     public function collection(Collection $rows)
     {
-        $userId = Auth::id();
+        set_time_limit(300);
+        ini_set('memory_limit', '512M');
 
-        foreach ($rows as $row) 
+        $userId = Auth::id();
+        $skippedRows = [];
+        $processedRows = 0;
+
+        foreach ($rows as $index => $row) 
         {
-            if (empty($row['nama_dasar']) || empty($row['tebal_mm']) || empty($row['stok_awal'])) {
+            // ✅ VALIDASI WAJIB
+            if (empty($row['nama_dasar']) || empty($row['tebal_mm']) || !isset($row['stok_awal'])) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'reason' => 'Kolom nama_dasar, tebal_mm, atau stok_awal kosong'
+                ];
                 continue;
             }
 
             $namaDasar = trim($row['nama_dasar']);
-            $kodeBarang = trim($row['kode_barang']);
+            $kodeBarang = trim($row['kode_barang'] ?? '');
             $t = (float) $row['tebal_mm'];
             $l = (float) $row['lebar_mm'];
             $p = (float) $row['panjang_mm'];
@@ -58,47 +68,59 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 'm3_per_pcs' => $kubikasi
             ];
 
-            $item = Item::updateOrCreate(
-                [
-                    'name' => $uniqueName
-                ],
-                [
-                    'code' => $kodeBarang,
-                    'category_id' => $this->categoryKayu->id,
-                    'unit_id' => $this->unitPieces->id,
-                    'specifications' => $specifications,
-                ]
-            );
+            try {
+                // ✅ 1. CREATE/UPDATE ITEM DENGAN STOK
+                $item = Item::updateOrCreate(
+                    ['name' => $uniqueName],
+                    [
+                        'code' => $kodeBarang,
+                        'category_id' => $this->categoryKayu->id,
+                        'unit_id' => $this->unitPieces->id,
+                        'specifications' => $specifications,
+                        'stock' => $stokAwal, // ✅ SET STOK LANGSUNG
+                    ]
+                );
 
-            if ($stokAwal > 0) {
-                
-                $existingSaldoAwal = StockMovement::where('item_id', $item->id)
-                                                  ->where('type', 'Saldo Awal')
-                                                  ->first();
+                // ✅ 2. BIKIN STOCK MOVEMENT (TYPE: Stok Masuk)
+                if ($stokAwal > 0) {
+                    // Cek apakah sudah ada stock movement untuk saldo awal item ini
+                    $existingMovement = StockMovement::where('item_id', $item->id)
+                                                     ->where('notes', 'LIKE', '%Saldo Awal (Kayu)%')
+                                                     ->first();
 
-                $oldQuantity = 0;
-
-                if ($existingSaldoAwal) {
-                    $oldQuantity = $existingSaldoAwal->quantity;
-                    $existingSaldoAwal->update([
-                        'quantity' => $stokAwal,
-                        'notes'    => 'Saldo Awal (Kayu) diperbarui via Excel upload.',
-                    ]);
-                } else {
-                    StockMovement::create([
-                        'item_id'  => $item->id,
-                        'type'     => 'Saldo Awal',
-                        'quantity' => $stokAwal,
-                        'notes'    => 'Saldo Awal (Kayu) dari Excel upload.',
-                    ]);
+                    if ($existingMovement) {
+                        // Update movement yang sudah ada
+                        $existingMovement->update([
+                            'quantity' => $stokAwal,
+                            'notes' => 'Saldo Awal (Kayu) diperbarui via Excel upload.',
+                        ]);
+                    } else {
+                        // Bikin movement baru
+                        StockMovement::create([
+                            'item_id' => $item->id,
+                            'type' => 'Stok Masuk', // ✅ GANTI JADI 'Stok Masuk'
+                            'quantity' => $stokAwal,
+                            'notes' => 'Saldo Awal (Kayu) dari Excel upload.',
+                        ]);
+                    }
                 }
 
-                $quantityDifference = $stokAwal - $oldQuantity;
-                
-                $itemToUpdate = Item::lockForUpdate()->find($item->id);
-                $itemToUpdate->increment('stock', $quantityDifference);
+                $processedRows++;
+            } catch (\Exception $e) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'item_name' => $uniqueName,
+                    'reason' => 'Error sistem: ' . $e->getMessage()
+                ];
+                Log::error("Error processing row {$index} for kayu {$uniqueName}: " . $e->getMessage());
             }
         }
+
+        if (!empty($skippedRows)) {
+            Log::warning('Baris Excel Kayu yang ditolak:', $skippedRows);
+        }
+        
+        Log::info("Import Kayu selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 
     public function getCsvSettings(): array

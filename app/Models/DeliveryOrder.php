@@ -10,39 +10,44 @@ class DeliveryOrder extends Model
 {
     use HasFactory, SoftDeletes;
 
-  protected $fillable = [
-    'do_number',
-    'sales_order_id',
-    'buyer_id',
-    'user_id',
-    'delivery_date',
-    'status',
-    'notes',
-    'driver_name',
-    'vehicle_number',
-    
-    // Kolom Ekspor
-    'incoterm',
-    'freight_terms',
-    'container_number',
-    'seal_number',
-    'bl_date',
-    'vessel_name',
-    'mother_vessel',
-    'consignee_info',
-    'applicant_info',
-    'notify_info',
-    'eu_factory_number',
-    'port_of_loading',
-    'port_of_discharge',
-    'final_destination',
-    'bl_number',
-    'rex_info',
-    'rex_date',
-    'rex_certificate_file', 
-    'goods_description',
-    'barcode_image',
-];
+    protected $fillable = [
+        'do_number',
+        'sales_order_id',
+        'buyer_id',
+        'user_id',
+        'delivery_date',
+        'status',
+        'notes',
+        'driver_name',
+        'vehicle_number',
+        
+        // Kolom Ekspor
+        'incoterm',
+        'freight_terms',
+        'container_number',
+        'seal_number',
+        'bl_date',
+        'vessel_name',
+        'mother_vessel',
+        'consignee_info',
+        'applicant_info',
+        'notify_info',
+        'eu_factory_number',
+        'port_of_loading',
+        'port_of_discharge',
+        'final_destination',
+        'bl_number',
+        'rex_info',
+        'rex_date',
+        'rex_certificate_file', 
+        'goods_description',
+        'barcode_image',
+        
+        // ✅ TAMBAHAN BARU UNTUK SHIPPING INSTRUCTION
+        'forwarder_name',    // Nama & Alamat Forwarder (Messrs)
+        'peb_number',        // Nomor PEB
+        'container_type',    // Tipe Container (20ft, 40HC, dll)
+    ];
 
     protected $casts = [
         'delivery_date' => 'date',
@@ -54,7 +59,6 @@ class DeliveryOrder extends Model
         'notify_info' => 'array',
     ];
 
-    
     protected $with = [
         'details',
     ];

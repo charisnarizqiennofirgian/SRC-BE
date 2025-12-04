@@ -62,9 +62,12 @@ class DeliveryOrderController extends Controller
 
             // === Validasi barcode & rex_certificate_file
             $validated = $request->validate([
-                // ... validasi lain tetap seperti kebutuhan
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
+                // ✅ VALIDASI BARU UNTUK SHIPPING INSTRUCTION
+                'forwarder_name' => 'nullable|string',
+                'peb_number' => 'nullable|string|max:100',
+                'container_type' => 'nullable|string|max:50',
             ]);
 
             // === Upload barcode_image (jika ada)
@@ -109,7 +112,12 @@ class DeliveryOrderController extends Controller
                 'consignee_info' => $request->consignee_info,
                 'applicant_info' => $request->applicant_info,
                 'notify_info' => $request->notify_info,
-                'barcode_image' => $barcodeImagePath, // simpan path barcode
+                'barcode_image' => $barcodeImagePath,
+                
+                // ✅ TAMBAHAN BARU UNTUK SHIPPING INSTRUCTION
+                'forwarder_name' => $request->forwarder_name,
+                'peb_number' => $request->peb_number,
+                'container_type' => $request->container_type,
             ]);
 
             $details = $request->details;
@@ -185,8 +193,15 @@ class DeliveryOrderController extends Controller
     public function show($id)
     {
         try {
-            $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
-                ->findOrFail($id);
+            // === UPDATE PENTING DI SINI ===
+            // Saya menambahkan 'details.salesOrderDetail' agar bisa tarik HARGA (Price) untuk Invoice.
+            $deliveryOrder = DeliveryOrder::with([
+                'salesOrder.buyer', 
+                'buyer', 
+                'user', 
+                'details.item',
+                'details.salesOrderDetail' // <--- INI TAMBAHANNYA
+            ])->findOrFail($id);
 
             // PATCH: JSON decode info alamat, agar frontend bisa akses .name/.address
             $fields = ['consignee_info', 'applicant_info', 'notify_info'];
@@ -221,6 +236,10 @@ class DeliveryOrderController extends Controller
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
+                // ✅ VALIDASI BARU UNTUK SHIPPING INSTRUCTION
+                'forwarder_name' => 'nullable|string',
+                'peb_number' => 'nullable|string|max:100',
+                'container_type' => 'nullable|string|max:50',
             ]);
 
             if ($request->hasFile('barcode_image')) {
@@ -241,7 +260,46 @@ class DeliveryOrderController extends Controller
                 $validated['rex_certificate_file'] = $rexCertificateFile;
             }
 
-            $do->update($validated);
+            // ✅ UPDATE DATA UTAMA (termasuk 3 field baru)
+            $do->update([
+                'delivery_date' => $request->delivery_date ?? $do->delivery_date,
+                'driver_name' => $request->driver_name ?? $do->driver_name,
+                'vehicle_number' => $request->vehicle_number ?? $do->vehicle_number,
+                'notes' => $request->notes ?? $do->notes,
+                'incoterm' => $request->incoterm ?? $do->incoterm,
+                'bl_date' => $request->bl_date ?? $do->bl_date,
+                'vessel_name' => $request->vessel_name ?? $do->vessel_name,
+                'mother_vessel' => $request->mother_vessel ?? $do->mother_vessel,
+                'eu_factory_number' => $request->eu_factory_number ?? $do->eu_factory_number,
+                'port_of_loading' => $request->port_of_loading ?? $do->port_of_loading,
+                'port_of_discharge' => $request->port_of_discharge ?? $do->port_of_discharge,
+                'final_destination' => $request->final_destination ?? $do->final_destination,
+                'bl_number' => $request->bl_number ?? $do->bl_number,
+                'rex_info' => $request->rex_info ?? $do->rex_info,
+                'freight_terms' => $request->freight_terms ?? $do->freight_terms,
+                'container_number' => $request->container_number ?? $do->container_number,
+                'seal_number' => $request->seal_number ?? $do->seal_number,
+                'rex_date' => $request->rex_date ?? $do->rex_date,
+                'goods_description' => $request->goods_description ?? $do->goods_description,
+                'consignee_info' => $request->consignee_info ?? $do->consignee_info,
+                'applicant_info' => $request->applicant_info ?? $do->applicant_info,
+                'notify_info' => $request->notify_info ?? $do->notify_info,
+                
+                // ✅ TAMBAHAN BARU UNTUK SHIPPING INSTRUCTION
+                'forwarder_name' => $request->forwarder_name ?? $do->forwarder_name,
+                'peb_number' => $request->peb_number ?? $do->peb_number,
+                'container_type' => $request->container_type ?? $do->container_type,
+            ]);
+
+            // Update file uploads jika ada
+            if (isset($validated['barcode_image'])) {
+                $do->barcode_image = $validated['barcode_image'];
+                $do->save();
+            }
+            if (isset($validated['rex_certificate_file'])) {
+                $do->rex_certificate_file = $validated['rex_certificate_file'];
+                $do->save();
+            }
 
             // RELOAD + path
             $do = DeliveryOrder::find($do->id);

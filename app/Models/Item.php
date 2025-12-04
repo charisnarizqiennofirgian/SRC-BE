@@ -22,6 +22,8 @@ class Item extends Model
         'nw_per_box',
         'gw_per_box',
         'wood_consumed_per_pcs',
+        'm3_per_carton',
+        'hs_code',
     ];
 
     protected $casts = [

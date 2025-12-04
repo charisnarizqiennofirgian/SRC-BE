@@ -1,0 +1,163 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "ERP Kayu API",
+        "description": "Dokumentasi API untuk sistem ERP pengolahan kayu",
+        "contact": {
+            "email": "support@erp-kayu.com"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8000",
+            "description": "Server Development"
+        }
+    ],
+    "paths": {
+        "/api/goods-receipts": {
+            "post": {
+                "tags": [
+                    "Pembelian"
+                ],
+                "summary": "Simpan penerimaan barang dari supplier",
+                "operationId": "8f244d784d918ca239371b3f2be90810",
+                "requestBody": {
+                    "description": "Data penerimaan barang",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "purchase_order_id",
+                                    "receipt_date",
+                                    "details"
+                                ],
+                                "properties": {
+                                    "purchase_order_id": {
+                                        "description": "ID Purchase Order",
+                                        "type": "integer",
+                                        "example": 2
+                                    },
+                                    "receipt_date": {
+                                        "description": "Tanggal penerimaan",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-12-01"
+                                    },
+                                    "supplier_document_number": {
+                                        "description": "Nomor dokumen dari supplier",
+                                        "type": "string",
+                                        "example": "INV-67657"
+                                    },
+                                    "notes": {
+                                        "description": "Catatan tambahan",
+                                        "type": "string",
+                                        "example": "Kayu jati grade A"
+                                    },
+                                    "details": {
+                                        "description": "Daftar item yang diterima",
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "item_id": {
+                                                    "description": "ID Item",
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "quantity_received": {
+                                                    "description": "Jumlah diterima (m3)",
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 10.5
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Sukses menyimpan data",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Penerimaan barang berhasil dicatat dan stok telah diperbarui."
+                                        },
+                                        "data": {
+                                            "description": "Data penerimaan barang yang disimpan",
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validasi gagal",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "errors": {
+                                            "description": "Daftar error validasi",
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "sanctum": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "sanctum": {
+                "type": "apiKey",
+                "description": "Enter token in format (Bearer <token>)",
+                "name": "Authorization",
+                "in": "header"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Pembelian",
+            "description": "Manajemen pembelian kayu dari supplier"
+        }
+    ],
+    "security": [
+        {
+            "sanctum": []
+        }
+    ]
+}

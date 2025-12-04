@@ -18,83 +18,83 @@ class MaterialController extends Controller
      * Menampilkan daftar resource (Item/Material).
      */
     public function index(Request $request)
-{
-    try {
-        $relations = [];
-        if ($request->has('include')) {
-            $relations = explode(',', $request->include);
+    {
+        try {
+            $relations = [];
+            if ($request->has('include')) {
+                $relations = explode(',', $request->include);
 
-            if ($request->has('category_name') && !in_array('category', $relations)) {
-                $relations[] = 'category';
+                if ($request->has('category_name') && !in_array('category', $relations)) {
+                    $relations[] = 'category';
+                }
+                $allowedRelations = ['unit', 'category'];
+                $relations = array_intersect($relations, $allowedRelations);
             }
-            $allowedRelations = ['unit', 'category'];
-            $relations = array_intersect($relations, $allowedRelations);
-        }
 
-        
-        if ($request->query('all')) {
-            $items = Item::with(['category:id,name', 'unit:id,name'])
-                ->orderBy('name')
-                ->get();
+            if ($request->query('all')) {
+                $items = Item::with(['category:id,name', 'unit:id,name'])
+                    ->orderBy('name')
+                    ->get();
+                return response()->json(['success' => true, 'data' => $items]);
+            }
+
+            $perPage = min($request->input('per_page', 50), 100);
+            $search = $request->input('search');
+
+            $query = Item::with($relations)
+                ->select(
+                    'id',
+                    'name',
+                    'code',
+                    'unit_id',
+                    'category_id',
+                    'stock',
+                    'description',
+                    'created_at',
+                    'specifications',
+                    'nw_per_box',
+                    'gw_per_box',
+                    'wood_consumed_per_pcs',
+                    'm3_per_carton',
+                    'hs_code'
+                );
+
+            if ($search) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                        ->orWhere('code', 'like', "%{$search}%");
+                });
+            }
+
+            if ($request->has('category_id') && $request->category_id) {
+                $query->where('category_id', $request->category_id);
+            } else if ($request->has('category_name') && $request->category_name) {
+                $query->whereHas('category', function ($q) use ($request) {
+                    $q->where('name', 'like', '%' . $request->category_name . '%');
+                });
+            }
+
+            $sortBy = $request->input('sort_by', 'created_at');
+            $sortOrder = $request->input('sort_order', 'desc');
+
+            $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
+            if (in_array($sortBy, $allowedSortFields)) {
+                $query->orderBy($sortBy, $sortOrder);
+            } else {
+                $query->latest();
+            }
+
+            $items = $query->paginate($perPage);
+
             return response()->json(['success' => true, 'data' => $items]);
+        } catch (\Exception $e) {
+            Log::error('Error saat mengambil data barang: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mengambil data barang.',
+            ], 500);
         }
-
-        $perPage = min($request->input('per_page', 50), 100);
-        $search = $request->input('search');
-
-        $query = Item::with($relations)
-            ->select(
-                'id',
-                'name',
-                'code',
-                'unit_id',
-                'category_id',
-                'stock',
-                'description',
-                'created_at',
-                'specifications',
-                'nw_per_box',
-                'gw_per_box',
-                'wood_consumed_per_pcs'
-            );
-
-        if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "%{$search}%");
-            });
-        }
-
-        if ($request->has('category_id') && $request->category_id) {
-            $query->where('category_id', $request->category_id);
-        } else if ($request->has('category_name') && $request->category_name) {
-            $query->whereHas('category', function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->category_name . '%');
-            });
-        }
-
-        $sortBy = $request->input('sort_by', 'created_at');
-        $sortOrder = $request->input('sort_order', 'desc');
-
-        $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
-        if (in_array($sortBy, $allowedSortFields)) {
-            $query->orderBy($sortBy, $sortOrder);
-        } else {
-            $query->latest();
-        }
-
-        $items = $query->paginate($perPage);
-
-        return response()->json(['success' => true, 'data' => $items]);
-    } catch (\Exception $e) {
-        Log::error('Error saat mengambil data barang: ' . $e->getMessage());
-        return response()->json([
-            'success' => false,
-            'message' => 'Terjadi kesalahan saat mengambil data barang.',
-        ], 500);
     }
-}
-
 
     /**
      * Menyimpan resource baru (Item/Material).
@@ -117,6 +117,8 @@ class MaterialController extends Controller
                 'nw_per_box' => 'nullable|numeric|min:0',
                 'gw_per_box' => 'nullable|numeric|min:0',
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
+                'm3_per_carton' => 'nullable|numeric|min:0',
+                'hs_code' => 'nullable|string|max:50',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -136,6 +138,7 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
+            
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -145,6 +148,7 @@ class MaterialController extends Controller
                     $itemData['specifications'] = null;
                 }
             }
+
             $item = Item::create($itemData);
             $item->load(['unit:id,name', 'category:id,name']);
             Cache::forget('materials_all');
@@ -155,7 +159,7 @@ class MaterialController extends Controller
                 'data' => $item,
             ], 201);
         } catch (\Exception $e) {
-            Log::error('Error saat membuat item: '. $e->getMessage());
+            Log::error('Error saat membuat item: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menyimpan data.',
@@ -204,6 +208,8 @@ class MaterialController extends Controller
                 'nw_per_box' => 'nullable|numeric|min:0',
                 'gw_per_box' => 'nullable|numeric|min:0',
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
+                'm3_per_carton' => 'nullable|numeric|min:0',
+                'hs_code' => 'nullable|string|max:50',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -223,6 +229,7 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
+            
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -232,6 +239,7 @@ class MaterialController extends Controller
                     $itemData['specifications'] = null;
                 }
             }
+
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);
             Cache::forget('materials_all');
@@ -272,28 +280,25 @@ class MaterialController extends Controller
         }
     }
 
-        public function downloadTemplate(Request $request)
+    public function downloadTemplate(Request $request)
     {
         try {
-            
             $headers = [
                 'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'deskripsi',
-                'spec_p', 'spec_l', 'spec_t', 
-                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs' 
-            ];
-            
-           
-            $example1 = [
-                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'Produk KILT',
-                '', '', '', 
-                '27.0', '42.0', '0.0099' 
+                'spec_p', 'spec_l', 'spec_t',
+                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code'
             ];
 
-            // Contoh untuk Karton Box
+            $example1 = [
+                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'Produk KILT',
+                '', '', '',
+                '27.0', '42.0', '0.0099', '0.045', '4403.99'
+            ];
+
             $example2 = [
                 'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'Box untuk KILT',
-                '960', '940', '940', 
-                '', '', '' 
+                '960', '940', '940',
+                '', '', '', '', ''
             ];
 
             $content = implode(';', $headers) . "\n";
@@ -301,7 +306,6 @@ class MaterialController extends Controller
             $content .= implode(';', $example2) . "\n";
 
             $fileName = 'template_master_barang_all_' . date('Ymd') . '.csv';
-            
 
             return response($content)
                 ->header('Content-Type', 'text/csv; charset=UTF-8')
@@ -318,7 +322,6 @@ class MaterialController extends Controller
         }
     }
 
-    
     public function import(Request $request)
     {
         $validator = Validator::make(

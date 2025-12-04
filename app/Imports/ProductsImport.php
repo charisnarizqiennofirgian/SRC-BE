@@ -2,71 +2,126 @@
 
 namespace App\Imports;
 
-use App\Models\Item; // <-- GANTI: Gunakan model Item
+use App\Models\Item;
+use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
-use Maatwebsite\Excel\Concerns\ToModel;
+use Illuminate\Support\Collection;
+use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 
-class ProductsImport implements ToModel, WithHeadingRow, WithValidation
+class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
     private $productCategoryId;
     private $units;
 
-    /**
-     * Constructor ini akan berjalan sekali saja sebelum impor dimulai.
-     * Kita siapkan data yang dibutuhkan agar lebih efisien.
-     */
     public function __construct()
     {
-        // 1. Cari dan simpan ID untuk kategori "Produk Jadi"
         $this->productCategoryId = Category::where('name', 'Produk Jadi')->value('id');
         
-        // 2. Ambil semua data unit untuk pencocokan nama
-        // Logika cerdas Anda untuk case-insensitive kita pertahankan
         $this->units = Unit::pluck('id', 'name')->mapWithKeys(function ($id, $name) {
             return [strtolower(trim($name)) => $id];
         });
     }
 
-    /**
-     * Fungsi ini akan berjalan untuk setiap baris di file Excel.
-     * @param array $row
-     * @return \Illuminate\Database\Eloquent\Model|null
-     */
-    public function model(array $row)
+    public function collection(Collection $rows)
     {
-        
-        $unitName = strtolower(trim($row['satuan']));
-        $unitId = $this->units[$unitName] ?? null;
+        set_time_limit(300);
+        ini_set('memory_limit', '512M');
 
-        
-        if ($unitId && $this->productCategoryId) {
-            return new Item([ // 
-                'code'        => $row['kode'],
-                'name'        => $row['nama_produk'],
-                'description' => $row['deskripsi'] ?? null,
-                'stock'       => $row['stok'] ?? 0,
-                'price'       => $row['harga'] ?? 0,
-                'category_id' => $this->productCategoryId, // 
-                'unit_id'     => $unitId,
-            ]);
+        $skippedRows = [];
+        $processedRows = 0;
+
+        foreach ($rows as $index => $row) 
+        {
+            // ✅ VALIDASI WAJIB
+            if (empty($row['kode']) || empty($row['nama_produk']) || empty($row['satuan'])) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'reason' => 'Kolom kode, nama_produk, atau satuan kosong'
+                ];
+                continue;
+            }
+
+            $unitName = strtolower(trim($row['satuan']));
+            $unitId = $this->units[$unitName] ?? null;
+
+            if (!$unitId) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'reason' => "Satuan '{$row['satuan']}' tidak ditemukan di master unit"
+                ];
+                continue;
+            }
+
+            if (!$this->productCategoryId) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'reason' => 'Kategori Produk Jadi tidak ditemukan'
+                ];
+                continue;
+            }
+
+            $stok = isset($row['stok']) ? (float) $row['stok'] : 0;
+
+            try {
+                // ✅ 1. CREATE/UPDATE ITEM
+                $item = Item::updateOrCreate(
+                    ['code' => $row['kode']],
+                    [
+                        'name' => $row['nama_produk'],
+                        'description' => $row['deskripsi'] ?? null,
+                        'stock' => $stok,
+                        'category_id' => $this->productCategoryId,
+                        'unit_id' => $unitId,
+                    ]
+                );
+
+                // ✅ 2. BIKIN STOCK MOVEMENT (kalau ada stok)
+                if ($stok > 0) {
+                    $existingMovement = StockMovement::where('item_id', $item->id)
+                                                     ->where('notes', 'LIKE', '%Import Excel Produk%')
+                                                     ->first();
+
+                    if ($existingMovement) {
+                        $existingMovement->update([
+                            'quantity' => $stok,
+                            'notes' => 'Import Excel Produk (Updated)',
+                        ]);
+                    } else {
+                        StockMovement::create([
+                            'item_id' => $item->id,
+                            'type' => 'Stok Masuk',
+                            'quantity' => $stok,
+                            'notes' => 'Import Excel Produk',
+                        ]);
+                    }
+                }
+
+                $processedRows++;
+            } catch (\Exception $e) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'item_name' => $row['nama_produk'],
+                    'reason' => 'Error sistem: ' . $e->getMessage()
+                ];
+                Log::error("Error processing row {$index} for product {$row['nama_produk']}: " . $e->getMessage());
+            }
         }
 
-        // Jika satuan tidak ditemukan, lewati baris ini
-        return null;
+        if (!empty($skippedRows)) {
+            Log::warning('Baris Excel Product yang ditolak:', $skippedRows);
+        }
+        
+        Log::info("Import Product selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 
-    /**
-     * Aturan validasi untuk setiap baris di Excel.
-     */
-    public function rules(): array
+    public function getCsvSettings(): array
     {
         return [
-            'kode' => 'required|string|unique:items,code', // 
-            'nama_produk' => 'required|string',
-            'satuan' => 'required|string|exists:units,name', // 
+            'delimiter' => ';'
         ];
     }
 }

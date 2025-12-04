@@ -10,8 +10,79 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
+/**
+ * @OA\Info(
+ *     title="ERP Kayu API",
+ *     version="1.0.0",
+ *     description="Dokumentasi API untuk sistem ERP pengolahan kayu",
+ *     @OA\Contact(
+ *         email="support@erp-kayu.com"
+ *     ),
+ *     @OA\License(
+ *         name="Apache 2.0",
+ *         url="https://www.apache.org/licenses/LICENSE-2.0.html"
+ *     )
+ * )
+ * @OA\Server(
+ *     url=L5_SWAGGER_CONST_HOST,
+ *     description="Server Development"
+ * )
+ * @OA\Tag(
+ *     name="Pembelian",
+ *     description="Manajemen pembelian kayu dari supplier"
+ * )
+ * @OA\SecurityScheme(
+ *     securityScheme="sanctum",
+ *     type="apiKey",
+ *     in="header",
+ *     name="Authorization",
+ *     description="Masukkan token dalam format: Bearer {token}"
+ * )
+ */
 class GoodsReceiptController extends Controller
 {
+    /**
+     * @OA\Post(
+     *     path="/api/goods-receipts",
+     *     summary="Simpan penerimaan barang dari supplier",
+     *     tags={"Pembelian"},
+     *     security={{"sanctum": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         description="Data penerimaan barang",
+     *         @OA\JsonContent(
+     *             required={"purchase_order_id","receipt_date","details"},
+     *             @OA\Property(property="purchase_order_id", type="integer", example=2, description="ID Purchase Order"),
+     *             @OA\Property(property="receipt_date", type="string", format="date", example="2025-12-01", description="Tanggal penerimaan"),
+     *             @OA\Property(property="supplier_document_number", type="string", example="INV-67657", description="Nomor dokumen dari supplier"),
+     *             @OA\Property(property="notes", type="string", example="Kayu jati grade A", description="Catatan tambahan"),
+     *             @OA\Property(property="details", type="array", description="Daftar item yang diterima",
+     *                 @OA\Items(
+     *                     @OA\Property(property="item_id", type="integer", example=5, description="ID Item"),
+     *                     @OA\Property(property="quantity_received", type="number", format="float", example=10.5, description="Jumlah diterima (m3)")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Sukses menyimpan data",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Penerimaan barang berhasil dicatat dan stok telah diperbarui."),
+     *             @OA\Property(property="data", type="object", description="Data penerimaan barang yang disimpan")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validasi gagal",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="errors", type="object", description="Daftar error validasi")
+     *         )
+     *     )
+     * )
+     */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
