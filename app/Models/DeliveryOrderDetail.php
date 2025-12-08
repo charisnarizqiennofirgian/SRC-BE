@@ -19,6 +19,9 @@ class DeliveryOrderDetail extends Model
         'item_unit',
         'quantity_shipped',
         'quantity_boxes',
+
+        
+        'quantity_crates',   
     ];
 
     public function deliveryOrder()

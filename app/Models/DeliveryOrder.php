@@ -20,7 +20,10 @@ class DeliveryOrder extends Model
         'notes',
         'driver_name',
         'vehicle_number',
+
         
+        'shipment_mode',
+
         // Kolom Ekspor
         'incoterm',
         'freight_terms',
@@ -39,20 +42,20 @@ class DeliveryOrder extends Model
         'bl_number',
         'rex_info',
         'rex_date',
-        'rex_certificate_file', 
+        'rex_certificate_file',
         'goods_description',
         'barcode_image',
+
         
-        // ✅ TAMBAHAN BARU UNTUK SHIPPING INSTRUCTION
-        'forwarder_name',    // Nama & Alamat Forwarder (Messrs)
-        'peb_number',        // Nomor PEB
-        'container_type',    // Tipe Container (20ft, 40HC, dll)
+        'forwarder_name',    
+        'peb_number',        
+        'container_type',    
     ];
 
     protected $casts = [
         'delivery_date' => 'date',
         'bl_date' => 'date',
-        
+
         // Aturan untuk kolom JSON
         'consignee_info' => 'array',
         'applicant_info' => 'array',

@@ -33,21 +33,31 @@ class StockReportController extends Controller
             }
 
             $query = Item::with(['unit:id,name', 'category:id,name'])
-                         
-                         ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock', 'specifications')
-                         ->whereIn('category_id', $categoryIds);
+                ->select(
+                    'id',
+                    'name',
+                    'code',
+                    'unit_id',
+                    'category_id',
+                    'stock',
+                    'specifications',
+                    'jenis',     // ✅ ditambahkan
+                    'kualitas',  // ✅ ditambahkan
+                    'bentuk'     // ✅ ditambahkan
+                )
+                ->whereIn('category_id', $categoryIds);
 
             if ($request->has('search') && $request->input('search')) {
                 $search = $request->input('search');
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('code', 'like', "%{$search}%");
+                        ->orWhere('code', 'like', "%{$search}%");
                 });
             }
 
             $sortBy = $request->input('sort_by', 'name');
             $sortOrder = $request->input('sort_order', 'asc');
-            
+
             $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
             if (in_array($sortBy, $allowedSortFields)) {
                 $query->orderBy($sortBy, $sortOrder);
@@ -59,7 +69,6 @@ class StockReportController extends Controller
             $items = $query->paginate($perPage);
 
             return response()->json(['success' => true, 'data' => $items]);
-
         } catch (\Exception $e) {
             Log::error('Gagal mengambil laporan stok: ' . $e->getMessage());
             return response()->json([

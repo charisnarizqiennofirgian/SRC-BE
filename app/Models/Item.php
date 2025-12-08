@@ -24,6 +24,10 @@ class Item extends Model
         'wood_consumed_per_pcs',
         'm3_per_carton',
         'hs_code',
+        // ✅ field Kayu RST
+        'jenis',
+        'kualitas',
+        'bentuk',
     ];
 
     protected $casts = [

@@ -14,9 +14,6 @@ use App\Imports\MaterialsImport;
 
 class MaterialController extends Controller
 {
-    /**
-     * Menampilkan daftar resource (Item/Material).
-     */
     public function index(Request $request)
     {
         try {
@@ -56,7 +53,10 @@ class MaterialController extends Controller
                     'gw_per_box',
                     'wood_consumed_per_pcs',
                     'm3_per_carton',
-                    'hs_code'
+                    'hs_code',
+                    'jenis',
+                    'kualitas',
+                    'bentuk'
                 );
 
             if ($search) {
@@ -68,7 +68,7 @@ class MaterialController extends Controller
 
             if ($request->has('category_id') && $request->category_id) {
                 $query->where('category_id', $request->category_id);
-            } else if ($request->has('category_name') && $request->category_name) {
+            } elseif ($request->has('category_name') && $request->category_name) {
                 $query->whereHas('category', function ($q) use ($request) {
                     $q->where('name', 'like', '%' . $request->category_name . '%');
                 });
@@ -96,9 +96,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Menyimpan resource baru (Item/Material).
-     */
     public function store(Request $request)
     {
         $validator = Validator::make(
@@ -119,6 +116,9 @@ class MaterialController extends Controller
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
                 'm3_per_carton' => 'nullable|numeric|min:0',
                 'hs_code' => 'nullable|string|max:50',
+                'jenis' => 'nullable|string|max:255',
+                'kualitas' => 'nullable|string|max:255',
+                'bentuk' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -138,7 +138,7 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
-            
+
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -146,6 +146,27 @@ class MaterialController extends Controller
                     empty($itemData['specifications']['p'])
                 ) {
                     $itemData['specifications'] = null;
+                }
+            }
+
+            $itemData['jenis'] = $itemData['jenis'] ?? null;
+            $itemData['kualitas'] = $itemData['kualitas'] ?? null;
+            $itemData['bentuk'] = $itemData['bentuk'] ?? null;
+
+            // ✅ FORMAT NAMA KHUSUS KAYU RST
+            $category = Category::find($itemData['category_id'] ?? null);
+            if (
+                $category &&
+                $category->name === 'Kayu RST' &&
+                !empty($itemData['specifications'])
+            ) {
+                $namaDasar = $itemData['name'];
+                $t = $itemData['specifications']['t'] ?? null;
+                $l = $itemData['specifications']['l'] ?? null;
+                $p = $itemData['specifications']['p'] ?? null;
+
+                if ($t && $l && $p) {
+                    $itemData['name'] = "{$namaDasar} ({$t}x{$l}x{$p})";
                 }
             }
 
@@ -167,9 +188,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Menampilkan resource spesifik (Item/Material).
-     */
     public function show(Item $material)
     {
         try {
@@ -187,9 +205,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Memperbarui resource spesifik (Item/Material).
-     */
     public function update(Request $request, Item $material)
     {
         $validator = Validator::make(
@@ -210,6 +225,9 @@ class MaterialController extends Controller
                 'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
                 'm3_per_carton' => 'nullable|numeric|min:0',
                 'hs_code' => 'nullable|string|max:50',
+                'jenis' => 'nullable|string|max:255',
+                'kualitas' => 'nullable|string|max:255',
+                'bentuk' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -229,7 +247,7 @@ class MaterialController extends Controller
 
         try {
             $itemData = $validator->validated();
-            
+
             if (isset($itemData['specifications'])) {
                 if (
                     empty($itemData['specifications']['t']) &&
@@ -237,6 +255,27 @@ class MaterialController extends Controller
                     empty($itemData['specifications']['p'])
                 ) {
                     $itemData['specifications'] = null;
+                }
+            }
+
+            $itemData['jenis'] = $itemData['jenis'] ?? null;
+            $itemData['kualitas'] = $itemData['kualitas'] ?? null;
+            $itemData['bentuk'] = $itemData['bentuk'] ?? null;
+
+            // ✅ FORMAT NAMA KHUSUS KAYU RST SAAT UPDATE
+            $category = Category::find($itemData['category_id'] ?? null);
+            if (
+                $category &&
+                $category->name === 'Kayu RST' &&
+                !empty($itemData['specifications'])
+            ) {
+                $namaDasar = $itemData['name'];
+                $t = $itemData['specifications']['t'] ?? null;
+                $l = $itemData['specifications']['l'] ?? null;
+                $p = $itemData['specifications']['p'] ?? null;
+
+                if ($t && $l && $p) {
+                    $itemData['name'] = "{$namaDasar} ({$t}x{$l}x{$p})";
                 }
             }
 
@@ -258,9 +297,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Menghapus resource spesifik (Item/Material).
-     */
     public function destroy(Item $material)
     {
         try {
@@ -286,19 +322,19 @@ class MaterialController extends Controller
             $headers = [
                 'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'deskripsi',
                 'spec_p', 'spec_l', 'spec_t',
-                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code'
+                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code',
             ];
 
             $example1 = [
                 'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'Produk KILT',
                 '', '', '',
-                '27.0', '42.0', '0.0099', '0.045', '4403.99'
+                '27.0', '42.0', '0.0099', '0.045', '4403.99',
             ];
 
             $example2 = [
                 'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'Box untuk KILT',
                 '960', '940', '940',
-                '', '', '', '', ''
+                '', '', '', '', '',
             ];
 
             $content = implode(';', $headers) . "\n";
@@ -392,9 +428,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Export data Item/Material. (Belum diimplementasikan)
-     */
     public function export(Request $request)
     {
         try {
