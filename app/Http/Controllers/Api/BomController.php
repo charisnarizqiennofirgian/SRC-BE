@@ -6,16 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\Bom;
 use App\Models\BomDetail;
 use App\Models\Item;
-use App\Models\StockMovement; // (IMPORT BARU UNTUK POTONG STOK)
+use App\Models\StockMovement;
+use App\Models\ProductionLog; // ✅ TAMBAHAN
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Auth; // ✅ TAMBAHAN
 
 class BomController extends Controller
 {
-    
     public function index(Request $request)
     {
         try {
@@ -41,7 +42,6 @@ class BomController extends Controller
         }
     }
 
-    
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -64,9 +64,9 @@ class BomController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal.',
-                'errors' => $validator->errors()
+                'success'   => false,
+                'message'   => 'Validasi gagal.',
+                'errors'    => $validator->errors()
             ], 422);
         }
 
@@ -89,15 +89,14 @@ class BomController extends Controller
             }
 
             $this->recalculateBomTotals($bom);
-            
+
             DB::commit();
 
             return response()->json([
                 'success' => true,
                 'message' => 'Resep (BOM) berhasil disimpan.',
-                'data' => $bom->load('product.unit', 'details.component')
+                'data'    => $bom->load('product.unit', 'details.component')
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error storing BOM: ' . $e->getMessage());
@@ -108,12 +107,11 @@ class BomController extends Controller
         }
     }
 
-    
     public function show(string $id)
     {
         try {
             $bom = Bom::with([
-                'product.unit', 
+                'product.unit',
                 'details.component.unit',
                 'details.component.category'
             ])->findOrFail($id);
@@ -121,19 +119,18 @@ class BomController extends Controller
             return response()->json(['success' => true, 'data' => $bom]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Data resep (BOM) tidak ditemukan.'
             ], 404);
         } catch (\Exception $e) {
             Log::error('Error fetching BOM details: ' . $e->getMessage());
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Gagal mengambil detail resep.'
             ], 500);
         }
     }
 
-    
     public function update(Request $request, string $id)
     {
         try {
@@ -161,8 +158,8 @@ class BomController extends Controller
             'details.*.notes' => 'nullable|string',
         ], [
             'item_id.required' => 'Produk Jadi wajib dipilih.',
-            'item_id.unique' => 'Produk Jadi ini sudah memiliki Resep (BOM).',
-            'name.required' => 'Nama Resep wajib diisi.',
+            'item_id.unique'   => 'Produk Jadi ini sudah memiliki Resep (BOM).',
+            'name.required'    => 'Nama Resep wajib diisi.',
             'details.required' => 'Bahan (detail) resep wajib diisi.',
         ]);
 
@@ -170,7 +167,7 @@ class BomController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal.',
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors()
             ], 422);
         }
 
@@ -195,7 +192,7 @@ class BomController extends Controller
             }
 
             $this->recalculateBomTotals($bom);
-            
+
             DB::commit();
 
             return response()->json([
@@ -203,7 +200,6 @@ class BomController extends Controller
                 'message' => 'Resep (BOM) berhasil diperbarui.',
                 'data' => $bom->load('product.unit', 'details.component')
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error updating BOM: ' . $e->getMessage());
@@ -214,16 +210,15 @@ class BomController extends Controller
         }
     }
 
-    
     public function destroy(string $id)
     {
         try {
             $bom = Bom::findOrFail($id);
-            
+
             DB::beginTransaction();
-            
+
             $productItem = $bom->product;
-            
+
             $bom->details()->delete();
             $bom->delete();
 
@@ -235,24 +230,22 @@ class BomController extends Controller
             DB::commit();
 
             return response()->json(['success' => true, 'message' => 'Resep (BOM) berhasil dihapus.']);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Data resep (BOM) tidak ditemukan.'], 404);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error deleting BOM: ' . $e->getMessage());
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Gagal menghapus resep.'
             ], 500);
         }
     }
 
-    
     private function recalculateBomTotals(Bom $bom)
     {
         $totalWood = 0;
-        
+
         $details = $bom->details()->with('component.category')->get();
 
         foreach ($details as $detail) {
@@ -264,14 +257,14 @@ class BomController extends Controller
 
                 if (str_contains($categoryName, 'kayu rst')) {
                     $specs = $component->specifications;
-                    
+
                     if (is_array($specs) && isset($specs['p'], $specs['l'], $specs['t'])) {
                         $p = (float) $specs['p'];
                         $l = (float) $specs['l'];
                         $t = (float) $specs['t'];
-                        
+
                         $m3_per_component = ($p * $l * $t) / 1000000000;
-                        
+
                         $totalWood += $m3_per_component * $detail->quantity;
                     }
                 }
@@ -288,19 +281,22 @@ class BomController extends Controller
         }
     }
 
-
-    // --- FUNGSI BARU (LOGIKA "DAPUR" ANDA) ---
+    // --- PRODUKSI BERDASARKAN BOM ---
     public function executeProduction(Request $request, Bom $bom)
     {
         $validator = Validator::make($request->all(), [
             'quantity' => 'required|numeric|min:1',
         ], [
             'quantity.required' => 'Jumlah produksi wajib diisi.',
-            'quantity.min' => 'Jumlah produksi minimal 1.',
+            'quantity.min'      => 'Jumlah produksi minimal 1.',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'message' => 'Validasi gagal.', 'errors' => $validator->errors()], 422);
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal.',
+                'errors'  => $validator->errors()
+            ], 422);
         }
 
         $productionQty = (float) $request->quantity;
@@ -324,22 +320,39 @@ class BomController extends Controller
                 }
             }
 
-            // 2. Potong Stok Komponen (Bahan Baku)
+            $today = now()->toDateString();
+            $userId = Auth::id();
+            $refNo = 'ASM-' . $bom->id . '-' . date('YmdHis');
+
+            // 2. Potong Stok Komponen (Bahan Baku) + catat ke production_logs
             foreach ($bom->details as $detail) {
                 $component = $detail->component;
                 $qtyToCut = (float) $detail->quantity * $productionQty;
-                
+
                 $oldStock = $component->stock;
                 $component->stock -= $qtyToCut;
                 $component->save();
 
                 StockMovement::create([
-                    'item_id' => $component->id,
-                    'type' => 'Produksi (Keluar)',
-                    'quantity' => -$qtyToCut,
-                    'notes' => "Produksi {$product->name} (BOM ID: {$bom->id}) sebanyak {$productionQty} unit.",
-                    'old_stock' => $oldStock,
-                    'new_stock' => $component->stock,
+                    'item_id'    => $component->id,
+                    'type'       => 'Produksi (Keluar)',
+                    'quantity'   => -$qtyToCut,
+                    'notes'      => "Produksi {$product->name} (BOM ID: {$bom->id}) sebanyak {$productionQty} unit.",
+                    'old_stock'  => $oldStock,
+                    'new_stock'  => $component->stock,
+                ]);
+
+                ProductionLog::create([
+                    'date'            => $today,
+                    'reference_number'=> $refNo,
+                    'process_type'    => 'ASSEMBLY',
+                    'stage'           => 'ASSEMBLY',
+                    'input_item_id'   => $component->id,
+                    'input_quantity'  => $qtyToCut,
+                    'output_item_id'  => $product->id,
+                    'output_quantity' => $productionQty,
+                    'notes'           => "Assembly {$product->name} (BOM {$bom->id})",
+                    'user_id'         => $userId,
                 ]);
             }
 
@@ -349,12 +362,12 @@ class BomController extends Controller
             $product->save();
 
             StockMovement::create([
-                'item_id' => $product->id,
-                'type' => 'Produksi (Masuk)',
-                'quantity' => $productionQty,
-                'notes' => "Hasil produksi (BOM ID: {$bom->id}) sebanyak {$productionQty} unit.",
-                'old_stock' => $oldStock,
-                'new_stock' => $product->stock,
+                'item_id'    => $product->id,
+                'type'       => 'Produksi (Masuk)',
+                'quantity'   => $productionQty,
+                'notes'      => "Hasil produksi (BOM ID: {$bom->id}) sebanyak {$productionQty} unit.",
+                'old_stock'  => $oldStock,
+                'new_stock'  => $product->stock,
             ]);
 
             DB::commit();
@@ -363,7 +376,6 @@ class BomController extends Controller
                 'success' => true,
                 'message' => "Produksi {$product->name} sebanyak {$productionQty} unit berhasil dicatat. Stok telah diperbarui."
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error executing production: ' . $e->getMessage());

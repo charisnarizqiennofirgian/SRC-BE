@@ -18,6 +18,8 @@ use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
 use App\Http\Controllers\Api\DeliveryOrderController;
+use App\Http\Controllers\Api\BomController;               // ✅ tambah
+use App\Http\Controllers\Api\ProductionController;        // ✅ tambah
 
 /*
 |--------------------------------------------------------------------------
@@ -51,13 +53,13 @@ Route::get('/password-policy', function () {
 // ==========================================
 
 Route::middleware('auth:sanctum')->group(function () {
-    
+
     // --- USER INFO ---
     Route::get('/user', function (Request $request) {
         $user = $request->user();
         return [
-            'id' => $user->id,
-            'name' => $user->name,
+            'id'    => $user->id,
+            'name'  => $user->name,
             'email' => $user->email,
             'roles' => $user->roles->pluck('name')
         ];
@@ -70,23 +72,19 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- MASTER DATA ---
     Route::get('/categories/all', [CategoryController::class, 'all']);
     Route::apiResource('categories', CategoryController::class);
-    
+
     Route::get('/units/all', [UnitController::class, 'all']);
     Route::apiResource('units', UnitController::class);
-    
+
     Route::apiResource('suppliers', SupplierController::class);
     Route::apiResource('buyers', BuyerController::class);
-    
+
     Route::post('/products/import', [ProductController::class, 'import']);
     Route::apiResource('products', ProductController::class);
 
     Route::post('/materials/import', [MaterialController::class, 'import']);
     Route::get('/materials/template', [MaterialController::class, 'downloadTemplate']);
     Route::apiResource('materials', MaterialController::class);
-    
-    
-    
-
 
     // --- MANAJEMEN STOK ---
     Route::get('/stock-report', [StockReportController::class, 'index']);
@@ -104,35 +102,37 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('purchase-orders', PurchaseOrderController::class)->except(['show']);
 
     Route::get('goods-receipts/unbilled', [GoodsReceiptController::class, 'getUnbilledReceipts']);
-
     Route::apiResource('goods-receipts', GoodsReceiptController::class);
     Route::apiResource('purchase-bills', PurchaseBillController::class);
 
     // --- PENJUALAN ---
     Route::apiResource('sales-orders', SalesOrderController::class);
     Route::get('sales-orders-open', [SalesOrderController::class, 'getOpenSalesOrders']);
-    
+
     // --- PENGIRIMAN ---
     Route::apiResource('delivery-orders', DeliveryOrderController::class);
+
+    // --- PRODUKSI / BOM ---
+    Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);  
+    Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']); 
+    Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);           
 
     // --- UTILITAS DASHBOARD (INI MASIH DIPAKAI) ---
     Route::get('/dashboard-route', function (Request $request) {
         $user = $request->user();
         $roles = $user->roles->pluck('name')->toArray();
         $dashboardRoute = '/dashboard';
-        
+
         if (in_array('super-admin', $roles) || in_array('admin', $roles)) {
-            $dashboardRoute = '/admin'; 
+            $dashboardRoute = '/admin';
         } elseif (in_array('manager', $roles)) {
             $dashboardRoute = '/manager/dashboard';
         }
-        
+
         return response()->json([
             'success' => true,
             'dashboard_route' => $dashboardRoute,
             'user_roles' => $roles
         ]);
     });
-
-    
 });

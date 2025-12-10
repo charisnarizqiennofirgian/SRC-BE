@@ -14,6 +14,34 @@ use App\Imports\MaterialsImport;
 
 class MaterialController extends Controller
 {
+    // ✅ Helper: hitung volume_m3 otomatis dari spesifikasi + kategori
+    private function calculateVolumeM3(array $itemData): ?float
+    {
+        $category = Category::find($itemData['category_id'] ?? null);
+        if (!$category) return null;
+
+        $name = strtolower($category->name);
+
+        // Kayu RST → volume balok: p x l x t (mm) → m3
+        if (str_contains($name, 'kayu rst')) {
+            $specs = $itemData['specifications'] ?? null;
+
+            if (is_array($specs) && isset($specs['p'], $specs['l'], $specs['t'])) {
+                $p = (float) $specs['p'];
+                $l = (float) $specs['l'];
+                $t = (float) $specs['t'];
+
+                if ($p > 0 && $l > 0 && $t > 0) {
+                    return ($p * $l * $t) / 1000000000; // mm³ → m³
+                }
+            }
+        }
+
+        // Kayu Log: volume manual dari user, jangan dihitung otomatis
+
+        return null;
+    }
+
     public function index(Request $request)
     {
         try {
@@ -36,7 +64,7 @@ class MaterialController extends Controller
             }
 
             $perPage = min($request->input('per_page', 50), 100);
-            $search = $request->input('search');
+            $search  = $request->input('search');
 
             $query = Item::with($relations)
                 ->select(
@@ -56,7 +84,8 @@ class MaterialController extends Controller
                     'hs_code',
                     'jenis',
                     'kualitas',
-                    'bentuk'
+                    'bentuk',
+                    'volume_m3',
                 );
 
             if ($search) {
@@ -74,7 +103,7 @@ class MaterialController extends Controller
                 });
             }
 
-            $sortBy = $request->input('sort_by', 'created_at');
+            $sortBy    = $request->input('sort_by', 'created_at');
             $sortOrder = $request->input('sort_order', 'desc');
 
             $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
@@ -119,6 +148,7 @@ class MaterialController extends Controller
                 'jenis' => 'nullable|string|max:255',
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
+                'volume_m3' => 'nullable|numeric|min:0', // ✅ tambah validasi
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -153,7 +183,7 @@ class MaterialController extends Controller
             $itemData['kualitas'] = $itemData['kualitas'] ?? null;
             $itemData['bentuk'] = $itemData['bentuk'] ?? null;
 
-            // ✅ FORMAT NAMA KHUSUS KAYU RST
+            // FORMAT NAMA KHUSUS KAYU RST
             $category = Category::find($itemData['category_id'] ?? null);
             if (
                 $category &&
@@ -169,6 +199,14 @@ class MaterialController extends Controller
                     $itemData['name'] = "{$namaDasar} ({$t}x{$l}x{$p})";
                 }
             }
+
+            // ✅ HITUNG volume_m3 OTOMATIS (Kayu RST)
+            $volume = $this->calculateVolumeM3($itemData);
+            if (!is_null($volume)) {
+                // hanya override kalau bisa dihitung (Kayu RST)
+                $itemData['volume_m3'] = $volume;
+            }
+            // kalau null → tetap pakai volume_m3 dari input (misal Kayu Log)
 
             $item = Item::create($itemData);
             $item->load(['unit:id,name', 'category:id,name']);
@@ -228,6 +266,7 @@ class MaterialController extends Controller
                 'jenis' => 'nullable|string|max:255',
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
+                'volume_m3' => 'nullable|numeric|min:0', // ✅ tambah validasi
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -262,7 +301,7 @@ class MaterialController extends Controller
             $itemData['kualitas'] = $itemData['kualitas'] ?? null;
             $itemData['bentuk'] = $itemData['bentuk'] ?? null;
 
-            // ✅ FORMAT NAMA KHUSUS KAYU RST SAAT UPDATE
+            // FORMAT NAMA KHUSUS KAYU RST SAAT UPDATE
             $category = Category::find($itemData['category_id'] ?? null);
             if (
                 $category &&
@@ -278,6 +317,14 @@ class MaterialController extends Controller
                     $itemData['name'] = "{$namaDasar} ({$t}x{$l}x{$p})";
                 }
             }
+
+            // ✅ HITUNG/UPDATE volume_m3 untuk RST,
+            // jangan ganggu input manual untuk kategori lain (misal Log)
+            $volume = $this->calculateVolumeM3($itemData);
+            if (!is_null($volume)) {
+                $itemData['volume_m3'] = $volume;
+            }
+            // jika null → biarkan volume_m3 sesuai input user atau tetap nilainya
 
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);

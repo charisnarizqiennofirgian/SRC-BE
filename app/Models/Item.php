@@ -24,10 +24,11 @@ class Item extends Model
         'wood_consumed_per_pcs',
         'm3_per_carton',
         'hs_code',
-        // ✅ field Kayu RST
+        // field Kayu RST
         'jenis',
         'kualitas',
         'bentuk',
+        'volume_m3',
     ];
 
     protected $casts = [
@@ -42,5 +43,11 @@ class Item extends Model
     public function unit()
     {
         return $this->belongsTo(Unit::class);
+    }
+
+    // 🔹 relasi ke tabel stocks (saldo per gudang)
+    public function stocks()
+    {
+        return $this->hasMany(Stock::class);
     }
 }
