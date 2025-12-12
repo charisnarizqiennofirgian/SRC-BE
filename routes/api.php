@@ -18,8 +18,10 @@ use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
 use App\Http\Controllers\Api\DeliveryOrderController;
-use App\Http\Controllers\Api\BomController;               // ✅ tambah
-use App\Http\Controllers\Api\ProductionController;        // ✅ tambah
+use App\Http\Controllers\Api\BomController;               
+use App\Http\Controllers\Api\ProductionController;        
+use App\Http\Controllers\Api\WarehouseController;
+use App\Http\Controllers\Api\SawmillProductionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -113,9 +115,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('delivery-orders', DeliveryOrderController::class);
 
     // --- PRODUKSI / BOM ---
-    Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);  
-    Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']); 
-    Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);           
+    Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);
+    Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']);
+    Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
+
+    // --- GUDANG ---
+    Route::get('/warehouses', [WarehouseController::class, 'index']);
+
+    // --- PRODUKSI PENGGERGAJAN ---
+    Route::post('/sawmill-productions', [SawmillProductionController::class, 'store']);
 
     // --- UTILITAS DASHBOARD (INI MASIH DIPAKAI) ---
     Route::get('/dashboard-route', function (Request $request) {

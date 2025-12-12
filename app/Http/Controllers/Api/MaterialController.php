@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\Category;
+use App\Models\Stock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\MaterialsImport;
 
@@ -136,6 +138,7 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
+                'initial_warehouse_id' => 'nullable|exists:warehouses,id', // ✅ baru
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
@@ -208,8 +211,29 @@ class MaterialController extends Controller
             }
             // kalau null → tetap pakai volume_m3 dari input (misal Kayu Log)
 
+            DB::beginTransaction();
+
             $item = Item::create($itemData);
             $item->load(['unit:id,name', 'category:id,name']);
+
+            // FASE 2: alokasikan stok awal ke tabel stocks jika diisi
+            $initialStock = (float) ($itemData['stock'] ?? 0);
+            $initialWarehouseId = $itemData['initial_warehouse_id'] ?? null;
+
+            if ($initialStock > 0 && $initialWarehouseId) {
+                Stock::updateOrCreate(
+                    [
+                        'item_id' => $item->id,
+                        'warehouse_id' => $initialWarehouseId,
+                    ],
+                    [
+                        'quantity' => $initialStock,
+                    ]
+                );
+            }
+
+            DB::commit();
+
             Cache::forget('materials_all');
 
             return response()->json([
@@ -218,6 +242,7 @@ class MaterialController extends Controller
                 'data' => $item,
             ], 201);
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error saat membuat item: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
@@ -254,6 +279,7 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
+                'initial_warehouse_id' => 'nullable|exists:warehouses,id', // ✅ baru
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
@@ -326,8 +352,32 @@ class MaterialController extends Controller
             }
             // jika null → biarkan volume_m3 sesuai input user atau tetap nilainya
 
+            DB::beginTransaction();
+
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);
+
+            // kalau stok awal + gudang diubah di edit, sinkronkan ke stocks (minimal)
+            if (array_key_exists('stock', $itemData) && isset($itemData['initial_warehouse_id'])) {
+                $initialStock = (float) ($itemData['stock'] ?? 0);
+                $initialWarehouseId = $itemData['initial_warehouse_id'];
+
+                if ($initialStock > 0 && $initialWarehouseId) {
+                    Stock::updateOrCreate(
+                        [
+                            'item_id' => $material->id,
+                            'warehouse_id' => $initialWarehouseId,
+                        ],
+                        [
+                            'quantity' => $initialStock,
+                        ]
+                    );
+                }
+                // kalau 0, untuk saat ini kita tidak hapus / ubah stok per gudang lain (bisa dibahas dengan PM)
+            }
+
+            DB::commit();
+
             Cache::forget('materials_all');
 
             return response()->json([
@@ -336,6 +386,7 @@ class MaterialController extends Controller
                 'data' => $material,
             ]);
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error saat update item: ' . $e->getMessage());
             return response()->json([
                 'success' => false,

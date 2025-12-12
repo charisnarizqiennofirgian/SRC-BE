@@ -9,23 +9,24 @@ class WarehouseSeeder extends Seeder
 {
     public function run(): void
     {
-        $data = [
-            ['name' => 'Gudang Log (Hulu)',              'code' => 'LOG'],
-            ['name' => 'Gudang Sanwil (RST Basah)',      'code' => 'SANWIL'],
-            ['name' => 'Gudang Candy (RST Kering)',      'code' => 'CANDY'],
-            ['name' => 'Gudang Pembahanan (Transit RST)','code' => 'PEMBAHANAN'],
-            ['name' => 'Gudang Moulding (Kayu S4S)',     'code' => 'MOULDING'],
+        $warehouses = [
+            ['name' => 'Gudang Log',                     'code' => 'LOG'],
+            ['name' => 'Gudang Sanwil (RST Basah)',      'code' => 'RSTB'],
+            ['name' => 'Gudang Candy (RST Kering)',      'code' => 'RSTK'],
+            ['name' => 'Gudang Pembahanan (Buffer RST)', 'code' => 'BUFFER'],
+            ['name' => 'Gudang Moulding (S4S)',          'code' => 'S4S'],
             ['name' => 'Gudang Mesin (Komponen)',        'code' => 'MESIN'],
-            ['name' => 'Gudang Assembling (Barang Mentah/Unfinished)','code' => 'ASSEMBLING'],
-            ['name' => 'Gudang Finishing (Proses Warna)','code' => 'FINISHING'],
-            ['name' => 'Gudang Packing (Barang Jadi/Siap Kirim)','code' => 'PACKING'],
-            ['name' => 'Gudang Bahan (Lem, Paku, dll)',  'code' => 'BAHAN'],
+            ['name' => 'Gudang Assembling (Barang Mentah)','code' => 'ASSEMBLING'],
+            ['name' => 'Gudang Rustik',                  'code' => 'RUSTIK'],
+            ['name' => 'Gudang Sanding (Seding)',        'code' => 'SANDING'],
+            ['name' => 'Gudang Finishing (Warna)',       'code' => 'FINISHING'],
+            ['name' => 'Gudang Packing (Barang Jadi)',   'code' => 'PACKING'],
         ];
 
-        foreach ($data as $row) {
-            Warehouse::firstOrCreate(
-                ['code' => $row['code']],
-                ['name' => $row['name']]
+        foreach ($warehouses as $data) {
+            Warehouse::updateOrCreate(
+                ['code' => $data['code']],
+                ['name' => $data['name']]
             );
         }
     }
