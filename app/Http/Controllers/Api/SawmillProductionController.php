@@ -7,6 +7,7 @@ use App\Models\SawmillProduction;
 use App\Models\SawmillProductionLog;
 use App\Models\SawmillProductionRst;
 use App\Models\Stock;
+use App\Models\Item;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -46,7 +47,7 @@ class SawmillProductionController extends Controller
                 'notes' => $data['notes'] ?? null,
             ]);
 
-            // Kurangi stok LOG di gudang asal
+            // Kurangi stok LOG di gudang asal + simpan volume_log_m3
             foreach ($data['logs'] as $log) {
                 $stock = Stock::where('item_id', $log['item_log_id'])
                     ->where('warehouse_id', $data['warehouse_from_id'])
@@ -65,10 +66,16 @@ class SawmillProductionController extends Controller
                     $stock->decrement('quantity', $log['qty_log_pcs']);
                 }
 
+                // ambil volume per batang dari master item
+                $itemLog = Item::find($log['item_log_id']);
+                $volumePerPcs = $itemLog?->volume_m3 ?? 0;
+                $volumeLogTotal = $log['qty_log_pcs'] * $volumePerPcs;
+
                 SawmillProductionLog::create([
                     'sawmill_production_id' => $production->id,
                     'item_log_id' => $log['item_log_id'],
                     'qty_log_pcs' => $log['qty_log_pcs'],
+                    'volume_log_m3' => $volumeLogTotal,
                 ]);
             }
 
@@ -96,6 +103,19 @@ class SawmillProductionController extends Controller
                     'volume_rst_m3' => $rst['volume_rst_m3'],
                 ]);
             }
+
+            // === HITUNG TOTAL & RENDEMEN (TAMBAHAN BARU) ===
+            $totalLogM3 = $production->logs()->sum('volume_log_m3');
+            $totalRstM3 = $production->rsts()->sum('volume_rst_m3');
+            $yieldPercent = $totalLogM3 > 0
+                ? ($totalRstM3 / $totalLogM3) * 100
+                : 0;
+
+            $production->update([
+                'total_log_m3' => $totalLogM3,
+                'total_rst_m3' => $totalRstM3,
+                'yield_percent' => $yieldPercent,
+            ]);
 
             return response()->json([
                 'success' => true,

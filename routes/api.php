@@ -90,6 +90,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- MANAJEMEN STOK ---
     Route::get('/stock-report', [StockReportController::class, 'index']);
+    Route::get('reports/sawmill-yield', [\App\Http\Controllers\Api\SawmillReportController::class, 'index']);
     Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store']);
     Route::post('/stock-adjustments/upload', [StockAdjustmentController::class, 'upload']);
     Route::post('/stock-adjustments/upload-saldo-awal-kayu', [StockAdjustmentController::class, 'uploadSaldoAwalKayu']);

@@ -10,6 +10,7 @@ class SawmillProductionLog extends Model
         'sawmill_production_id',
         'item_log_id',
         'qty_log_pcs',
+        'volume_log_m3', 
     ];
 
     public function production()
