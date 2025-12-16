@@ -95,10 +95,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/stock-adjustments/upload', [StockAdjustmentController::class, 'upload']);
     Route::post('/stock-adjustments/upload-saldo-awal-kayu', [StockAdjustmentController::class, 'uploadSaldoAwalKayu']);
     Route::get('/stock-adjustments/template-kayu', [StockAdjustmentController::class, 'downloadTemplateKayu']);
+    Route::get('/stock-adjustments/template-kayu-rst', [StockAdjustmentController::class, 'downloadTemplateKayuRst']);
+    Route::post('/materials/import-kayu-rst', [StockAdjustmentController::class, 'uploadSaldoAwalKayuRst']);
+    Route::get('/stock-adjustments/template-umum', [StockAdjustmentController::class, 'downloadTemplateUmum']);
     Route::get('/stock-adjustments/template-produk-jadi', [StockAdjustmentController::class, 'downloadProdukJadiTemplate']);
     Route::get('/stock-adjustments/template-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'downloadTemplateSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
+
+    Route::prefix('stock-adjustments')->group(function () {
+        // sudah ada:
+        // Route::get('/template-umum', [StockAdjustmentController::class, 'downloadTemplateUmum']);
+        // Route::post('/upload-saldo-awal-umum', [StockAdjustmentController::class, 'uploadSaldoAwalUmum']);
+        // dst...
+
+        // 🟣 Karton Box
+        Route::get('/template-karton-box', [StockAdjustmentController::class, 'downloadTemplateKartonBox']);
+        Route::post('/upload-karton-box', [StockAdjustmentController::class, 'uploadSaldoAwalKartonBox']);
+    });
 
     // --- PEMBELIAN ---
     Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show']);

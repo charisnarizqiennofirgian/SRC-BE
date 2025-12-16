@@ -10,18 +10,19 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
 {
     public function array(): array
     {
-        // Contoh baris 1
         return [
             [
-                'K-JTI-001',           // kode_barang
-                'KAYU JATI RST',       // nama_dasar
-                'TEAK',                // jenis
-                'A',                   // kualitas
-                'PLANK',               // bentuk
-                50,                    // tebal_mm
-                80,                    // lebar_mm
-                1000,                  // panjang_mm
-                20,                    // stok_awal
+                'K-JTI-001',      // kode_barang
+                'KAYU JATI RST',  // nama_dasar
+                'TEAK',           // jenis
+                'A',              // kualitas
+                'PLANK',          // bentuk
+                50,               // tebal_mm
+                80,               // lebar_mm
+                1000,             // panjang_mm
+                20,               // stok_awal
+                'Pieces',         // satuan (harus sama dengan master Unit)
+                'SANWIL',         // gudang (kode gudang contoh)
             ],
             [
                 'K-MRN-001',
@@ -33,13 +34,14 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 60,
                 2000,
                 15,
+                'Pieces',
+                'SANWIL',
             ],
         ];
     }
 
     public function headings(): array
     {
-        // Harus sama persis dengan yang dibaca di KayuStockImport
         return [
             'kode_barang',
             'nama_dasar',
@@ -50,6 +52,8 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
             'lebar_mm',
             'panjang_mm',
             'stok_awal',
+            'satuan',   // diambil ke master Unit
+            'gudang',   // wajib diisi kode gudang (case bebas)
         ];
     }
 }

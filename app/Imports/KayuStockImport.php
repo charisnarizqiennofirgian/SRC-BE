@@ -6,6 +6,8 @@ use App\Models\Item;
 use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
+use App\Models\Warehouse;
+use App\Models\Stock;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -16,7 +18,7 @@ use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
     private $categoryKayu;
-    private $unitPieces;
+    private $defaultUnit;
 
     public function __construct()
     {
@@ -25,7 +27,8 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             ['description' => 'Bahan Baku Kayu RST']
         );
 
-        $this->unitPieces = Unit::firstOrCreate(
+        // fallback kalau kolom satuan kosong
+        $this->defaultUnit = Unit::firstOrCreate(
             ['name' => 'Pieces'],
             ['short_name' => 'PCS']
         );
@@ -36,16 +39,21 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $userId = Auth::id();
-        $skippedRows = [];
+        $userId        = Auth::id();
+        $skippedRows   = [];
         $processedRows = 0;
 
         foreach ($rows as $index => $row) {
-            // ✅ VALIDASI WAJIB MINIMAL
-            if (empty($row['nama_dasar']) || empty($row['tebal_mm']) || !isset($row['stok_awal'])) {
+            // wajib: nama_dasar, tebal_mm, stok_awal, gudang
+            if (
+                empty($row['nama_dasar']) ||
+                empty($row['tebal_mm']) ||
+                !isset($row['stok_awal']) ||
+                empty($row['gudang'])
+            ) {
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'reason' => 'Kolom nama_dasar, tebal_mm, atau stok_awal kosong',
+                    'reason'     => 'Kolom nama_dasar, tebal_mm, stok_awal, atau gudang kosong',
                 ];
                 continue;
             }
@@ -53,82 +61,113 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             $namaDasar  = trim($row['nama_dasar']);
             $kodeBarang = trim($row['kode_barang'] ?? '');
 
-            // 🔽 FIELD BARU DARI EXCEL
+            // satuan dari Excel (mis: Pieces, M, Lembar, dll)
+            $satuanName = trim($row['satuan'] ?? '');
+            $unit = $satuanName
+                ? Unit::firstOrCreate(
+                    ['name' => $satuanName],
+                    ['short_name' => strtoupper(substr($satuanName, 0, 5))]
+                  )
+                : $this->defaultUnit;
+
+            // gudang: normalisasi ke uppercase biar SANWIL / sanwil / Sanwil tetap ketemu
+            $gudangCodeRaw = trim($row['gudang']);
+            $gudangCode    = strtoupper($gudangCodeRaw);
+
             $jenis    = isset($row['jenis']) ? trim($row['jenis']) : null;
             $kualitas = isset($row['kualitas']) ? trim($row['kualitas']) : null;
             $bentuk   = isset($row['bentuk']) ? trim($row['bentuk']) : null;
 
-            $t = (float) $row['tebal_mm'];
-            $l = (float) ($row['lebar_mm'] ?? 0);
-            $p = (float) ($row['panjang_mm'] ?? 0);
+            $t        = (float) $row['tebal_mm'];
+            $l        = (float) ($row['lebar_mm'] ?? 0);
+            $p        = (float) ($row['panjang_mm'] ?? 0);
             $stokAwal = (float) $row['stok_awal'];
 
-            // Nama unik tetap seperti sebelum
             $uniqueName = "{$namaDasar} ({$t}x{$l}x{$p})";
 
-            // Kubikasi per pcs (m3)
-            $kubikasi = ($t * $l * $p) / 1000000000;
+            // m3 per pcs
+            $kubikasiPerPcs = ($t * $l * $p) / 1000000000;
 
             $specifications = [
-                't' => $t,
-                'l' => $l,
-                'p' => $p,
-                'm3_per_pcs' => $kubikasi,
+                't'          => $t,
+                'l'          => $l,
+                'p'          => $p,
+                'm3_per_pcs' => $kubikasiPerPcs,
             ];
 
             try {
-                // ✅ 1. CREATE/UPDATE ITEM DENGAN STOK + FIELD KAYU RST
+                // 1. ITEM Kayu RST (tanpa set kolom stock lagi, biar stok per gudang yang pegang)
                 $item = Item::updateOrCreate(
                     ['name' => $uniqueName],
                     [
-                        'code'          => $kodeBarang,
-                        'category_id'   => $this->categoryKayu->id,
-                        'unit_id'       => $this->unitPieces->id,
-                        'specifications'=> $specifications,
-                        'stock'         => $stokAwal,
-                        'jenis'         => $jenis,     // ✅ SIMPAN
-                        'kualitas'      => $kualitas,  // ✅ SIMPAN
-                        'bentuk'        => $bentuk,    // ✅ SIMPAN
+                        'code'           => $kodeBarang,
+                        'category_id'    => $this->categoryKayu->id,
+                        'unit_id'        => $unit->id,
+                        'specifications' => $specifications,
+                        'jenis'          => $jenis,
+                        'kualitas'       => $kualitas,
+                        'bentuk'         => $bentuk,
                     ]
                 );
 
-                // ✅ 2. BIKIN / UPDATE STOCK MOVEMENT (Saldo Awal Kayu)
+                // 2. STOCK MOVEMENT saldo awal (opsional, kalau mau tracking histori)
                 if ($stokAwal > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
-                        ->where('notes', 'LIKE', '%Saldo Awal (Kayu)%')
+                        ->where('notes', 'LIKE', '%Saldo Awal (Kayu RST)%')
                         ->first();
 
                     if ($existingMovement) {
                         $existingMovement->update([
                             'quantity' => $stokAwal,
-                            'notes' => 'Saldo Awal (Kayu) diperbarui via Excel upload.',
+                            'notes'    => 'Saldo Awal (Kayu RST) diperbarui via Excel upload.',
                         ]);
                     } else {
                         StockMovement::create([
-                            'item_id' => $item->id,
-                            'type' => 'Stok Masuk',
+                            'item_id'  => $item->id,
+                            'type'     => 'Stok Masuk',
                             'quantity' => $stokAwal,
-                            'notes' => 'Saldo Awal (Kayu) dari Excel upload.',
+                            'notes'    => 'Saldo Awal (Kayu RST) dari Excel upload.',
                         ]);
                     }
+                }
+
+                // 3. STOK PER GUDANG (pakai kode gudang uppercase)
+                $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
+
+                if (!$warehouse) {
+                    $skippedRows[] = [
+                        'row_number' => $index + 2,
+                        'item_name'  => $uniqueName,
+                        'reason'     => 'Kode gudang tidak ditemukan: ' . $gudangCodeRaw,
+                    ];
+                } else {
+                    Stock::updateOrCreate(
+                        [
+                            'item_id'      => $item->id,
+                            'warehouse_id' => $warehouse->id,
+                        ],
+                        [
+                            'quantity' => $stokAwal,
+                        ]
+                    );
                 }
 
                 $processedRows++;
             } catch (\Exception $e) {
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'item_name' => $uniqueName,
-                    'reason' => 'Error sistem: ' . $e->getMessage(),
+                    'item_name'  => $uniqueName,
+                    'reason'     => 'Error sistem: ' . $e->getMessage(),
                 ];
                 Log::error("Error processing row {$index} untuk kayu {$uniqueName}: " . $e->getMessage());
             }
         }
 
         if (!empty($skippedRows)) {
-            Log::warning('Baris Excel Kayu yang ditolak:', $skippedRows);
+            Log::warning('Baris Excel Kayu RST yang ditolak:', $skippedRows);
         }
 
-        Log::info("Import Kayu selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
+        Log::info("Import Kayu RST selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 
     public function getCsvSettings(): array

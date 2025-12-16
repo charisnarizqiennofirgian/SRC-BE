@@ -13,7 +13,7 @@ class StockReportController extends Controller
     public function index(Request $request)
     {
         try {
-            // Wajib ada filter kategori
+            // 1. Filter kategori wajib
             if (!$request->has('categories')) {
                 return response()->json([
                     'success' => false,
@@ -21,10 +21,8 @@ class StockReportController extends Controller
                 ], 400);
             }
 
-            // categories = "Kayu Logs,Kayu RST"
             $categoryNames = explode(',', $request->query('categories'));
 
-            // Cari id kategori dengan nama yang cocok (case-insensitive)
             $categoryIds = Category::where(function ($query) use ($categoryNames) {
                 foreach ($categoryNames as $name) {
                     $query->orWhereRaw('LOWER(name) = ?', [strtolower(trim($name))]);
@@ -35,49 +33,58 @@ class StockReportController extends Controller
                 return response()->json(['success' => true, 'data' => []]);
             }
 
-            // Query item + relasi unit, category, stocks.warehouse
-            $query = Item::with([
+            // 2. Query tanpa gudang, pakai items.stock
+            $query = Item::select(
+                    'items.id',
+                    'items.name',
+                    'items.code',
+                    'items.unit_id',
+                    'items.category_id',
+                    'items.stock',
+                    'items.specifications',
+                    'items.jenis',
+                    'items.kualitas',
+                    'items.bentuk'
+                )
+                ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'stocks.warehouse:id,name,code', // 🔹 relasi stok per gudang
                 ])
-                ->select(
-                    'id',
-                    'name',
-                    'code',
-                    'unit_id',
-                    'category_id',
-                    'stock',          // masih disertakan untuk kompatibilitas lama
-                    'specifications',
-                    'jenis',
-                    'kualitas',
-                    'bentuk'
-                )
-                ->whereIn('category_id', $categoryIds);
+                ->whereIn('items.category_id', $categoryIds);
 
-            // Pencarian
-            if ($request->has('search') && $request->input('search')) {
+            // 3. Search
+            if ($request->filled('search')) {
                 $search = $request->input('search');
                 $query->where(function ($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('code', 'like', "%{$search}%");
+                    $q->where('items.name', 'like', "%{$search}%")
+                        ->orWhere('items.code', 'like', "%{$search}%");
                 });
             }
 
-            // Sorting
-            $sortBy = $request->input('sort_by', 'name');
+            // 4. Sorting
+            $sortBy    = $request->input('sort_by', 'name');
             $sortOrder = $request->input('sort_order', 'asc');
+            $allowedSortFields = ['name', 'code', 'created_at'];
 
-            $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
             if (in_array($sortBy, $allowedSortFields)) {
-                $query->orderBy($sortBy, $sortOrder);
+                $query->orderBy("items.$sortBy", $sortOrder);
             } else {
-                $query->orderBy('name', 'asc');
+                $query->orderBy('items.name', 'asc');
             }
 
-            // Pagination
+            // 5. Pagination
             $perPage = min($request->input('per_page', 50), 100);
-            $items = $query->paginate($perPage);
+            $items   = $query->paginate($perPage);
+
+            // 6. Hitung kubikasi per item
+            $items->getCollection()->transform(function ($item) {
+                $m3PerPcs = $item->specifications['m3_per_pcs'] ?? 0;
+                $qty      = (float) ($item->stock ?? 0);
+
+                $item->total_volume_m3 = $qty * $m3PerPcs;
+
+                return $item;
+            });
 
             return response()->json([
                 'success' => true,
