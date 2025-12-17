@@ -33,7 +33,7 @@ class StockReportController extends Controller
                 return response()->json(['success' => true, 'data' => []]);
             }
 
-            // 2. Query tanpa gudang, pakai items.stock
+            // 2. Query items + relasi stocks
             $query = Item::select(
                     'items.id',
                     'items.name',
@@ -49,6 +49,8 @@ class StockReportController extends Controller
                 ->with([
                     'unit:id,name',
                     'category:id,name',
+                    'stocks:id,item_id,warehouse_id,quantity',
+                    'stocks.warehouse:id,name,code',
                 ])
                 ->whereIn('items.category_id', $categoryIds);
 
@@ -76,12 +78,22 @@ class StockReportController extends Controller
             $perPage = min($request->input('per_page', 50), 100);
             $items   = $query->paginate($perPage);
 
-            // 6. Hitung kubikasi per item
+            // 6. Hitung total stok (dari tabel stocks) + kubikasi
             $items->getCollection()->transform(function ($item) {
-                $m3PerPcs = $item->specifications['m3_per_pcs'] ?? 0;
-                $qty      = (float) ($item->stock ?? 0);
+                // total stok dari relasi stocks
+                $totalFromStocks = ($item->stocks ?? collect())->sum(function ($s) {
+                    return (float) ($s->quantity ?? 0);
+                });
 
-                $item->total_volume_m3 = $qty * $m3PerPcs;
+                $item->total_stock_from_stocks = $totalFromStocks;
+
+                // kubikasi (kalau ada m3_per_pcs di specifications)
+                $m3PerPcs = 0;
+                if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
+                    $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
+                }
+
+                $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
 
                 return $item;
             });

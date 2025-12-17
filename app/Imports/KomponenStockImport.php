@@ -11,17 +11,17 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\Importable;
 
-class KartonBoxStockImport implements ToModel, WithHeadingRow, WithValidation
+class KomponenStockImport implements ToModel, WithHeadingRow, WithValidation
 {
     use Importable;
 
     public function model(array $row)
     {
+        // kategori: isi di Excel "Komponen"
         $category = Category::firstOrCreate(
             ['name' => $row['kategori']],
             [
-                'type'        => 'karton',
-                'description' => 'Kategori untuk Karton Box',
+                'description' => 'Kategori untuk Komponen',
                 'created_by'  => 1,
             ]
         );
@@ -52,14 +52,14 @@ class KartonBoxStockImport implements ToModel, WithHeadingRow, WithValidation
         ];
 
         $item = Item::firstOrCreate(
-    ['code' => $row['kode']],
-    [
-        'name'        => $row['nama'],
-        'category_id' => $category->id,
-        'unit_id'     => $unit->id,
-        'uuid'        => Str::uuid(),
-    ]
-);
+            ['code' => $row['kode']],
+            [
+                'name'        => $row['nama'],
+                'category_id' => $category->id,
+                'unit_id'     => $unit->id,
+                'uuid'        => Str::uuid(),
+            ]
+        );
 
         $item->specifications = $specifications;
         $item->stock = $stokAwal;

@@ -10,17 +10,11 @@ use Illuminate\Support\Facades\Hash;
 
 class PermissionsSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
-        
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
-        
         $permissions = [
-
             'view-dashboard',
             'manage-users',
             'manage-roles',
@@ -29,48 +23,41 @@ class PermissionsSeeder extends Seeder
             'manage-suppliers',
             'manage-buyers',
             'manage-items',
-            
-            
             'manage-stock-adjustments',
             'view-stock-report',
-            
-            
             'manage-po',
-            'manage-grn', 
-            'manage-bills', 
-            
-            
+            'manage-grn',
+            'manage-bills',
             'manage-so',
-            'manage-do', 
-            'manage-invoices', 
-            
-            
+            'manage-do',
+            'manage-invoices',
             'manage-bom',
         ];
 
-        
         foreach ($permissions as $permission) {
-            Permission::create(['name' => $permission]);
+            Permission::firstOrCreate(
+                ['name' => $permission],
+                ['guard_name' => 'web']
+            );
         }
 
-        
-        $superAdminRole = Role::create(['name' => 'super-admin']);
-        
-        
-        $superAdminRole->givePermissionTo(Permission::all());
-        
-        // 6. Buat Role "Admin" biasa (jika perlu)
-        // $adminRole = Role::create(['name' => 'admin']);
-        // $adminRole->givePermissionTo(['view-dashboard', 'manage-items']); 
+        $superAdminRole = Role::firstOrCreate(
+            ['name' => 'super-admin'],
+            ['guard_name' => 'web']
+        );
 
-        
-        $user = User::create([
-            'name' => 'Admin',
-            'email' => 'admin@admin.com',
-            'password' => Hash::make('password')
-        ]);
+        $superAdminRole->syncPermissions(Permission::all());
 
-        
-        $user->assignRole($superAdminRole);
+        $user = User::firstOrCreate(
+            ['email' => 'admin@admin.com'],
+            [
+                'name' => 'Admin',
+                'password' => Hash::make('password'),
+            ]
+        );
+
+        if (! $user->hasRole('super-admin')) {
+            $user->assignRole($superAdminRole);
+        }
     }
 }

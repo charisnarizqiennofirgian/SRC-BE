@@ -14,11 +14,13 @@ use App\Imports\KayuLogStockImport;
 use App\Imports\KayuStockImport;
 use App\Imports\UmumStockImport;
 use App\Imports\KartonBoxStockImport;
+use App\Imports\KomponenStockImport;
 use App\Exports\KayuLogTemplateExport;
 use App\Exports\KayuTemplateExport;
 use App\Exports\ProdukJadiTemplateExport;
 use App\Exports\UmumTemplateExport;
 use App\Exports\KartonBoxTemplateExport;
+use App\Exports\KomponenTemplateExport;
 
 class StockAdjustmentController extends Controller
 {
@@ -259,6 +261,100 @@ class StockAdjustmentController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Karton Box: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan internal saat memproses file.',
+                'error'   => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    /* ================== KOMPONEN ================== */
+
+    public function downloadTemplateKomponen()
+    {
+        try {
+            return Excel::download(
+                new KomponenTemplateExport,
+                'template_saldo_awal_komponen.xlsx'
+            );
+        } catch (\Exception $e) {
+            Log::error('Gagal download template komponen: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mendownload template komponen.'
+            ], 500);
+        }
+    }
+
+    public function uploadSaldoAwalKomponen(Request $request)
+    {
+        if (!$request->hasFile('file')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan. Pastikan field name adalah "file".',
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'file' => [
+                'required',
+                'file',
+                'mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'max:5120'
+            ]
+        ], [
+            'file.required' => 'File wajib di-upload.',
+            'file.file'     => 'File yang di-upload tidak valid.',
+            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max'      => 'Ukuran file maksimal 5MB.'
+        ]);
+
+        if ($validator->fails()) {
+            Log::warning('Validasi file komponen gagal:', [
+                'errors'    => $validator->errors()->toArray(),
+                'file_info' => $request->hasFile('file') ? [
+                    'original_name' => $request->file('file')->getClientOriginalName(),
+                    'mime_type'     => $request->file('file')->getMimeType(),
+                    'size'          => $request->file('file')->getSize(),
+                ] : 'No file uploaded'
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi file gagal.',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            Excel::import(new KomponenStockImport, $request->file('file'));
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Upload saldo awal Komponen berhasil. Master data dan stok telah diperbarui.'
+            ], 201);
+
+        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+            DB::rollBack();
+            $failures = $e->failures();
+            Log::error('Gagal validasi Excel Komponen:', ['failures' => $failures]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Data di Excel tidak valid.',
+                'errors'  => $failures,
+            ], 422);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Gagal upload Saldo Awal Komponen: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([

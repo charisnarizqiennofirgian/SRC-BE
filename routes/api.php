@@ -22,6 +22,9 @@ use App\Http\Controllers\Api\BomController;
 use App\Http\Controllers\Api\ProductionController;        
 use App\Http\Controllers\Api\WarehouseController;
 use App\Http\Controllers\Api\SawmillProductionController;
+use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\CandyProductionController;
+use App\Http\Controllers\Api\ProductionOrderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -112,6 +115,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // 🟣 Karton Box
         Route::get('/template-karton-box', [StockAdjustmentController::class, 'downloadTemplateKartonBox']);
         Route::post('/upload-karton-box', [StockAdjustmentController::class, 'uploadSaldoAwalKartonBox']);
+        
+        // 🟡 Komponen
+        Route::get('/template-komponen', [StockAdjustmentController::class, 'downloadTemplateKomponen']);
+        Route::post('/upload-komponen', [StockAdjustmentController::class, 'uploadSaldoAwalKomponen']);
     });
 
     // --- PEMBELIAN ---
@@ -133,9 +140,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);
     Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']);
     Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
-
+    Route::post('/candy-productions', [CandyProductionController::class, 'store']);
+    Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
     // --- GUDANG ---
     Route::get('/warehouses', [WarehouseController::class, 'index']);
+    Route::get('/inventories', [InventoryController::class, 'index']);
 
     // --- PRODUKSI PENGGERGAJAN ---
     Route::post('/sawmill-productions', [SawmillProductionController::class, 'store']);

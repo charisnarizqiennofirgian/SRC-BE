@@ -21,14 +21,19 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
 
     public function __construct()
     {
+        // Default kategori Produk Jadi
         $this->defaultCategory = Category::firstOrCreate(
             ['name' => 'Produk Jadi'],
             ['description' => 'Produk Jadi Furniture']
         );
 
+        // Default satuan PCS (pakai short_name sebagai key unik)
         $this->defaultUnit = Unit::firstOrCreate(
-            ['name' => 'PCS'],
-            ['short_name' => 'PCS']
+            ['short_name' => 'PCS'],
+            [
+                'name'        => 'PCS',
+                'description' => 'Pieces',
+            ]
         );
     }
 
@@ -37,51 +42,53 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $userId        = Auth::id();
         $skippedRows   = [];
         $processedRows = 0;
 
-        Log::info("========== MULAI IMPORT PRODUK JADI ==========");
-        Log::info("Total rows dari Excel: " . $rows->count());
+        Log::info('========== MULAI IMPORT PRODUK JADI ==========');
+        Log::info('Total rows dari Excel: ' . $rows->count());
 
         foreach ($rows as $index => $row) {
             $rowData = $row->toArray();
-            Log::info("ROW #{$index} - DATA:", $rowData);
+            Log::info("ROW #{$index} - RAW DATA:", $rowData);
 
-            // wajib minimal
-            if (
-                empty($rowData['nama_produk']) ||
-                !isset($rowData['stok_awal']) ||
-                empty($rowData['gudang'])
-            ) {
-                Log::warning("ROW #{$index} DITOLAK (wajib kosong)");
+            // Normalisasi key ke lower-case untuk jaga-jaga header beda kapital
+            $normalized = [];
+            foreach ($rowData as $key => $value) {
+                $normalized[strtolower(trim($key))] = $value;
+            }
+
+            // Ambil kolom dengan nama yang lebih fleksibel
+            $namaProduk = trim($normalized['nama_produk'] ?? $normalized['nama produk'] ?? '');
+            $kodeBarang = trim($normalized['kode_barang'] ?? $normalized['kode barang'] ?? '');
+            $stokAwal   = isset($normalized['stok_awal'])
+                ? (float) $normalized['stok_awal']
+                : (isset($normalized['stok awal']) ? (float) $normalized['stok awal'] : 0);
+            $gudangRaw  = trim($normalized['gudang'] ?? '');
+            $hsCodeRaw  = $normalized['hs_code'] ?? $normalized['hs code'] ?? null;
+
+            // Wajib minimal: nama produk, stok awal, gudang
+            if (empty($namaProduk) || $stokAwal <= 0 || empty($gudangRaw)) {
+                Log::warning("ROW #{$index} DITOLAK (kolom wajib kosong / stok <= 0)");
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'reason'     => 'Kolom nama_produk, stok_awal, atau gudang kosong',
+                    'reason'     => 'Kolom nama_produk, stok_awal, atau gudang kosong / stok <= 0',
+                    'data'       => $normalized,
                 ];
                 continue;
             }
 
-            $namaProduk = trim($rowData['nama_produk']);
-            $kodeBarang = trim($rowData['kode_barang'] ?? '');
-            $stokAwal   = (float) $rowData['stok_awal'];
-            $hsCodeRaw  = $rowData['hs_code'] ?? null;
-
-            if (empty($hsCodeRaw)) {
-                Log::warning("ROW #{$index} DITOLAK - HS Code kosong");
-                $skippedRows[] = [
-                    'row_number' => $index + 2,
-                    'item_name'  => $namaProduk,
-                    'reason'     => 'HS Code wajib diisi',
-                ];
-                continue;
+            // HS Code: kalau kosong, tidak lagi menggagalkan baris, hanya dicatat null
+            $hsCode = null;
+            if (!empty($hsCodeRaw)) {
+                $hsCode = $this->sanitizeHsCode((string) $hsCodeRaw);
+            } else {
+                Log::warning("ROW #{$index} - HS Code kosong, item tetap dibuat tanpa HS Code.");
             }
-
-            $hsCode = $this->sanitizeHsCode($hsCodeRaw);
 
             // kategori & satuan dari Excel (fallback ke default)
-            $kategoriName = trim($rowData['kategori'] ?? '');
-            $satuanName   = trim($rowData['satuan'] ?? '');
+            $kategoriName = trim($normalized['kategori'] ?? '');
+            $satuanName   = trim($normalized['satuan'] ?? '');
 
             $category = $kategoriName
                 ? Category::firstOrCreate(
@@ -90,38 +97,49 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                   )
                 : $this->defaultCategory;
 
-            $unit = $satuanName
-                ? Unit::firstOrCreate(
-                    ['name' => $satuanName],
-                    ['short_name' => strtoupper(substr($satuanName, 0, 5))]
-                  )
-                : $this->defaultUnit;
+            if ($satuanName) {
+                $short = strtoupper($satuanName);
+                $unit = Unit::firstOrCreate(
+                    ['short_name' => $short],
+                    [
+                        'name'        => $satuanName,
+                        'description' => 'Satuan dari import Produk Jadi',
+                    ]
+                );
+            } else {
+                $unit = $this->defaultUnit;
+            }
 
-            // gudang: normalisasi code
-            $gudangCodeRaw = trim($rowData['gudang']);
-            $gudangCode    = strtoupper($gudangCodeRaw);
+            // Gudang: normalisasi code ke uppercase
+            $gudangCode    = strtoupper($gudangRaw);
 
             try {
-                Log::info("ROW #{$index} - CREATING ITEM: {$namaProduk}");
+                Log::info("ROW #{$index} - CREATING/UPDATING ITEM: {$namaProduk}");
 
-                // 1) master item (tanpa set kolom stock, stok dipegang tabel stocks)
+                // Kolom-kolom tambahan DNA
+                $nwPerBox   = $normalized['nw_per_box'] ?? $normalized['nw per box'] ?? null;
+                $gwPerBox   = $normalized['gw_per_box'] ?? $normalized['gw per box'] ?? null;
+                $woodPerPcs = $normalized['wood_consumed_per_pcs'] ?? $normalized['wood consumed per pcs'] ?? null;
+                $m3Carton   = $normalized['m3_per_carton'] ?? $normalized['m3 per carton'] ?? null;
+
+                // 1) master item
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
-                        'name'                   => $namaProduk,
-                        'category_id'            => $category->id,
-                        'unit_id'                => $unit->id,
-                        'hs_code'                => $hsCode,
-                        'nw_per_box'             => !empty($rowData['nw_per_box']) ? (float) $rowData['nw_per_box'] : null,
-                        'gw_per_box'             => !empty($rowData['gw_per_box']) ? (float) $rowData['gw_per_box'] : null,
-                        'wood_consumed_per_pcs'  => !empty($rowData['wood_consumed_per_pcs']) ? (float) $rowData['wood_consumed_per_pcs'] : null,
-                        'm3_per_carton'          => !empty($rowData['m3_per_carton']) ? (float) $rowData['m3_per_carton'] : null,
+                        'name'                  => $namaProduk,
+                        'category_id'           => $category->id,
+                        'unit_id'               => $unit->id,
+                        'hs_code'               => $hsCode,
+                        'nw_per_box'            => $nwPerBox !== null ? (float) $nwPerBox : null,
+                        'gw_per_box'            => $gwPerBox !== null ? (float) $gwPerBox : null,
+                        'wood_consumed_per_pcs' => $woodPerPcs !== null ? (float) $woodPerPcs : null,
+                        'm3_per_carton'         => $m3Carton !== null ? (float) $m3Carton : null,
                     ]
                 );
 
                 Log::info("ROW #{$index} - ITEM SAVED: ID {$item->id}");
 
-                // 2) stock movement saldo awal
+                // 2) stock movement saldo awal (global)
                 if ($stokAwal > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
                         ->where('notes', 'LIKE', '%Saldo Awal Produk Jadi%')
@@ -151,9 +169,9 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     $skippedRows[] = [
                         'row_number' => $index + 2,
                         'item_name'  => $namaProduk,
-                        'reason'     => 'Kode gudang tidak ditemukan: ' . $gudangCodeRaw,
+                        'reason'     => 'Kode gudang tidak ditemukan: ' . $gudangRaw,
                     ];
-                    Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangCodeRaw}");
+                    Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangRaw}");
                 } else {
                     Stock::updateOrCreate(
                         [
@@ -184,7 +202,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             Log::warning('Baris Produk Jadi yang ditolak:', $skippedRows);
         }
 
-        Log::info("========== IMPORT PRODUK JADI SELESAI ==========");
+        Log::info('========== IMPORT PRODUK JADI SELESAI ==========');
         Log::info("Berhasil: {$processedRows}, Ditolak: " . count($skippedRows));
     }
 

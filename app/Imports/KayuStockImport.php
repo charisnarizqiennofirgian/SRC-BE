@@ -39,9 +39,11 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $userId        = Auth::id();
         $skippedRows   = [];
         $processedRows = 0;
+
+        Log::info('=== MULAI IMPORT KAYU RST ===');
+        Log::info('Total rows: '.$rows->count());
 
         foreach ($rows as $index => $row) {
             // wajib: nama_dasar, tebal_mm, stok_awal, gudang
@@ -61,7 +63,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             $namaDasar  = trim($row['nama_dasar']);
             $kodeBarang = trim($row['kode_barang'] ?? '');
 
-            // satuan dari Excel (mis: Pieces, M, Lembar, dll)
+            // satuan dari Excel
             $satuanName = trim($row['satuan'] ?? '');
             $unit = $satuanName
                 ? Unit::firstOrCreate(
@@ -70,7 +72,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                   )
                 : $this->defaultUnit;
 
-            // gudang: normalisasi ke uppercase biar SANWIL / sanwil / Sanwil tetap ketemu
+            // gudang → uppercase
             $gudangCodeRaw = trim($row['gudang']);
             $gudangCode    = strtoupper($gudangCodeRaw);
 
@@ -96,7 +98,9 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             ];
 
             try {
-                // 1. ITEM Kayu RST (tanpa set kolom stock lagi, biar stok per gudang yang pegang)
+                Log::info("ROW #{$index} - ITEM: {$uniqueName}");
+
+                // 1. ITEM Kayu RST
                 $item = Item::updateOrCreate(
                     ['name' => $uniqueName],
                     [
@@ -110,7 +114,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     ]
                 );
 
-                // 2. STOCK MOVEMENT saldo awal (opsional, kalau mau tracking histori)
+                // 2. STOCK MOVEMENT saldo awal
                 if ($stokAwal > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
                         ->where('notes', 'LIKE', '%Saldo Awal (Kayu RST)%')
@@ -131,15 +135,16 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     }
                 }
 
-                // 3. STOK PER GUDANG (pakai kode gudang uppercase)
+                // 3. STOK PER GUDANG
                 $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
 
                 if (!$warehouse) {
                     $skippedRows[] = [
                         'row_number' => $index + 2,
                         'item_name'  => $uniqueName,
-                        'reason'     => 'Kode gudang tidak ditemukan: ' . $gudangCodeRaw,
+                        'reason'     => 'Kode gudang tidak ditemukan: '.$gudangCodeRaw,
                     ];
+                    Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangCodeRaw}");
                 } else {
                     Stock::updateOrCreate(
                         [
@@ -150,6 +155,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                             'quantity' => $stokAwal,
                         ]
                     );
+                    Log::info("ROW #{$index} - STOCK GUDANG OK (WH ID {$warehouse->id})");
                 }
 
                 $processedRows++;
@@ -157,9 +163,9 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 $skippedRows[] = [
                     'row_number' => $index + 2,
                     'item_name'  => $uniqueName,
-                    'reason'     => 'Error sistem: ' . $e->getMessage(),
+                    'reason'     => 'Error sistem: '.$e->getMessage(),
                 ];
-                Log::error("Error processing row {$index} untuk kayu {$uniqueName}: " . $e->getMessage());
+                Log::error("Error processing row {$index} untuk kayu {$uniqueName}: ".$e->getMessage());
             }
         }
 
@@ -167,7 +173,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             Log::warning('Baris Excel Kayu RST yang ditolak:', $skippedRows);
         }
 
-        Log::info("Import Kayu RST selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
+        Log::info("Import Kayu RST selesai. Berhasil: {$processedRows} baris. Ditolak: ".count($skippedRows).' baris.');
     }
 
     public function getCsvSettings(): array

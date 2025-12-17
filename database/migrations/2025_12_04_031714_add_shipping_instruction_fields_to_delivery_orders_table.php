@@ -15,7 +15,9 @@ return new class extends Migration
             // 3 Kolom Baru untuk Shipping Instruction
             $table->text('forwarder_name')->nullable()->after('notes'); // Nama & Alamat Forwarder (Messrs)
             $table->string('peb_number', 100)->nullable()->after('bl_number'); // Nomor PEB
-            $table->string('container_type', 50)->nullable()->after('container_number'); // Tipe Container (20ft, 40HC, dll)
+
+            // hilangkan after('container_number') karena kolom itu belum tentu ada
+            $table->string('container_type', 50)->nullable(); // Tipe Container (20ft, 40HC, dll)
         });
     }
 

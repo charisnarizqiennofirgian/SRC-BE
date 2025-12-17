@@ -8,6 +8,7 @@ use App\Models\SawmillProductionLog;
 use App\Models\SawmillProductionRst;
 use App\Models\Stock;
 use App\Models\Item;
+use App\Models\Inventory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +22,10 @@ class SawmillProductionController extends Controller
             'warehouse_from_id' => ['required', 'exists:warehouses,id'],
             'warehouse_to_id' => ['required', 'exists:warehouses,id'],
             'notes' => ['nullable', 'string'],
+
+            // identitas PO & produk akhir (boleh nullable di awal, tapi flow PM: sebaiknya wajib)
+            'ref_po_id' => ['nullable', 'string', 'max:255'],
+            'ref_product_id' => ['nullable', 'integer'],
 
             'logs' => ['required', 'array', 'min:1'],
             'logs.*.item_log_id' => ['required', 'exists:items,id'],
@@ -40,11 +45,13 @@ class SawmillProductionController extends Controller
             $documentNumber = 'SW-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             $production = SawmillProduction::create([
-                'document_number' => $documentNumber,
-                'date' => $data['date'],
+                'document_number'   => $documentNumber,
+                'date'              => $data['date'],
                 'warehouse_from_id' => $data['warehouse_from_id'],
-                'warehouse_to_id' => $data['warehouse_to_id'],
-                'notes' => $data['notes'] ?? null,
+                'warehouse_to_id'   => $data['warehouse_to_id'],
+                'notes'             => $data['notes'] ?? null,
+                'ref_po_id'         => $data['ref_po_id'] ?? null,       // simpan di header
+                'ref_product_id'    => $data['ref_product_id'] ?? null,
             ]);
 
             // Kurangi stok LOG di gudang asal + simpan volume_log_m3
@@ -67,19 +74,19 @@ class SawmillProductionController extends Controller
                 }
 
                 // ambil volume per batang dari master item
-                $itemLog = Item::find($log['item_log_id']);
-                $volumePerPcs = $itemLog?->volume_m3 ?? 0;
+                $itemLog       = Item::find($log['item_log_id']);
+                $volumePerPcs  = $itemLog?->volume_m3 ?? 0;
                 $volumeLogTotal = $log['qty_log_pcs'] * $volumePerPcs;
 
                 SawmillProductionLog::create([
                     'sawmill_production_id' => $production->id,
-                    'item_log_id' => $log['item_log_id'],
-                    'qty_log_pcs' => $log['qty_log_pcs'],
-                    'volume_log_m3' => $volumeLogTotal,
+                    'item_log_id'           => $log['item_log_id'],
+                    'qty_log_pcs'           => $log['qty_log_pcs'],
+                    'volume_log_m3'         => $volumeLogTotal,
                 ]);
             }
 
-            // Tambah stok RST di gudang tujuan
+            // Tambah stok RST di gudang tujuan + catat ke tabel inventories (tracking PO & produk)
             foreach ($data['rsts'] as $rst) {
                 $stock = Stock::where('item_id', $rst['item_rst_id'])
                     ->where('warehouse_id', $data['warehouse_to_id'])
@@ -90,36 +97,58 @@ class SawmillProductionController extends Controller
                     $stock->increment('quantity', $rst['qty_rst_pcs']);
                 } else {
                     Stock::create([
-                        'item_id' => $rst['item_rst_id'],
+                        'item_id'      => $rst['item_rst_id'],
                         'warehouse_id' => $data['warehouse_to_id'],
-                        'quantity' => $rst['qty_rst_pcs'],
+                        'quantity'     => $rst['qty_rst_pcs'],
                     ]);
                 }
 
                 SawmillProductionRst::create([
                     'sawmill_production_id' => $production->id,
-                    'item_rst_id' => $rst['item_rst_id'],
-                    'qty_rst_pcs' => $rst['qty_rst_pcs'],
-                    'volume_rst_m3' => $rst['volume_rst_m3'],
+                    'item_rst_id'           => $rst['item_rst_id'],
+                    'qty_rst_pcs'           => $rst['qty_rst_pcs'],
+                    'volume_rst_m3'         => $rst['volume_rst_m3'],
                 ]);
+
+                // === INVENTORY PER GUDANG PER PO / PRODUK ===
+                // Satu baris per kombinasi: gudang tujuan + item RST + ref_po_id + ref_product_id
+                $inventory = Inventory::where('warehouse_id', $data['warehouse_to_id'])
+                    ->where('item_id', $rst['item_rst_id'])
+                    ->where('ref_po_id', $data['ref_po_id'] ?? null)
+                    ->where('ref_product_id', $data['ref_product_id'] ?? null)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($inventory) {
+                    $inventory->qty += $rst['qty_rst_pcs']; // di sini pakai pcs; kalau mau pakai m3 tinggal ganti
+                    $inventory->save();
+                } else {
+                    Inventory::create([
+                        'warehouse_id'   => $data['warehouse_to_id'],
+                        'item_id'        => $rst['item_rst_id'],
+                        'qty'            => $rst['qty_rst_pcs'],
+                        'ref_po_id'      => $data['ref_po_id'] ?? null,
+                        'ref_product_id' => $data['ref_product_id'] ?? null,
+                    ]);
+                }
             }
 
-            // === HITUNG TOTAL & RENDEMEN (TAMBAHAN BARU) ===
-            $totalLogM3 = $production->logs()->sum('volume_log_m3');
-            $totalRstM3 = $production->rsts()->sum('volume_rst_m3');
+            // === HITUNG TOTAL & RENDEMEN ===
+            $totalLogM3   = $production->logs()->sum('volume_log_m3');
+            $totalRstM3   = $production->rsts()->sum('volume_rst_m3');
             $yieldPercent = $totalLogM3 > 0
                 ? ($totalRstM3 / $totalLogM3) * 100
                 : 0;
 
             $production->update([
-                'total_log_m3' => $totalLogM3,
-                'total_rst_m3' => $totalRstM3,
-                'yield_percent' => $yieldPercent,
+                'total_log_m3'   => $totalLogM3,
+                'total_rst_m3'   => $totalRstM3,
+                'yield_percent'  => $yieldPercent,
             ]);
 
             return response()->json([
                 'success' => true,
-                'data' => $production->load('logs', 'rsts'),
+                'data'    => $production->load('logs', 'rsts'),
             ], 201);
         });
     }
