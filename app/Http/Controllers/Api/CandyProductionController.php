@@ -15,95 +15,91 @@ class CandyProductionController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'               => ['required', 'date'],
-            'notes'              => ['nullable', 'string'],
-            'source_inventory_id'=> ['required', 'exists:inventories,id'],
-            'qty_pcs'            => ['required', 'numeric', 'min:0.0001'],
-            'qty_m3'             => ['required', 'numeric', 'min:0.0001'],
+            'date'                => ['required', 'date'],
+            'notes'               => ['nullable', 'string'],
+            'source_inventory_id' => ['required', 'integer', 'exists:inventories,id'],
+            'target_item_id'      => ['required', 'integer', 'exists:items,id'],
+            'qty'                 => ['required', 'integer', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
-            // 1. Ambil inventory sumber (Gudang Sanwil)
+            // 1. Ambil inventory sumber (Gudang Sanwil, item basah)
             $sourceInv = Inventory::lockForUpdate()->findOrFail($data['source_inventory_id']);
 
-            if ($data['qty_pcs'] > $sourceInv->qty_pcs || $data['qty_m3'] > $sourceInv->qty_m3) {
+            if ($data['qty'] > $sourceInv->qty) {
                 throw ValidationException::withMessages([
-                    'qty_pcs' => ['Qty pcs / m³ melebihi stok tersedia di Gudang Sanwil.'],
+                    'qty' => ['Qty melebihi stok tersedia di Gudang Sanwil untuk baris inventory ini.'],
                 ]);
             }
 
-            // cari id gudang Candy
-            $candyWarehouse = Warehouse::where('name', 'Gudang Candy')->first();
+            // 2. Cari gudang Candy
+            $candyWarehouse = Warehouse::where('name', 'like', '%Gudang Candy%')->first();
             if (!$candyWarehouse) {
                 throw ValidationException::withMessages([
                     'warehouse' => ['Gudang Candy tidak ditemukan di master.'],
                 ]);
             }
 
-            $fromWarehouseId = $sourceInv->warehouse_id;    // Sanwil
-            $toWarehouseId   = $candyWarehouse->id;         // Candy
-            $itemId          = $sourceInv->item_id;
+            $fromWarehouseId = $sourceInv->warehouse_id;      // Sanwil
+            $toWarehouseId   = $candyWarehouse->id;           // Candy
+            $sourceItemId    = $sourceInv->item_id;           // item basah
+            $targetItemId    = $data['target_item_id'];       // item kering
 
-            // 2. Kurangi INVENTORY Sanwil
-            $sourceInv->qty_pcs -= $data['qty_pcs'];
-            $sourceInv->qty_m3  -= $data['qty_m3'];
+            // 3. Kurangi INVENTORY Sanwil (item basah)
+            $sourceInv->qty -= $data['qty'];
             $sourceInv->save();
 
-            // 3. Tambah / buat INVENTORY Candy (warisi ref_po_id & ref_product_id)
+            // 4. Tambah / buat INVENTORY Candy (item kering, warisi ref_po_id & ref_product_id)
             $targetInv = Inventory::where('warehouse_id', $toWarehouseId)
-                ->where('item_id', $itemId)
+                ->where('item_id', $targetItemId)
                 ->where('ref_po_id', $sourceInv->ref_po_id)
                 ->where('ref_product_id', $sourceInv->ref_product_id)
                 ->lockForUpdate()
                 ->first();
 
             if ($targetInv) {
-                $targetInv->qty_pcs += $data['qty_pcs'];
-                $targetInv->qty_m3  += $data['qty_m3'];
+                $targetInv->qty += $data['qty'];
                 $targetInv->save();
             } else {
                 $targetInv = Inventory::create([
                     'warehouse_id'   => $toWarehouseId,
-                    'item_id'        => $itemId,
-                    'qty_pcs'        => $data['qty_pcs'],
-                    'qty_m3'         => $data['qty_m3'],
+                    'item_id'        => $targetItemId,
+                    'qty'            => $data['qty'],
                     'ref_po_id'      => $sourceInv->ref_po_id,
                     'ref_product_id' => $sourceInv->ref_product_id,
                 ]);
             }
 
-            // 4. Kurangi STOCK pcs di Gudang Sanwil
+            // 5. Kurangi STOCK pcs di Gudang Sanwil (item basah)
             $fromStock = Stock::where('warehouse_id', $fromWarehouseId)
-                ->where('item_id', $itemId)
+                ->where('item_id', $sourceItemId)
                 ->lockForUpdate()
                 ->first();
 
             if ($fromStock) {
-                if ($fromStock->quantity < $data['qty_pcs']) {
+                if ($fromStock->quantity < $data['qty']) {
                     throw ValidationException::withMessages([
-                        'qty_pcs' => ['Stok pcs di Gudang Sanwil tidak mencukupi.'],
+                        'qty' => ['Stok pcs di Gudang Sanwil tidak mencukupi.'],
                     ]);
                 }
-                $fromStock->decrement('quantity', $data['qty_pcs']);
+                $fromStock->decrement('quantity', $data['qty']);
             }
 
-            // 5. Tambah STOCK pcs di Gudang Candy
+            // 6. Tambah STOCK pcs di Gudang Candy (item kering)
             $toStock = Stock::where('warehouse_id', $toWarehouseId)
-                ->where('item_id', $itemId)
+                ->where('item_id', $targetItemId)
                 ->lockForUpdate()
                 ->first();
 
             if ($toStock) {
-                $toStock->increment('quantity', $data['qty_pcs']);
+                $toStock->increment('quantity', $data['qty']);
             } else {
                 Stock::create([
                     'warehouse_id' => $toWarehouseId,
-                    'item_id'      => $itemId,
-                    'quantity'     => $data['qty_pcs'],
+                    'item_id'      => $targetItemId,
+                    'quantity'     => $data['qty'],
                 ]);
             }
-
-            // (opsional) simpan log dokumen CandyProduction sendiri kalau nanti dibutuhkan
 
             return response()->json([
                 'success' => true,

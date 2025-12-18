@@ -142,6 +142,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
     Route::post('/candy-productions', [CandyProductionController::class, 'store']);
     Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
+    Route::get('/production-orders', [ProductionOrderController::class, 'index']);
+    Route::get('/production-orders/{productionOrder}', [ProductionOrderController::class, 'show']);
     // --- GUDANG ---
     Route::get('/warehouses', [WarehouseController::class, 'index']);
     Route::get('/inventories', [InventoryController::class, 'index']);

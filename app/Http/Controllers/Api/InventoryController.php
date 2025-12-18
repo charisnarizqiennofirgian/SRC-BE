@@ -19,7 +19,7 @@ class InventoryController extends Controller
             ->when($warehouseId, function ($q) use ($warehouseId) {
                 $q->where('warehouse_id', $warehouseId);
             })
-            ->where('qty_pcs', '>', 0); // hanya stok > 0
+            ->where('qty', '>', 0); // hanya stok > 0
 
         if ($search) {
             $query->whereHas('item', function ($q) use ($search) {

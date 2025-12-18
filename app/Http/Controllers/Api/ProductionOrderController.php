@@ -11,13 +11,118 @@ use Illuminate\Support\Facades\DB;
 
 class ProductionOrderController extends Controller
 {
-    public function storeFromSalesOrder(Request $request, SalesOrder $salesOrder)
+    // LIST UNTUK DROPDOWN / GRID
+    public function index(Request $request)
     {
-        // nanti di sini: generate nomor PO, simpan header + detail
+        $query = ProductionOrder::query()
+            ->with(['salesOrder.buyer']) // asumsi relasi sudah ada
+            ->orderByDesc('created_at');
+
+        // ?status=... (kalau mau pakai)
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // ?status_not=completed -> semua yang belum completed
+        if ($request->filled('status_not')) {
+            $query->where('status', '!=', $request->status_not);
+        }
+
+        // ?buyer_id=...
+        if ($request->filled('buyer_id')) {
+            $query->whereHas('salesOrder', function ($q) use ($request) {
+                $q->where('buyer_id', $request->buyer_id);
+            });
+        }
+
+        $productionOrders = $query->get();
+
+        // bentuk data simpel buat dropdown/grid
+        $data = $productionOrders->map(function ($po) {
+            $buyerName = $po->salesOrder?->buyer?->name;
+            $soNumber  = $po->salesOrder?->so_number;
+
+            return [
+                'id'            => $po->id,
+                'po_number'     => $po->po_number,
+                'label'         => trim(sprintf(
+                    '%s - %s - %s',
+                    $po->po_number,
+                    $buyerName ?: '-',
+                    $soNumber ?: '-'
+                ), ' -'),
+                'status'        => $po->status,
+                'sales_order_id'=> $po->sales_order_id,
+            ];
+        });
+
         return response()->json([
             'success' => true,
-            'message' => 'Stub endpoint – siap diisi logic.',
-            'sales_order_id' => $salesOrder->id,
+            'data'    => $data,
         ]);
+    }
+
+    // DETAIL UNTUK CONTEKAN DI SAWMILL
+    public function show(ProductionOrder $productionOrder)
+    {
+        $productionOrder->load([
+            'salesOrder.buyer',
+            'details.item',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'id'         => $productionOrder->id,
+                'po_number'  => $productionOrder->po_number,
+                'status'     => $productionOrder->status,
+                'sales_order_id' => $productionOrder->sales_order_id,
+                'sales_order' => [
+                    'so_number'  => $productionOrder->salesOrder?->so_number,
+                    'buyer_name' => $productionOrder->salesOrder?->buyer?->name,
+                ],
+                // ini yang dipakai untuk teks contekan
+                'targets' => $productionOrder->details->map(function ($d) {
+                    return [
+                        'item_id'     => $d->item_id,
+                        'code'        => $d->item?->code,
+                        'name'        => $d->item?->name,
+                        'qty_planned' => $d->qty_planned,
+                    ];
+                })->values(),
+            ],
+        ]);
+    }
+
+    // BUAT DARI SALES ORDER
+    public function storeFromSalesOrder(Request $request, SalesOrder $salesOrder)
+    {
+        return DB::transaction(function () use ($request, $salesOrder) {
+            $poNumber = 'PO-' . $salesOrder->id . '-' . now()->format('YmdHis');
+
+            $productionOrder = ProductionOrder::create([
+                'po_number'      => $poNumber,
+                'sales_order_id' => $salesOrder->id,
+                'status'         => 'draft',
+                'notes'          => $request->input('notes'),
+                'created_by'     => $request->user()->id,
+            ]);
+
+            foreach ($salesOrder->details as $detail) {
+                ProductionOrderDetail::create([
+                    'production_order_id'   => $productionOrder->id,
+                    'sales_order_detail_id' => $detail->id,
+                    'item_id'               => $detail->item_id,
+                    'qty_planned'           => $detail->quantity,
+                    'qty_produced'          => 0,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Production Order berhasil dibuat dari Sales Order.',
+                'data'    => $productionOrder->load('details'),
+            ]);
+        });
     }
 }
