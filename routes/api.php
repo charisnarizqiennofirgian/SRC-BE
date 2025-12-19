@@ -25,6 +25,7 @@ use App\Http\Controllers\Api\SawmillProductionController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\CandyProductionController;
 use App\Http\Controllers\Api\ProductionOrderController;
+use App\Http\Controllers\Api\PembahananController;
 
 /*
 |--------------------------------------------------------------------------
@@ -144,6 +145,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
     Route::get('/production-orders', [ProductionOrderController::class, 'index']);
     Route::get('/production-orders/{productionOrder}', [ProductionOrderController::class, 'show']);
+    
+    // --- PROSES PEMBAHANAN ---
+    Route::post('/pembahanan', [PembahananController::class, 'store']);
+    Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
+    Route::get('/produksi/pembahanan/source-inventories', [PembahananController::class, 'sourceInventories']);
+
     // --- GUDANG ---
     Route::get('/warehouses', [WarehouseController::class, 'index']);
     Route::get('/inventories', [InventoryController::class, 'index']);

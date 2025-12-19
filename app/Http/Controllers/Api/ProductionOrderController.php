@@ -15,15 +15,18 @@ class ProductionOrderController extends Controller
     public function index(Request $request)
     {
         $query = ProductionOrder::query()
-            ->with(['salesOrder.buyer']) // asumsi relasi sudah ada
+            ->with([
+                'salesOrder.buyer',
+                'details.item', // untuk ambil nama produk utama
+            ])
             ->orderByDesc('created_at');
 
-        // ?status=... (kalau mau pakai)
+        // ?status=...
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // ?status_not=completed -> semua yang belum completed
+        // ?status_not=completed
         if ($request->filled('status_not')) {
             $query->where('status', '!=', $request->status_not);
         }
@@ -37,22 +40,27 @@ class ProductionOrderController extends Controller
 
         $productionOrders = $query->get();
 
-        // bentuk data simpel buat dropdown/grid
         $data = $productionOrders->map(function ($po) {
             $buyerName = $po->salesOrder?->buyer?->name;
             $soNumber  = $po->salesOrder?->so_number;
 
+            // ambil satu produk utama dari detail PO (kalau ada)
+            $mainTarget = $po->details->first();
+            $productName = $mainTarget?->item?->name ?? null;
+
             return [
-                'id'            => $po->id,
-                'po_number'     => $po->po_number,
-                'label'         => trim(sprintf(
+                'id'             => $po->id,
+                'po_number'      => $po->po_number,
+                'label'          => trim(sprintf(
                     '%s - %s - %s',
                     $po->po_number,
                     $buyerName ?: '-',
                     $soNumber ?: '-'
                 ), ' -'),
-                'status'        => $po->status,
-                'sales_order_id'=> $po->sales_order_id,
+                'status'         => $po->status,
+                'sales_order_id' => $po->sales_order_id,
+                'buyer_name'     => $buyerName,
+                'product_name'   => $productName,
             ];
         });
 
@@ -73,15 +81,14 @@ class ProductionOrderController extends Controller
         return response()->json([
             'success' => true,
             'data'    => [
-                'id'         => $productionOrder->id,
-                'po_number'  => $productionOrder->po_number,
-                'status'     => $productionOrder->status,
-                'sales_order_id' => $productionOrder->sales_order_id,
-                'sales_order' => [
+                'id'            => $productionOrder->id,
+                'po_number'     => $productionOrder->po_number,
+                'status'        => $productionOrder->status,
+                'sales_order_id'=> $productionOrder->sales_order_id,
+                'sales_order'   => [
                     'so_number'  => $productionOrder->salesOrder?->so_number,
                     'buyer_name' => $productionOrder->salesOrder?->buyer?->name,
                 ],
-                // ini yang dipakai untuk teks contekan
                 'targets' => $productionOrder->details->map(function ($d) {
                     return [
                         'item_id'     => $d->item_id,
