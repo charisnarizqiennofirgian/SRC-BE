@@ -23,15 +23,22 @@ class StockReportController extends Controller
 
             $categoryNames = explode(',', $request->query('categories'));
 
-            $categoryIds = Category::where(function ($query) use ($categoryNames) {
+            $categories = Category::where(function ($query) use ($categoryNames) {
                 foreach ($categoryNames as $name) {
                     $query->orWhereRaw('LOWER(name) = ?', [strtolower(trim($name))]);
                 }
-            })->pluck('id');
+            })->get();
+
+            $categoryIds = $categories->pluck('id');
 
             if ($categoryIds->isEmpty()) {
                 return response()->json(['success' => true, 'data' => []]);
             }
+
+            // cek apakah semua kategori bertipe 'umum'
+            $isUmumOnly = $categories->every(function ($cat) {
+                return $cat->type === 'umum';
+            });
 
             // 2. Query items + relasi stocks
             $query = Item::select(
@@ -78,16 +85,29 @@ class StockReportController extends Controller
             $perPage = min($request->input('per_page', 50), 100);
             $items   = $query->paginate($perPage);
 
-            // 6. Hitung total stok (dari tabel stocks) + kubikasi
-            $items->getCollection()->transform(function ($item) {
-                // total stok dari relasi stocks
-                $totalFromStocks = ($item->stocks ?? collect())->sum(function ($s) {
+            $warehouseId = $request->input('warehouse_id'); // bisa null
+
+            // 6. Hitung total stok + kubikasi
+            $collection = $items->getCollection()->transform(function ($item) use ($warehouseId, $isUmumOnly) {
+                $stocks = $item->stocks ?? collect();
+
+                if ($warehouseId) {
+                    $stocks = $stocks->where('warehouse_id', (int) $warehouseId);
+                }
+
+                $totalFromStocks = $stocks->sum(function ($s) {
                     return (float) ($s->quantity ?? 0);
                 });
 
+                // LOGIC BARU:
+                // kalau kategori hanya 'umum' dan tidak ada stok per gudang,
+                // pakai kolom items.stock sebagai total stok
+                if ($isUmumOnly && $totalFromStocks == 0) {
+                    $totalFromStocks = (float) ($item->stock ?? 0);
+                }
+
                 $item->total_stock_from_stocks = $totalFromStocks;
 
-                // kubikasi (kalau ada m3_per_pcs di specifications)
                 $m3PerPcs = 0;
                 if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
                     $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
@@ -97,6 +117,15 @@ class StockReportController extends Controller
 
                 return $item;
             });
+
+            // 7. Jika filter gudang aktif, sembunyikan item dengan stok 0 di gudang tsb
+            if ($warehouseId) {
+                $collection = $collection->filter(function ($item) {
+                    return ($item->total_stock_from_stocks ?? 0) > 0;
+                })->values();
+
+                $items->setCollection($collection);
+            }
 
             return response()->json([
                 'success' => true,

@@ -14,6 +14,7 @@ class KomponenTemplateExport implements FromArray, WithHeadings
             'nama',
             'kategori',
             'satuan',
+            'gudang',
             'p',
             'l',
             't',
@@ -29,10 +30,11 @@ class KomponenTemplateExport implements FromArray, WithHeadings
                 'Komponen Contoh',
                 'Komponen',
                 'PCS',
-                100,   // p (mm)
-                50,    // l (mm)
-                20,    // t (mm)
-                500,   // stok_awal
+                'MESIN', // gudang default
+                100,     // p (mm)
+                50,      // l (mm)
+                20,      // t (mm)
+                500,     // stok_awal
             ],
         ];
     }

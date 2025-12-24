@@ -646,4 +646,85 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
+
+    /* ================== BOM PRODUK ================== */
+
+    public function downloadTemplateBom()
+    {
+        try {
+            return Excel::download(
+                new \App\Exports\BomTemplateExport,
+                'template_bom_produk.xlsx'
+            );
+        } catch (\Exception $e) {
+            Log::error('Gagal download template BOM: '.$e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mendownload template BOM.'
+            ], 500);
+        }
+    }
+
+    public function uploadBom(Request $request)
+    {
+        if (!$request->hasFile('file')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan. Pastikan field name adalah "file".',
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'file' => [
+                'required',
+                'file',
+                'mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'max:5120'
+            ]
+        ]);
+
+        if ($validator->fails()) {
+            Log::warning('Validasi file BOM gagal:', [
+                'errors' => $validator->errors()->toArray(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi file gagal.',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            Excel::import(new \App\Imports\ProductBomImport, $request->file('file'));
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Upload BOM berhasil diproses.'
+            ], 201);
+        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+            DB::rollBack();
+            $failures = $e->failures();
+            Log::error('Gagal validasi Excel BOM:', ['failures' => $failures]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Data di Excel tidak valid.',
+                'errors'  => $failures,
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Gagal upload BOM: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan internal saat memproses file.',
+            ], 500);
+        }
+    }
 }

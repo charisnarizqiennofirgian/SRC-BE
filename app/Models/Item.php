@@ -50,4 +50,16 @@ class Item extends Model
     {
         return $this->hasMany(Stock::class);
     }
+
+    // 🔹 BOM: item ini sebagai parent (Finished Good) punya banyak child komponen
+    public function bomComponents()
+    {
+        return $this->hasMany(ProductBom::class, 'parent_item_id');
+    }
+
+    // 🔹 BOM: item ini sebagai child (komponen) bisa dipakai banyak parent
+    public function bomParents()
+    {
+        return $this->hasMany(ProductBom::class, 'child_item_id');
+    }
 }

@@ -26,6 +26,9 @@ use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\CandyProductionController;
 use App\Http\Controllers\Api\ProductionOrderController;
 use App\Http\Controllers\Api\PembahananController;
+use App\Http\Controllers\Api\MouldingController;
+use App\Http\Controllers\Api\ProductBomController;
+use App\Http\Controllers\Api\OperatorMesinController;
 
 /*
 |--------------------------------------------------------------------------
@@ -106,6 +109,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/stock-adjustments/template-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'downloadTemplateSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
+    
+    // BOM Produk
+    Route::get('/stock-adjustments/template-bom', [StockAdjustmentController::class, 'downloadTemplateBom']);
+    Route::post('/stock-adjustments/upload-bom', [StockAdjustmentController::class, 'uploadBom']);
 
     Route::prefix('stock-adjustments')->group(function () {
         // sudah ada:
@@ -144,12 +151,31 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/candy-productions', [CandyProductionController::class, 'store']);
     Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
     Route::get('/production-orders', [ProductionOrderController::class, 'index']);
+    Route::get('/production-orders/simple', [ProductionOrderController::class, 'simpleList']); // untuk dropdown
     Route::get('/production-orders/{productionOrder}', [ProductionOrderController::class, 'show']);
-    
+    // Menambahkan route untuk import product BOM
+    Route::post('/product-boms/import', [ProductBomController::class, 'import']);
+
+    // PRODUCTION BOM
+    Route::prefix('production')->group(function () {
+        Route::get('/bom', [ProductBomController::class, 'index']);
+        Route::post('/bom/import', [ProductBomController::class, 'import']);
+    });
+
+
     // --- PROSES PEMBAHANAN ---
     Route::post('/pembahanan', [PembahananController::class, 'store']);
     Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
     Route::get('/produksi/pembahanan/source-inventories', [PembahananController::class, 'sourceInventories']);
+
+    // --- PROSES MOULDING ---
+    Route::get('produksi/moulding/source-inventories', [MouldingController::class, 'sourceInventories']);
+    Route::post('produksi/moulding', [MouldingController::class, 'store']);
+
+    // --- OPERATOR MESIN ---
+    Route::post('/operator-mesin/produce', [OperatorMesinController::class, 'produce']);
+    Route::post('/operator-mesin/recipe', [OperatorMesinController::class, 'storeRecipe']);
+    Route::get('/operator-mesin/po/{id}', [OperatorMesinController::class, 'showByPo']);
 
     // --- GUDANG ---
     Route::get('/warehouses', [WarehouseController::class, 'index']);

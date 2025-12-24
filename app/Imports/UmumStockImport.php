@@ -17,7 +17,6 @@ class UmumStockImport implements ToModel, WithHeadingRow, WithValidation
 
     public function model(array $row)
     {
-        // kategori
         $category = Category::firstOrCreate(
             ['name' => $row['kategori']],
             [
@@ -27,7 +26,6 @@ class UmumStockImport implements ToModel, WithHeadingRow, WithValidation
             ]
         );
 
-        // satuan
         $unit = Unit::firstOrCreate(
             ['name' => $row['satuan']],
             [
@@ -38,7 +36,6 @@ class UmumStockImport implements ToModel, WithHeadingRow, WithValidation
 
         $stokAwal = (float) ($row['stok_awal'] ?? 0);
 
-        // master item
         $item = Item::firstOrCreate(
             ['code' => $row['kode']],
             [
@@ -50,11 +47,9 @@ class UmumStockImport implements ToModel, WithHeadingRow, WithValidation
             ]
         );
 
-        // isi langsung ke kolom stock (tanpa gudang)
-        if ($stokAwal > 0) {
-            $item->stock = $stokAwal;
-            $item->save();
-        }
+        // stok awal SELALU diset sesuai Excel (boleh 0)
+        $item->stock = $stokAwal;
+        $item->save();
 
         return $item;
     }

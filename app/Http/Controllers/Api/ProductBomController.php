@@ -4,25 +4,25 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Imports\ProductBomImport;
-use App\Models\Item;
 use App\Models\ProductBom;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Facades\Excel;
 
 class ProductBomController extends Controller
 {
-    // Untuk halaman index: list produk yang sudah punya BOM
+    // 🔹 LANGKAH 2: untuk halaman index Vue
     public function index()
     {
-        $rows = ProductBom::selectRaw('parent_item_id as item_id, COUNT(*) as components_count')
+        $rows = ProductBom::selectRaw('parent_item_id, COUNT(*) as components_count')
             ->groupBy('parent_item_id')
-            ->with('parentItem')
+            ->with('parentItem') // pastikan relasi ada di model ProductBom
             ->get()
             ->map(function ($row) {
                 return [
-                    'item_id'          => $row->item_id,
+                    'item_id'          => $row->parent_item_id,
                     'item_name'        => $row->parentItem?->name,
-                    'components_count' => $row->components_count,
+                    'components_count' => (int) $row->components_count,
                 ];
             });
 
@@ -32,32 +32,26 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // Import Excel BOM
+    // 🔹 LANGKAH 4: import Excel BOM
     public function import(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv'],
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
         try {
-            (new ProductBomImport)->import($request->file('file'));
+            Excel::import(new ProductBomImport, $request->file('file'));
 
             return response()->json([
                 'success' => true,
-                'message' => 'Import BOM selesai.',
+                'message' => 'Import BOM berhasil diproses.',
             ]);
         } catch (\Exception $e) {
+            Log::error('Error import BOM: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal import: ' . $e->getMessage(),
+                'message' => 'Terjadi kesalahan saat import BOM: '.$e->getMessage(),
             ], 500);
         }
     }

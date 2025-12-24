@@ -14,6 +14,16 @@ class ProductionOrderController extends Controller
     // LIST UNTUK DROPDOWN / GRID
     public function index(Request $request)
     {
+        // Jika hanya ingin data sederhana untuk dropdown
+        if ($request->has('simple')) {
+            $pos = ProductionOrder::select('id', 'po_number')->latest()->get();
+
+            return response()->json([
+                'success' => true,
+                'data'    => $pos,
+            ]);
+        }
+
         $query = ProductionOrder::query()
             ->with([
                 'salesOrder.buyer',
@@ -67,6 +77,17 @@ class ProductionOrderController extends Controller
         return response()->json([
             'success' => true,
             'data'    => $data,
+        ]);
+    }
+
+    // Fungsi baru untuk mendapatkan data sederhana PO (untuk dropdown)
+    public function simpleList()
+    {
+        $pos = ProductionOrder::select('id', 'po_number')->latest()->get();
+
+        return response()->json([
+            'success' => true,
+            'data'    => $pos,
         ]);
     }
 
