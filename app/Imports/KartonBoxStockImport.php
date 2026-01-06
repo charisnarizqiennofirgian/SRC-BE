@@ -27,12 +27,13 @@ class KartonBoxStockImport implements ToModel, WithHeadingRow, WithValidation
         );
 
         $unit = Unit::firstOrCreate(
-            ['name' => $row['satuan']],
-            [
-                'symbol'      => $row['satuan'],
-                'description' => 'Satuan untuk ' . $row['satuan'],
-            ]
-        );
+    ['name' => $row['satuan']],
+    [
+        'short_name'  => $row['satuan'],          // misal: Pieces → Pcs nanti bisa diubah
+        'symbol'      => $row['satuan'],
+        'description' => 'Satuan untuk ' . $row['satuan'],
+    ]
+);
 
         $p = (float) ($row['p'] ?? 0);
         $l = (float) ($row['l'] ?? 0);

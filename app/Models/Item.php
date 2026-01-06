@@ -29,6 +29,8 @@ class Item extends Model
         'kualitas',
         'bentuk',
         'volume_m3',
+        // field baru untuk jalur produksi
+        'production_route',
     ];
 
     protected $casts = [
@@ -45,10 +47,16 @@ class Item extends Model
         return $this->belongsTo(Unit::class);
     }
 
-    // 🔹 relasi ke tabel stocks (saldo per gudang)
+    // 🔹 relasi ke tabel stocks (saldo per gudang) - LOGIC LAMA, TETAP ADA
     public function stocks()
     {
         return $this->hasMany(Stock::class);
+    }
+
+    // 🔹 relasi ke tabel inventories (stok per gudang) - BARU untuk Assembling
+    public function inventories()
+    {
+        return $this->hasMany(Inventory::class, 'item_id');
     }
 
     // 🔹 BOM: item ini sebagai parent (Finished Good) punya banyak child komponen

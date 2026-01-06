@@ -88,35 +88,34 @@ class StockReportController extends Controller
             $warehouseId = $request->input('warehouse_id'); // bisa null
 
             // 6. Hitung total stok + kubikasi
-            $collection = $items->getCollection()->transform(function ($item) use ($warehouseId, $isUmumOnly) {
-                $stocks = $item->stocks ?? collect();
+$collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {
+    $stocks = $item->stocks ?? collect();
 
-                if ($warehouseId) {
-                    $stocks = $stocks->where('warehouse_id', (int) $warehouseId);
-                }
+    if ($warehouseId) {
+        $stocks = $stocks->where('warehouse_id', (int) $warehouseId);
+    }
 
-                $totalFromStocks = $stocks->sum(function ($s) {
-                    return (float) ($s->quantity ?? 0);
-                });
+    $totalFromStocks = $stocks->sum(function ($s) {
+        return (float) ($s->quantity ?? 0);
+    });
 
-                // LOGIC BARU:
-                // kalau kategori hanya 'umum' dan tidak ada stok per gudang,
-                // pakai kolom items.stock sebagai total stok
-                if ($isUmumOnly && $totalFromStocks == 0) {
-                    $totalFromStocks = (float) ($item->stock ?? 0);
-                }
+    // fallback umum untuk semua tipe kategori
+    if ($totalFromStocks == 0) {
+        $totalFromStocks = (float) ($item->stock ?? 0);
+    }
 
-                $item->total_stock_from_stocks = $totalFromStocks;
+    $item->total_stock_from_stocks = $totalFromStocks;
 
-                $m3PerPcs = 0;
-                if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
-                    $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
-                }
+    $m3PerPcs = 0;
+    if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
+        $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
+    }
 
-                $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
+    $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
 
-                return $item;
-            });
+    return $item;
+});
+
 
             // 7. Jika filter gudang aktif, sembunyikan item dengan stok 0 di gudang tsb
             if ($warehouseId) {

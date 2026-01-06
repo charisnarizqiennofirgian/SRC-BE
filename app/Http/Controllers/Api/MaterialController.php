@@ -59,11 +59,17 @@ class MaterialController extends Controller
             }
 
             if ($request->query('all')) {
-                $items = Item::with(['category:id,name', 'unit:id,name'])
-                    ->orderBy('name')
-                    ->get();
-                return response()->json(['success' => true, 'data' => $items]);
-            }
+    $items = Item::with(['category:id,name', 'unit:id,name'])
+        ->when($request->filled('category_name'), function ($q) use ($request) {
+            $q->whereHas('category', function ($qq) use ($request) {
+                $qq->where('name', 'like', '%'.$request->category_name.'%');
+            });
+        })
+        ->orderBy('name')
+        ->get();
+
+    return response()->json(['success' => true, 'data' => $items]);
+}
 
             $perPage = min($request->input('per_page', 50), 100);
             $search  = $request->input('search');

@@ -8,19 +8,29 @@ use Illuminate\Http\Request;
 
 class InventoryController extends Controller
 {
-    // List stok per gudang (dipakai Candy: gudang Sanwil)
     public function index(Request $request)
     {
-        $warehouseId = $request->input('warehouse_id'); // wajib untuk Candy
-        $search      = $request->input('search');       // optional
-        $perPage     = min($request->input('per_page', 50), 100);
+        $warehouseId = $request->input('warehouse_id');
+        $categoryId  = $request->input('category_id');
+        $search      = $request->input('search');
+        $perPage     = min($request->input('per_page', 50), 9999);
 
-        $query = Inventory::with(['item:id,code,name', 'warehouse:id,name'])
-            ->when($warehouseId, function ($q) use ($warehouseId) {
-                $q->where('warehouse_id', $warehouseId);
-            })
-            ->where('qty', '>', 0); // hanya stok > 0
+        $query = Inventory::with(['item.category', 'item.unit', 'warehouse'])
+            ->where('qty', '>', 0); // ✅ PAKAI 'qty'
 
+        // Filter by warehouse
+        if ($warehouseId) {
+            $query->where('warehouse_id', $warehouseId);
+        }
+
+        // Filter by category
+        if ($categoryId) {
+            $query->whereHas('item', function ($q) use ($categoryId) {
+                $q->where('category_id', $categoryId);
+            });
+        }
+
+        // Search by item name or code
         if ($search) {
             $query->whereHas('item', function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")

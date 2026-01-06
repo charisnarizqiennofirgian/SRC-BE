@@ -9,7 +9,8 @@ class Inventory extends Model
     protected $fillable = [
         'warehouse_id',
         'item_id',
-        'qty',
+        'qty_pcs',      // jumlah fisik (batang/pcs)
+        'qty_m3',       // kubikasi total
         'ref_po_id',
         'ref_product_id',
     ];

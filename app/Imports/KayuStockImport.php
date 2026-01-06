@@ -111,6 +111,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                         'jenis'          => $jenis,
                         'kualitas'       => $kualitas,
                         'bentuk'         => $bentuk,
+                         'volume_m3'      => $kubikasiPerPcs,
                     ]
                 );
 

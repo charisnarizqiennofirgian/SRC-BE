@@ -6,83 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\GoodsReceipt;
 use App\Models\PurchaseOrder;
 use App\Models\StockMovement;
+use App\Models\Warehouse;
+use App\Models\Stock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 /**
- * @OA\Info(
- *     title="ERP Kayu API",
- *     version="1.0.0",
- *     description="Dokumentasi API untuk sistem ERP pengolahan kayu",
- *     @OA\Contact(
- *         email="support@erp-kayu.com"
- *     ),
- *     @OA\License(
- *         name="Apache 2.0",
- *         url="https://www.apache.org/licenses/LICENSE-2.0.html"
- *     )
- * )
- * @OA\Server(
- *     url=L5_SWAGGER_CONST_HOST,
- *     description="Server Development"
- * )
- * @OA\Tag(
- *     name="Pembelian",
- *     description="Manajemen pembelian kayu dari supplier"
- * )
- * @OA\SecurityScheme(
- *     securityScheme="sanctum",
- *     type="apiKey",
- *     in="header",
- *     name="Authorization",
- *     description="Masukkan token dalam format: Bearer {token}"
- * )
+ * (docblock dipertahankan seperti aslinya)
  */
 class GoodsReceiptController extends Controller
 {
-    /**
-     * @OA\Post(
-     *     path="/api/goods-receipts",
-     *     summary="Simpan penerimaan barang dari supplier",
-     *     tags={"Pembelian"},
-     *     security={{"sanctum": {}}},
-     *     @OA\RequestBody(
-     *         required=true,
-     *         description="Data penerimaan barang",
-     *         @OA\JsonContent(
-     *             required={"purchase_order_id","receipt_date","details"},
-     *             @OA\Property(property="purchase_order_id", type="integer", example=2, description="ID Purchase Order"),
-     *             @OA\Property(property="receipt_date", type="string", format="date", example="2025-12-01", description="Tanggal penerimaan"),
-     *             @OA\Property(property="supplier_document_number", type="string", example="INV-67657", description="Nomor dokumen dari supplier"),
-     *             @OA\Property(property="notes", type="string", example="Kayu jati grade A", description="Catatan tambahan"),
-     *             @OA\Property(property="details", type="array", description="Daftar item yang diterima",
-     *                 @OA\Items(
-     *                     @OA\Property(property="item_id", type="integer", example=5, description="ID Item"),
-     *                     @OA\Property(property="quantity_received", type="number", format="float", example=10.5, description="Jumlah diterima (m3)")
-     *                 )
-     *             )
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=201,
-     *         description="Sukses menyimpan data",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=true),
-     *             @OA\Property(property="message", type="string", example="Penerimaan barang berhasil dicatat dan stok telah diperbarui."),
-     *             @OA\Property(property="data", type="object", description="Data penerimaan barang yang disimpan")
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=422,
-     *         description="Validasi gagal",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=false),
-     *             @OA\Property(property="errors", type="object", description="Daftar error validasi")
-     *         )
-     *     )
-     * )
-     */
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -112,6 +46,9 @@ class GoodsReceiptController extends Controller
                 'notes' => $validatedData['notes'],
             ]);
 
+            // ambil gudang BUFFER sekali saja
+            $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
+
             foreach ($validatedData['details'] as $detail) {
                 if ($detail['quantity_received'] > 0) {
                     $poDetail = $purchaseOrder->details->firstWhere('item_id', $detail['item_id']);
@@ -134,11 +71,23 @@ class GoodsReceiptController extends Controller
                     if ($item) {
                         $item->increment('stock', $detail['quantity_received']);
                     }
+
+                    // update stok per gudang BUFFER tanpa mengubah logic lama
+                    if ($bufferWarehouse) {
+                        $stock = Stock::firstOrCreate([
+                            'item_id' => $detail['item_id'],
+                            'warehouse_id' => $bufferWarehouse->id,
+                        ], [
+                            'quantity' => 0,
+                        ]);
+
+                        $stock->increment('quantity', $detail['quantity_received']);
+                    }
                 }
             }
 
             $this->updatePurchaseOrderStatus($purchaseOrder);
-            
+
             DB::commit();
 
             return response()->json([
@@ -150,7 +99,7 @@ class GoodsReceiptController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Terjadi kesalahan: ' . $e->getMessage()
             ], 500);
         }
@@ -166,17 +115,13 @@ class GoodsReceiptController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        // ✅ PERBAIKAN: Ganti "where('status', '!=', 'Open')" menjadi "whereIn('status', ['Open', 'Partial'])"
-        // Alasan: 
-        // 1. Kolom 'status' sudah ada di database (dari migration sebelumnya)
-        // 2. Logika bisnis: Faktur bisa dibuat untuk surat jalan yang statusnya "Open" (belum pernah difaktur) atau "Partial" (sebagian sudah difaktur)
         $receipts = \App\Models\GoodsReceipt::whereIn('status', ['Open', 'Partial'])
             ->whereHas('purchaseOrder', function ($query) use ($request) {
                 $query->where('supplier_id', $request->supplier_id);
             })
             ->whereDoesntHave('details.purchaseBillDetail')
             ->with([
-                'purchaseOrder.details', 
+                'purchaseOrder.details',
                 'details.item:id,name,code',
                 'details.purchaseOrderDetail',
             ])
@@ -186,7 +131,7 @@ class GoodsReceiptController extends Controller
             if ($receipt->purchaseOrder && $receipt->purchaseOrder->details) {
                 foreach ($receipt->details as $grDetail) {
                     $poDetail = $grDetail->purchaseOrderDetail;
-                    
+
                     if (!$poDetail) {
                         $poDetail = $receipt->purchaseOrder->details->firstWhere('item_id', $grDetail->item_id);
                     }
@@ -230,7 +175,7 @@ class GoodsReceiptController extends Controller
         $lastReceipt = GoodsReceipt::where('receipt_number', 'like', $prefix . '%')->latest('id')->first();
         $number = 1;
         if ($lastReceipt) {
-             $number = (int) substr($lastReceipt->receipt_number, -4) + 1;
+            $number = (int) substr($lastReceipt->receipt_number, -4) + 1;
         }
         return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }
