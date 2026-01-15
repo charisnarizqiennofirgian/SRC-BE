@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\SalesOrder;
 use App\Models\Item;
+use App\Models\Inventory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -17,7 +18,7 @@ class SalesOrderController extends Controller
     {
         try {
             $query = SalesOrder::with([
-                    'buyer:id,name', 
+                    'buyer:id,name',
                     'user:id,name',
                     'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
                     'details.item:id,name'
@@ -64,7 +65,7 @@ class SalesOrderController extends Controller
             'discount' => 'nullable|numeric',
             'tax_ppn' => 'nullable|numeric',
             'grand_total' => 'required|numeric',
-            
+
             'currency' => 'required|string|in:IDR,USD',
             'exchange_rate' => 'required|numeric|min:1',
         ]);
@@ -80,11 +81,11 @@ class SalesOrderController extends Controller
         DB::beginTransaction();
         try {
             $soData = $request->only([
-                'buyer_id', 'so_date', 'customer_po_number', 
+                'buyer_id', 'so_date', 'customer_po_number',
                 'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
                 'currency', 'exchange_rate'
             ]);
-            
+
             $soData['user_id'] = Auth::id();
             $soData['so_number'] = $this->generateSoNumber();
 
@@ -98,9 +99,9 @@ class SalesOrderController extends Controller
                     'item_id' => $item->id,
                     'quantity' => $detail['quantity'],
                     'quantity_shipped' => 0,
-                    'item_name' => $item->name, 
+                    'item_name' => $item->name,
                     'item_unit' => $item->unit->name,
-                    'item_code' => $item->code ?? null,  
+                    'item_code' => $item->code ?? null,
                     'unit_price' => $detail['unit_price'],
                     'discount' => $detail['discount'] ?? 0,
                     'line_total' => $lineTotal,
@@ -109,7 +110,7 @@ class SalesOrderController extends Controller
                     'keterangan' => $detail['keterangan'] ?? null,
                 ]);
             }
-            
+
             DB::commit();
 
             $salesOrder->load(['buyer:id,name', 'user:id,name', 'details.item']);
@@ -138,7 +139,7 @@ class SalesOrderController extends Controller
         try {
             $query = SalesOrder::with(['buyer:id,name', 'user:id,name', 'details' => function($q){
                 $q->whereColumn('quantity', '>', 'quantity_shipped');
-            }])
+            }, 'details.item:id,name,code,stock,unit_id', 'details.item.unit:id,name'])
             ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
             ->where('status', '!=', 'Completed')
             ->where('status', '!=', 'Cancelled')
@@ -149,6 +150,24 @@ class SalesOrderController extends Controller
             ->orderBy('id', 'desc');
 
             $salesOrders = $query->paginate($request->input('per_page', 25));
+
+            // Ambil stok dari Gudang Packing untuk setiap item
+            $packingWarehouseId = 11; // Gudang Packing
+
+            $salesOrders->getCollection()->transform(function ($so) use ($packingWarehouseId) {
+                $so->details->transform(function ($detail) use ($packingWarehouseId) {
+                    // Ambil stok dari tabel inventories di Gudang Packing
+                    $inventory = Inventory::where('item_id', $detail->item_id)
+                        ->where('warehouse_id', $packingWarehouseId)
+                        ->first();
+
+                    // Tambahkan current_stock ke detail
+                    $detail->current_stock = $inventory ? (float) $inventory->qty : 0;
+
+                    return $detail;
+                });
+                return $so;
+            });
 
             return response()->json([
                 'success' => true,
@@ -168,8 +187,8 @@ class SalesOrderController extends Controller
     {
         try {
             $salesOrder = SalesOrder::with([
-                'buyer', 
-                'user', 
+                'buyer',
+                'user',
                 'details' => function($query) {
                     $query->select(
                         'id',
@@ -177,13 +196,13 @@ class SalesOrderController extends Controller
                         'item_id',
                         'item_name',
                         'item_unit',
-                        'item_code',         
+                        'item_code',
                         'quantity',
                         'unit_price',
                         'discount',
                         'line_total',
-                        'delivery_date',  
-                        'keterangan'      
+                        'delivery_date',
+                        'keterangan'
                     );
                 },
                 'details.item:id,name,code'
@@ -224,7 +243,7 @@ class SalesOrderController extends Controller
             'discount' => 'nullable|numeric',
             'tax_ppn' => 'nullable|numeric',
             'grand_total' => 'required|numeric',
-            
+
             'currency' => 'required|string|in:IDR,USD',
             'exchange_rate' => 'required|numeric|min:1',
         ]);
@@ -242,11 +261,11 @@ class SalesOrderController extends Controller
             $salesOrder = SalesOrder::findOrFail($id);
 
             $soData = $request->only([
-                'buyer_id', 'so_date', 'customer_po_number', 
+                'buyer_id', 'so_date', 'customer_po_number',
                 'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
                 'currency', 'exchange_rate'
             ]);
-            
+
             $salesOrder->update($soData);
 
             $salesOrder->details()->delete();
@@ -259,9 +278,9 @@ class SalesOrderController extends Controller
                     'item_id' => $item->id,
                     'quantity' => $detail['quantity'],
                     'quantity_shipped' => 0,
-                    'item_name' => $item->name, 
+                    'item_name' => $item->name,
                     'item_unit' => $item->unit->name,
-                    'item_code' => $item->code ?? null,  
+                    'item_code' => $item->code ?? null,
                     'unit_price' => $detail['unit_price'],
                     'discount' => $detail['discount'] ?? 0,
                     'line_total' => $lineTotal,
@@ -270,7 +289,7 @@ class SalesOrderController extends Controller
                     'keterangan' => $detail['keterangan'] ?? null,
                 ]);
             }
-            
+
             DB::commit();
 
             $salesOrder->load(['buyer:id,name', 'user:id,name', 'details.item']);
@@ -324,7 +343,7 @@ class SalesOrderController extends Controller
                             ->whereMonth('created_at', $month)
                             ->orderBy('id', 'desc')
                             ->first();
-        
+
         $newNumber = 1;
         if ($lastSo) {
             $lastNumberStr = substr($lastSo->so_number, -4);
@@ -332,7 +351,7 @@ class SalesOrderController extends Controller
                 $newNumber = (int)$lastNumberStr + 1;
             }
         }
-        
+
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 }

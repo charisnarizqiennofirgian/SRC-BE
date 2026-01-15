@@ -7,7 +7,7 @@ use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
 use App\Models\Warehouse;
-use App\Models\Stock;
+use App\Models\Inventory; // ✅ GANTI: Stock → Inventory
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -111,7 +111,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             }
 
             // Gudang: normalisasi code ke uppercase
-            $gudangCode    = strtoupper($gudangRaw);
+            $gudangCode = strtoupper($gudangRaw);
 
             try {
                 Log::info("ROW #{$index} - CREATING/UPDATING ITEM: {$namaProduk}");
@@ -162,7 +162,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     }
                 }
 
-                // 3) stok per gudang
+                // ✅ 3) FIX: inventory per gudang (GANTI Stock → Inventory)
                 $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
 
                 if (!$warehouse) {
@@ -173,16 +173,28 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     ];
                     Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangRaw}");
                 } else {
-                    Stock::updateOrCreate(
+                    // ✅ GANTI: Stock → Inventory
+                    // ✅ GANTI: quantity → qty
+                    // ✅ TAMBAH: qty_m3
+
+                    // Hitung qty_m3 kalau ada m3_per_carton
+                    $qtyM3 = 0;
+                    if ($m3Carton !== null && $m3Carton > 0) {
+                        $qtyM3 = (float) $m3Carton * $stokAwal;
+                    }
+
+                    Inventory::updateOrCreate(
                         [
                             'item_id'      => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'quantity' => $stokAwal,
+                            'qty'    => $stokAwal, // ✅ Field: qty (bukan quantity)
+                            'qty_m3' => $qtyM3,     // ✅ Field: qty_m3
                         ]
                     );
-                    Log::info("ROW #{$index} - STOCK PER GUDANG DISIMPAN (WH ID {$warehouse->id})");
+
+                    Log::info("ROW #{$index} - ✅ INVENTORY DISIMPAN: {$stokAwal} pcs (Warehouse ID: {$warehouse->id}, qty_m3: {$qtyM3})");
                 }
 
                 $processedRows++;

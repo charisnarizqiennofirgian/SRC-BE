@@ -50,4 +50,9 @@ class SalesOrder extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function productionOrders()
+    {
+        return $this->hasMany(ProductionOrder::class);
+    }
 }

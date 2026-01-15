@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\SawmillProduction;
 use App\Models\SawmillProductionLog;
 use App\Models\SawmillProductionRst;
-use App\Models\Stock;
 use App\Models\Item;
 use App\Models\Inventory;
+use App\Models\InventoryLog;
+use App\Models\ProductionOrder;
 use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class SawmillProductionController extends Controller
@@ -31,7 +33,6 @@ class SawmillProductionController extends Controller
             'warehouse_to_id' => ['required', 'exists:warehouses,id'],
             'notes' => ['nullable', 'string'],
 
-            // identitas PO & produk akhir (sekarang WAJIB, pakai production_orders.id)
             'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
             'ref_product_id' => ['nullable', 'integer'],
 
@@ -58,30 +59,48 @@ class SawmillProductionController extends Controller
                 'warehouse_from_id' => $data['warehouse_from_id'],
                 'warehouse_to_id'   => $data['warehouse_to_id'],
                 'notes'             => $data['notes'] ?? null,
-                'ref_po_id'         => $data['ref_po_id'],      // wajib ada
+                'ref_po_id'         => $data['ref_po_id'],
                 'ref_product_id'    => $data['ref_product_id'] ?? null,
             ]);
 
-            // Kurangi stok LOG di gudang asal + simpan volume_log_m3
+            // Ambil data PO untuk reference_number
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+
+            // Kurangi stok LOG di gudang asal
             foreach ($data['logs'] as $log) {
-                $stock = Stock::where('item_id', $log['item_log_id'])
+                $inventory = Inventory::where('item_id', $log['item_log_id'])
                     ->where('warehouse_id', $data['warehouse_from_id'])
                     ->lockForUpdate()
                     ->first();
 
-                $currentQty = $stock?->quantity ?? 0;
+                $currentQty = $inventory?->qty ?? 0;
 
                 if ($currentQty < $log['qty_log_pcs']) {
                     throw ValidationException::withMessages([
-                        'logs' => ["Stok log untuk item {$log['item_log_id']} di gudang asal tidak mencukupi."],
+                        'logs' => ["Stok log untuk item {$log['item_log_id']} di gudang asal tidak mencukupi. (Tersedia: {$currentQty})"],
                     ]);
                 }
 
-                if ($stock) {
-                    $stock->decrement('quantity', $log['qty_log_pcs']);
+                if ($inventory) {
+                    $inventory->decrement('qty', $log['qty_log_pcs']);
                 }
 
-                // ambil volume per batang dari master item
+                // Catat ke inventory_logs (OUT dari gudang asal)
+                InventoryLog::create([
+                    'date' => $data['date'],
+                    'time' => now()->toTimeString(),
+                    'item_id' => $log['item_log_id'],
+                    'warehouse_id' => $data['warehouse_from_id'],
+                    'qty' => $log['qty_log_pcs'],
+                    'direction' => 'OUT',
+                    'transaction_type' => 'PRODUCTION',
+                    'reference_type' => 'ProductionOrder',
+                    'reference_id' => $data['ref_po_id'],
+                    'reference_number' => $productionOrder?->po_number ?? $documentNumber,
+                    'notes' => "Bahan log untuk produksi sawmill ({$documentNumber})",
+                    'user_id' => Auth::id(),
+                ]);
+
                 $itemLog        = Item::find($log['item_log_id']);
                 $volumePerPcs   = $itemLog?->volume_m3 ?? 0;
                 $volumeLogTotal = $log['qty_log_pcs'] * $volumePerPcs;
@@ -94,22 +113,39 @@ class SawmillProductionController extends Controller
                 ]);
             }
 
-            // Tambah stok RST di gudang tujuan + catat ke tabel inventories (tracking PO & produk)
+            // Tambah stok RST di gudang tujuan
             foreach ($data['rsts'] as $rst) {
-                $stock = Stock::where('item_id', $rst['item_rst_id'])
+                $inventory = Inventory::where('item_id', $rst['item_rst_id'])
                     ->where('warehouse_id', $data['warehouse_to_id'])
                     ->lockForUpdate()
                     ->first();
 
-                if ($stock) {
-                    $stock->increment('quantity', $rst['qty_rst_pcs']);
+                if ($inventory) {
+                    $inventory->increment('qty', $rst['qty_rst_pcs']);
                 } else {
-                    Stock::create([
+                    Inventory::create([
                         'item_id'      => $rst['item_rst_id'],
                         'warehouse_id' => $data['warehouse_to_id'],
-                        'quantity'     => $rst['qty_rst_pcs'],
+                        'qty'          => $rst['qty_rst_pcs'],
                     ]);
                 }
+
+                // Catat ke inventory_logs (IN ke gudang tujuan)
+                InventoryLog::create([
+                    'date' => $data['date'],
+                    'time' => now()->toTimeString(),
+                    'item_id' => $rst['item_rst_id'],
+                    'warehouse_id' => $data['warehouse_to_id'],
+                    'qty' => $rst['qty_rst_pcs'],
+                    'qty_m3' => $rst['volume_rst_m3'],
+                    'direction' => 'IN',
+                    'transaction_type' => 'PRODUCTION',
+                    'reference_type' => 'ProductionOrder',
+                    'reference_id' => $data['ref_po_id'],
+                    'reference_number' => $productionOrder?->po_number ?? $documentNumber,
+                    'notes' => "Hasil produksi sawmill RST ({$documentNumber})",
+                    'user_id' => Auth::id(),
+                ]);
 
                 SawmillProductionRst::create([
                     'sawmill_production_id' => $production->id,
@@ -117,27 +153,6 @@ class SawmillProductionController extends Controller
                     'qty_rst_pcs'           => $rst['qty_rst_pcs'],
                     'volume_rst_m3'         => $rst['volume_rst_m3'],
                 ]);
-
-                // === INVENTORY PER GUDANG PER PO / PRODUK ===
-                $inventory = Inventory::where('warehouse_id', $data['warehouse_to_id'])
-                    ->where('item_id', $rst['item_rst_id'])
-                    ->where('ref_po_id', $data['ref_po_id'])
-                    ->where('ref_product_id', $data['ref_product_id'] ?? null)
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($inventory) {
-                    $inventory->qty += $rst['qty_rst_pcs']; // pakai pcs
-                    $inventory->save();
-                } else {
-                    Inventory::create([
-                        'warehouse_id'   => $data['warehouse_to_id'],
-                        'item_id'        => $rst['item_rst_id'],
-                        'qty'            => $rst['qty_rst_pcs'],
-                        'ref_po_id'      => $data['ref_po_id'],
-                        'ref_product_id' => $data['ref_product_id'] ?? null,
-                    ]);
-                }
             }
 
             // === HITUNG TOTAL & RENDEMEN ===

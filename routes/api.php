@@ -18,8 +18,8 @@ use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
 use App\Http\Controllers\Api\DeliveryOrderController;
-use App\Http\Controllers\Api\BomController;               
-use App\Http\Controllers\Api\ProductionController;        
+use App\Http\Controllers\Api\BomController;
+use App\Http\Controllers\Api\ProductionController;
 use App\Http\Controllers\Api\WarehouseController;
 use App\Http\Controllers\Api\SawmillProductionController;
 use App\Http\Controllers\Api\InventoryController;
@@ -30,6 +30,13 @@ use App\Http\Controllers\Api\MouldingController;
 use App\Http\Controllers\Api\ProductBomController;
 use App\Http\Controllers\Api\OperatorMesinController;
 use App\Http\Controllers\Api\AssemblingController;
+use App\Http\Controllers\Api\SandingController;
+use App\Http\Controllers\Api\RustikController;
+use App\Http\Controllers\Api\FinishingController;
+use App\Http\Controllers\Api\PackingController;
+use App\Http\Controllers\Api\MaterialUsageController;
+use App\Http\Controllers\Api\InventoryLogController;
+use App\Http\Controllers\Api\ProductionMonitoringController;
 
 /*
 |--------------------------------------------------------------------------
@@ -110,7 +117,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/stock-adjustments/template-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'downloadTemplateSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
     Route::post('/stock-adjustments/upload-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
-    
+
     // BOM Produk
     Route::get('/stock-adjustments/template-bom', [StockAdjustmentController::class, 'downloadTemplateBom']);
     Route::post('/stock-adjustments/upload-bom', [StockAdjustmentController::class, 'uploadBom']);
@@ -119,7 +126,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // 🟣 Karton Box
         Route::get('/template-karton-box', [StockAdjustmentController::class, 'downloadTemplateKartonBox']);
         Route::post('/upload-karton-box', [StockAdjustmentController::class, 'uploadSaldoAwalKartonBox']);
-        
+
         // 🟡 Komponen
         Route::get('/template-komponen', [StockAdjustmentController::class, 'downloadTemplateKomponen']);
         Route::post('/upload-komponen', [StockAdjustmentController::class, 'uploadSaldoAwalKomponen']);
@@ -183,6 +190,52 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/orders', [AssemblingController::class, 'getAvailableOrders']);
         Route::post('/check-material', [AssemblingController::class, 'checkMaterialAvailability']);
         Route::post('/store', [AssemblingController::class, 'store']);
+    });
+
+    // --- PROSES SANDING ---
+    Route::prefix('sanding')->group(function () {
+        Route::get('/available-stock', [SandingController::class, 'getAvailableStock']);
+        Route::post('/process', [SandingController::class, 'process']);
+    });
+
+    // --- PROSES RUSTIK ---
+    Route::prefix('rustik')->group(function () {
+        Route::get('/available-stock', [RustikController::class, 'getAvailableStock']);
+        Route::post('/process', [RustikController::class, 'process']);
+    });
+
+    // --- PROSES FINISHING ---
+    Route::prefix('finishing')->group(function () {
+        Route::get('/available-stock', [FinishingController::class, 'getAvailableStock']);
+        Route::post('/process', [FinishingController::class, 'process']);
+    });
+
+    // --- PROSES PACKING ---
+    Route::prefix('packing')->group(function () {
+        Route::get('/available-stock', [PackingController::class, 'getAvailableStock']);
+        Route::post('/process', [PackingController::class, 'process']);
+    });
+
+    // --- PENGGUNAAN MATERIAL (ASSEMBLING DLL) ---
+    Route::prefix('material-usages')->group(function () {
+        Route::get('/', [MaterialUsageController::class, 'index']);
+        Route::post('/', [MaterialUsageController::class, 'store']);
+        Route::get('/consumables', [MaterialUsageController::class, 'getConsumableItems']);
+        Route::get('/divisions', [MaterialUsageController::class, 'getDivisions']);
+        Route::get('/stock/{itemId}', [MaterialUsageController::class, 'checkStock']);
+    });
+
+    // --- LOG INVENTORY ---
+    Route::prefix('inventory-logs')->group(function () {
+        Route::get('/', [InventoryLogController::class, 'index']);
+        Route::get('/warehouses', [InventoryLogController::class, 'getWarehouses']);
+        Route::get('/transaction-types', [InventoryLogController::class, 'getTransactionTypes']);
+        Route::get('/items', [InventoryLogController::class, 'getItems']);
+    });
+
+    // --- MONITORING PRODUKSI ---
+    Route::prefix('production-monitoring')->group(function () {
+        Route::get('/', [ProductionMonitoringController::class, 'index']);
     });
 
     // --- UTILITAS DASHBOARD ---

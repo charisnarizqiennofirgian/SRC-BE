@@ -10,6 +10,15 @@ class Item extends Model
 {
     use HasFactory, SoftDeletes;
 
+    const TYPE_RAW_MATERIAL  = 'raw_material';
+    const TYPE_CONSUMABLE    = 'consumable';
+    const TYPE_COMPONENT     = 'component';
+    const TYPE_WIP           = 'wip';
+    const TYPE_FINISHED_GOOD = 'finished_good';
+    const TYPE_PACKAGING     = 'packaging';
+    const TYPE_SPAREPART     = 'sparepart';
+    const TYPE_OTHER         = 'other';
+
     protected $fillable = [
         'name',
         'code',
@@ -24,18 +33,54 @@ class Item extends Model
         'wood_consumed_per_pcs',
         'm3_per_carton',
         'hs_code',
-        // field Kayu RST
         'jenis',
         'kualitas',
         'bentuk',
         'volume_m3',
-        // field baru untuk jalur produksi
         'production_route',
     ];
 
     protected $casts = [
         'specifications' => 'array',
     ];
+
+    public static function getTypes(): array
+    {
+        return [
+            self::TYPE_RAW_MATERIAL  => 'Bahan Baku Utama',
+            self::TYPE_CONSUMABLE    => 'Bahan Pendukung (Consumable)',
+            self::TYPE_COMPONENT     => 'Komponen',
+            self::TYPE_WIP           => 'Barang Setengah Jadi (WIP)',
+            self::TYPE_FINISHED_GOOD => 'Produk Jadi',
+            self::TYPE_PACKAGING     => 'Packaging',
+            self::TYPE_SPAREPART     => 'Sparepart',
+            self::TYPE_OTHER         => 'Lainnya',
+        ];
+    }
+
+    public static function getConsumableTypes(): array
+    {
+        return [
+            self::TYPE_CONSUMABLE,
+            self::TYPE_SPAREPART,
+            self::TYPE_PACKAGING,
+        ];
+    }
+
+    public function isConsumable(): bool
+    {
+        return in_array($this->type, self::getConsumableTypes());
+    }
+
+    public function isFinishedGood(): bool
+    {
+        return $this->type === self::TYPE_FINISHED_GOOD;
+    }
+
+    public function isRawMaterial(): bool
+    {
+        return $this->type === self::TYPE_RAW_MATERIAL;
+    }
 
     public function category()
     {
@@ -47,27 +92,48 @@ class Item extends Model
         return $this->belongsTo(Unit::class);
     }
 
-    // 🔹 relasi ke tabel stocks (saldo per gudang) - LOGIC LAMA, TETAP ADA
     public function stocks()
     {
         return $this->hasMany(Stock::class);
     }
 
-    // 🔹 relasi ke tabel inventories (stok per gudang) - BARU untuk Assembling
     public function inventories()
     {
         return $this->hasMany(Inventory::class, 'item_id');
     }
 
-    // 🔹 BOM: item ini sebagai parent (Finished Good) punya banyak child komponen
+    public function inventoryLogs()
+    {
+        return $this->hasMany(InventoryLog::class);
+    }
+
     public function bomComponents()
     {
         return $this->hasMany(ProductBom::class, 'parent_item_id');
     }
 
-    // 🔹 BOM: item ini sebagai child (komponen) bisa dipakai banyak parent
     public function bomParents()
     {
         return $this->hasMany(ProductBom::class, 'child_item_id');
+    }
+
+    public function scopeConsumables($query)
+    {
+        return $query->whereIn('type', self::getConsumableTypes());
+    }
+
+    public function scopeFinishedGoods($query)
+    {
+        return $query->where('type', self::TYPE_FINISHED_GOOD);
+    }
+
+    public function scopeRawMaterials($query)
+    {
+        return $query->where('type', self::TYPE_RAW_MATERIAL);
+    }
+
+    public function scopeByType($query, string $type)
+    {
+        return $query->where('type', $type);
     }
 }

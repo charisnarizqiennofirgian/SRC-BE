@@ -9,6 +9,9 @@ use App\Models\Item;
 use App\Models\StockMovement;
 use App\Models\SalesOrder;
 use App\Models\SalesOrderDetail;
+use App\Models\InventoryLog;
+use App\Models\Warehouse;
+use App\Models\Inventory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -60,21 +63,15 @@ class DeliveryOrderController extends Controller
             $nextNumber = $lastDO ? (intval(substr($lastDO->do_number, -4)) + 1) : 1;
             $doNumber = 'DO/' . date('Y') . '/' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
 
-            // === Validasi barcode, rex, SI & shipment mode
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
-
-                // SI
                 'forwarder_name' => 'nullable|string',
                 'peb_number' => 'nullable|string|max:100',
                 'container_type' => 'nullable|string|max:50',
-
-                // MODE PENGIRIMAN
                 'shipment_mode' => 'nullable|in:SEA,AIR',
             ]);
 
-            // === Upload barcode_image (jika ada)
             $barcodeImagePath = null;
             if ($request->hasFile('barcode_image')) {
                 $barcodeImagePath = $request->file('barcode_image')->store('barcodes', 'public');
@@ -97,10 +94,7 @@ class DeliveryOrderController extends Controller
                 'vehicle_number' => $request->vehicle_number,
                 'notes' => $request->notes,
                 'status' => 'Shipped',
-
-                // ✅ MODE PENGIRIMAN (default SEA kalau tidak dikirim)
                 'shipment_mode' => $request->shipment_mode ?? 'SEA',
-
                 'incoterm' => $request->incoterm,
                 'bl_date' => $request->bl_date,
                 'vessel_name' => $request->vessel_name,
@@ -121,8 +115,6 @@ class DeliveryOrderController extends Controller
                 'applicant_info' => $request->applicant_info,
                 'notify_info' => $request->notify_info,
                 'barcode_image' => $barcodeImagePath,
-
-                // ✅ SI
                 'forwarder_name' => $request->forwarder_name,
                 'peb_number' => $request->peb_number,
                 'container_type' => $request->container_type,
@@ -133,13 +125,22 @@ class DeliveryOrderController extends Controller
                 $details = json_decode($details, true);
             }
 
+            $packingWarehouseId = 11; // Gudang Packing
+
             foreach ($details as $detail) {
                 $item = Item::with('unit')->find($detail['item_id']);
                 if (!$item) {
                     throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
-                if ($item->stock < $detail['quantity_shipped']) {
-                    throw new \Exception("Stock {$item->name} tidak cukup. Tersedia: {$item->stock}, Diminta: {$detail['quantity_shipped']}");
+
+                // Cek stok dari tabel inventories di Gudang Packing
+                $inventory = Inventory::where('item_id', $detail['item_id'])
+                    ->where('warehouse_id', $packingWarehouseId)
+                    ->first();
+                $currentStock = $inventory ? (float) $inventory->qty : 0;
+
+                if ($currentStock < $detail['quantity_shipped']) {
+                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
                 }
 
                 DeliveryOrderDetail::create([
@@ -150,18 +151,37 @@ class DeliveryOrderController extends Controller
                     'item_unit' => $item->unit->name ?? 'Pcs',
                     'quantity_shipped' => $detail['quantity_shipped'],
                     'quantity_boxes' => $detail['quantity_boxes'] ?? null,
-
-                    // ✅ JUMLAH CRATE (hanya terisi kalau AIR)
                     'quantity_crates' => $detail['quantity_crates'] ?? null,
                 ]);
 
+                // Kurangi stok di tabel items
                 $item->decrement('stock', $detail['quantity_shipped']);
+
+                // Kurangi stok di tabel inventories (Gudang Packing)
+                if ($inventory) {
+                    $inventory->decrement('qty', $detail['quantity_shipped']);
+                }
 
                 StockMovement::create([
                     'item_id' => $detail['item_id'],
                     'type' => 'OUT',
                     'quantity' => $detail['quantity_shipped'],
                     'notes' => "Pengiriman barang (DO: {$doNumber})",
+                ]);
+
+                InventoryLog::create([
+                    'date' => $request->delivery_date ?? now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $detail['item_id'],
+                    'warehouse_id' => $packingWarehouseId,
+                    'qty' => $detail['quantity_shipped'],
+                    'direction' => 'OUT',
+                    'transaction_type' => 'SALE',
+                    'reference_type' => 'DeliveryOrder',
+                    'reference_id' => $deliveryOrder->id,
+                    'reference_number' => $doNumber,
+                    'notes' => "Pengiriman ke " . ($request->buyer_name ?? 'Buyer'),
+                    'user_id' => auth()->id(),
                 ]);
 
                 $soDetail = SalesOrderDetail::find($detail['sales_order_detail_id']);
@@ -183,7 +203,6 @@ class DeliveryOrderController extends Controller
                 $salesOrder->save();
             }
 
-            // PATCH: Load ulang untuk path barcode_image dalam bentuk URL
             $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
                 ->find($deliveryOrder->id);
             $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
@@ -210,9 +229,9 @@ class DeliveryOrderController extends Controller
     {
         try {
             $deliveryOrder = DeliveryOrder::with([
-                'salesOrder.buyer', 
-                'buyer', 
-                'user', 
+                'salesOrder.buyer',
+                'buyer',
+                'user',
                 'details.item',
                 'details.salesOrderDetail'
             ])->findOrFail($id);
@@ -248,13 +267,9 @@ class DeliveryOrderController extends Controller
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
                 'rex_certificate_file' => 'nullable|mimes:pdf|max:2048',
-
-                // SI
                 'forwarder_name' => 'nullable|string',
                 'peb_number' => 'nullable|string|max:100',
                 'container_type' => 'nullable|string|max:50',
-
-                // MODE
                 'shipment_mode' => 'nullable|in:SEA,AIR',
             ]);
 
@@ -276,7 +291,6 @@ class DeliveryOrderController extends Controller
                 $validated['rex_certificate_file'] = $rexCertificateFile;
             }
 
-            // ✅ UPDATE DATA UTAMA
             $do->update([
                 'delivery_date' => $request->delivery_date ?? $do->delivery_date,
                 'driver_name' => $request->driver_name ?? $do->driver_name,
@@ -300,8 +314,6 @@ class DeliveryOrderController extends Controller
                 'consignee_info' => $request->consignee_info ?? $do->consignee_info,
                 'applicant_info' => $request->applicant_info ?? $do->applicant_info,
                 'notify_info' => $request->notify_info ?? $do->notify_info,
-
-                // ✅ MODE & SI
                 'shipment_mode' => $request->shipment_mode ?? $do->shipment_mode,
                 'forwarder_name' => $request->forwarder_name ?? $do->forwarder_name,
                 'peb_number' => $request->peb_number ?? $do->peb_number,
@@ -317,7 +329,6 @@ class DeliveryOrderController extends Controller
                 $do->save();
             }
 
-            // RELOAD + path
             $do = DeliveryOrder::find($do->id);
             $do->barcode_image = $do->barcode_image
                 ? asset('storage/' . $do->barcode_image)
@@ -366,17 +377,44 @@ class DeliveryOrderController extends Controller
                 Storage::disk('public')->delete($deliveryOrder->rex_certificate_file);
             }
 
+            $packingWarehouseId = 11; // Gudang Packing
+
             foreach ($deliveryOrder->details as $detail) {
                 $item = Item::find($detail->item_id);
                 if ($item) {
                     $item->increment('stock', $detail->quantity_shipped);
                 }
+
+                // Kembalikan stok di tabel inventories (Gudang Packing)
+                $inventory = Inventory::where('item_id', $detail->item_id)
+                    ->where('warehouse_id', $packingWarehouseId)
+                    ->first();
+                if ($inventory) {
+                    $inventory->increment('qty', $detail->quantity_shipped);
+                }
+
                 StockMovement::create([
                     'item_id' => $detail->item_id,
                     'type' => 'IN',
                     'quantity' => $detail->quantity_shipped,
                     'notes' => "Pembatalan pengiriman (DO: {$deliveryOrder->do_number})",
                 ]);
+
+                InventoryLog::create([
+                    'date' => now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $detail->item_id,
+                    'warehouse_id' => $packingWarehouseId,
+                    'qty' => $detail->quantity_shipped,
+                    'direction' => 'IN',
+                    'transaction_type' => 'ADJUSTMENT',
+                    'reference_type' => 'DeliveryOrder',
+                    'reference_id' => $deliveryOrder->id,
+                    'reference_number' => $deliveryOrder->do_number,
+                    'notes' => "Pembatalan pengiriman (DO: {$deliveryOrder->do_number})",
+                    'user_id' => auth()->id(),
+                ]);
+
                 $soDetail = SalesOrderDetail::find($detail->sales_order_detail_id);
                 if ($soDetail) {
                     $soDetail->decrement('quantity_shipped', $detail->quantity_shipped);

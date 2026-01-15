@@ -9,7 +9,7 @@ use App\Models\ProductBom;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
-class ProductBomController extends Controller
+class BomController extends Controller
 {
     // Untuk halaman index: list produk yang sudah punya BOM
     public function index()

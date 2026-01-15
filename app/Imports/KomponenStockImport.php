@@ -6,7 +6,7 @@ use App\Models\Item;
 use App\Models\Category;
 use App\Models\Unit;
 use App\Models\Warehouse;
-use App\Models\Stock;
+use App\Models\Inventory; // ✅ GANTI: Stock → Inventory
 use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
@@ -104,20 +104,28 @@ class KomponenStockImport implements
                 $item->unit_id        = $unit->id;
                 $item->save();
 
-                // Stok awal: catat ke tabel stocks per gudang
+                // ✅ FIX: Stok awal simpan ke tabel inventories
                 if ($stokAwal > 0) {
-                    $stock = Stock::firstOrCreate(
+                    // Hitung qty_m3
+                    $qtyM3 = $m3PerPcs * $stokAwal;
+
+                    $inventory = Inventory::firstOrCreate(
                         [
                             'item_id'      => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'quantity' => 0,
+                            'qty'    => 0,      // ✅ Field: qty (bukan quantity)
+                            'qty_m3' => 0,
                         ]
                     );
 
-                    $stock->quantity += $stokAwal;
-                    $stock->save();
+                    // ✅ INCREMENT (bukan replace)
+                    $inventory->qty    += $stokAwal;
+                    $inventory->qty_m3 += $qtyM3;
+                    $inventory->save();
+
+                    Log::info("✅ Import Komponen: {$nama} - Stok {$stokAwal} pcs di {$warehouse->name}");
                 }
             } catch (\Throwable $e) {
                 Log::error(

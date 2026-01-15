@@ -3,6 +3,7 @@
 namespace App\Imports;
 
 use App\Models\Item;
+use App\Models\Inventory; // ✅ TAMBAH: untuk sync inventories
 use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
@@ -100,18 +101,18 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             try {
                 Log::info("ROW #{$index} - ITEM: {$uniqueName}");
 
-                // 1. ITEM Kayu RST
+                // ✅ FIX: Pakai 'code' sebagai key untuk cegah duplicate, bukan 'name'
                 $item = Item::updateOrCreate(
-                    ['name' => $uniqueName],
+                    ['code' => $kodeBarang], // ✅ GANTI: was ['name' => $uniqueName]
                     [
-                        'code'           => $kodeBarang,
+                        'name'           => $uniqueName, // ✅ PINDAH KE SINI
                         'category_id'    => $this->categoryKayu->id,
                         'unit_id'        => $unit->id,
                         'specifications' => $specifications,
                         'jenis'          => $jenis,
                         'kualitas'       => $kualitas,
                         'bentuk'         => $bentuk,
-                         'volume_m3'      => $kubikasiPerPcs,
+                        'volume_m3'      => $kubikasiPerPcs,
                     ]
                 );
 
@@ -147,6 +148,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     ];
                     Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangCodeRaw}");
                 } else {
+                    // ✅ Update tabel stocks (logic TIDAK DIUBAH)
                     Stock::updateOrCreate(
                         [
                             'item_id'      => $item->id,
@@ -157,6 +159,20 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                         ]
                     );
                     Log::info("ROW #{$index} - STOCK GUDANG OK (WH ID {$warehouse->id})");
+
+                    // ✅ TAMBAH: Sync ke tabel inventories (saldo awal)
+                    Inventory::updateOrCreate(
+                        [
+                            'item_id'        => $item->id,
+                            'warehouse_id'   => $warehouse->id,
+                            'ref_po_id'      => null, // Saldo awal tidak punya PO
+                            'ref_product_id' => null,
+                        ],
+                        [
+                            'qty' => $stokAwal,
+                        ]
+                    );
+                    Log::info("ROW #{$index} - INVENTORY SALDO AWAL SYNCED: Qty {$stokAwal}");
                 }
 
                 $processedRows++;

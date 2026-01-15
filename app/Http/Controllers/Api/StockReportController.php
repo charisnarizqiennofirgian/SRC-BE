@@ -35,12 +35,7 @@ class StockReportController extends Controller
                 return response()->json(['success' => true, 'data' => []]);
             }
 
-            // cek apakah semua kategori bertipe 'umum'
-            $isUmumOnly = $categories->every(function ($cat) {
-                return $cat->type === 'umum';
-            });
-
-            // 2. Query items + relasi stocks
+            // 2. Query items + relasi inventories (BUKAN stocks)
             $query = Item::select(
                     'items.id',
                     'items.name',
@@ -56,8 +51,8 @@ class StockReportController extends Controller
                 ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'stocks:id,item_id,warehouse_id,quantity',
-                    'stocks.warehouse:id,name,code',
+                    'inventories:id,item_id,warehouse_id,qty', // ✅ GANTI stocks → inventories
+                    'inventories.warehouse:id,name,code',      // ✅ GANTI stocks.warehouse → inventories.warehouse
                 ])
                 ->whereIn('items.category_id', $categoryIds);
 
@@ -85,39 +80,48 @@ class StockReportController extends Controller
             $perPage = min($request->input('per_page', 50), 100);
             $items   = $query->paginate($perPage);
 
-            $warehouseId = $request->input('warehouse_id'); // bisa null
+            $warehouseId = $request->input('warehouse_id');
 
             // 6. Hitung total stok + kubikasi
-$collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {
-    $stocks = $item->stocks ?? collect();
+            $collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {
+                // ✅ Ganti stocks → inventories
+                $allInventories = $item->inventories ?? collect();
+                
+                if ($warehouseId) {
+                    $filteredInventories = $allInventories->filter(function ($inv) use ($warehouseId) {
+                        return (int) $inv->warehouse_id === (int) $warehouseId;
+                    })->values();
+                    
+                    $item->setRelation('inventories', $filteredInventories);
+                    $item->stocks = $filteredInventories; // ✅ Set stocks untuk frontend
+                    $inventories = $filteredInventories;
+                } else {
+                    $item->stocks = $allInventories; // ✅ Set stocks untuk frontend
+                    $inventories = $allInventories;
+                }
 
-    if ($warehouseId) {
-        $stocks = $stocks->where('warehouse_id', (int) $warehouseId);
-    }
+                $totalFromStocks = $inventories->sum(function ($inv) {
+                    return (float) ($inv->qty ?? 0);
+                });
 
-    $totalFromStocks = $stocks->sum(function ($s) {
-        return (float) ($s->quantity ?? 0);
-    });
+                // fallback
+                if ($totalFromStocks == 0) {
+                    $totalFromStocks = (float) ($item->stock ?? 0);
+                }
 
-    // fallback umum untuk semua tipe kategori
-    if ($totalFromStocks == 0) {
-        $totalFromStocks = (float) ($item->stock ?? 0);
-    }
+                $item->total_stock_from_stocks = $totalFromStocks;
 
-    $item->total_stock_from_stocks = $totalFromStocks;
+                $m3PerPcs = 0;
+                if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
+                    $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
+                }
 
-    $m3PerPcs = 0;
-    if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
-        $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
-    }
+                $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
 
-    $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
+                return $item;
+            });
 
-    return $item;
-});
-
-
-            // 7. Jika filter gudang aktif, sembunyikan item dengan stok 0 di gudang tsb
+            // 7. Filter item dengan stok 0
             if ($warehouseId) {
                 $collection = $collection->filter(function ($item) {
                     return ($item->total_stock_from_stocks ?? 0) > 0;

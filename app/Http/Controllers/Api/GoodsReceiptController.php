@@ -8,13 +8,11 @@ use App\Models\PurchaseOrder;
 use App\Models\StockMovement;
 use App\Models\Warehouse;
 use App\Models\Stock;
+use App\Models\InventoryLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
-/**
- * (docblock dipertahankan seperti aslinya)
- */
 class GoodsReceiptController extends Controller
 {
     public function store(Request $request)
@@ -46,7 +44,6 @@ class GoodsReceiptController extends Controller
                 'notes' => $validatedData['notes'],
             ]);
 
-            // ambil gudang BUFFER sekali saja
             $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
 
             foreach ($validatedData['details'] as $detail) {
@@ -67,12 +64,26 @@ class GoodsReceiptController extends Controller
                         'notes' => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
                     ]);
 
+                    InventoryLog::create([
+                        'date' => $validatedData['receipt_date'],
+                        'time' => now()->toTimeString(),
+                        'item_id' => $detail['item_id'],
+                        'warehouse_id' => $bufferWarehouse->id ?? 1,
+                        'qty' => $detail['quantity_received'],
+                        'direction' => 'IN',
+                        'transaction_type' => 'PURCHASE',
+                        'reference_type' => 'GoodsReceipt',
+                        'reference_id' => $goodsReceipt->id,
+                        'reference_number' => $goodsReceipt->receipt_number,
+                        'notes' => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
+                        'user_id' => auth()->id(),
+                    ]);
+
                     $item = \App\Models\Item::find($detail['item_id']);
                     if ($item) {
                         $item->increment('stock', $detail['quantity_received']);
                     }
 
-                    // update stok per gudang BUFFER tanpa mengubah logic lama
                     if ($bufferWarehouse) {
                         $stock = Stock::firstOrCreate([
                             'item_id' => $detail['item_id'],
