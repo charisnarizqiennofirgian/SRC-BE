@@ -4,10 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Inventory;
-use App\Models\Stock;
 use App\Models\Warehouse;
 use App\Models\InventoryLog;
 use App\Models\ProductionOrder;
+use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -16,11 +16,19 @@ use Illuminate\Validation\ValidationException;
 
 class CandyProductionController extends Controller
 {
+    protected ProductionOrderProgressService $poProgress;
+
+    public function __construct(ProductionOrderProgressService $poProgress)
+    {
+        $this->poProgress = $poProgress;
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
             'date'  => ['required', 'date'],
             'notes' => ['nullable', 'string'],
+            'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.warehouse_id'   => ['required', 'integer', 'exists:warehouses,id'],
             'items.*.item_id'        => ['required', 'integer', 'exists:items,id'],
@@ -28,18 +36,24 @@ class CandyProductionController extends Controller
             'items.*.qty'            => ['required', 'integer', 'min:1'],
         ]);
 
-        Log::info('=== CANDY PRODUCTION START ===');
+        Log::info('=== KD PRODUCTION START ===');
         Log::info('Payload:', $data);
 
         return DB::transaction(function () use ($data) {
-            $candyWarehouse = Warehouse::where('name', 'like', '%Gudang Candy%')->first();
-            if (!$candyWarehouse) {
+            $kdWarehouse = Warehouse::where('code', 'RSTK')->first();
+
+            if (!$kdWarehouse) {
                 throw ValidationException::withMessages([
-                    'warehouse' => ['Gudang Candy tidak ditemukan di master.'],
+                    'warehouse' => ['Gudang KD (RST Kering) tidak ditemukan di master.'],
                 ]);
             }
 
-            Log::info("Gudang Candy ID: {$candyWarehouse->id}");
+            Log::info("Gudang KD ID: {$kdWarehouse->id}");
+
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+            $poNumber = $productionOrder?->po_number ?? null;
+
+            Log::info("Production Order: {$poNumber} (ID: {$data['ref_po_id']})");
 
             $results = [];
 
@@ -88,17 +102,11 @@ class CandyProductionController extends Controller
 
                     Log::info("Taking {$qtyToTake} pcs from Inventory ID {$sourceInv->id} (current qty: {$sourceInv->qty})");
 
-                    // Kurangi INVENTORY sumber
                     $sourceInv->qty -= $qtyToTake;
                     $sourceInv->save();
 
                     Log::info("Inventory ID {$sourceInv->id} updated to {$sourceInv->qty} pcs");
 
-                    // Ambil data PO untuk reference
-                    $productionOrder = $sourceInv->ref_po_id ? ProductionOrder::find($sourceInv->ref_po_id) : null;
-                    $poNumber = $productionOrder?->po_number ?? null;
-
-                    // Catat ke inventory_logs (OUT dari gudang sumber)
                     InventoryLog::create([
                         'date' => $data['date'],
                         'time' => now()->toTimeString(),
@@ -107,18 +115,16 @@ class CandyProductionController extends Controller
                         'qty' => $qtyToTake,
                         'direction' => 'OUT',
                         'transaction_type' => 'TRANSFER_OUT',
-                        'reference_type' => $sourceInv->ref_po_id ? 'ProductionOrder' : 'CandyProduction',
-                        'reference_id' => $sourceInv->ref_po_id ?? null,
+                        'reference_type' => 'ProductionOrder',
+                        'reference_id' => $data['ref_po_id'],
                         'reference_number' => $poNumber,
-                        'notes' => "Transfer ke Gudang Candy untuk proses pengeringan",
+                        'notes' => "Transfer ke Gudang KD untuk proses pengeringan",
                         'user_id' => Auth::id(),
                     ]);
 
-                    // Tambah / buat INVENTORY Candy
-                    $targetInv = Inventory::where('warehouse_id', $candyWarehouse->id)
+                    $targetInv = Inventory::where('warehouse_id', $kdWarehouse->id)
                         ->where('item_id', $targetItemId)
-                        ->where('ref_po_id', $sourceInv->ref_po_id)
-                        ->where('ref_product_id', $sourceInv->ref_product_id)
+                        ->where('ref_po_id', $data['ref_po_id'])
                         ->lockForUpdate()
                         ->first();
 
@@ -129,83 +135,37 @@ class CandyProductionController extends Controller
                         Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty}");
                     } else {
                         $targetInv = Inventory::create([
-                            'warehouse_id'   => $candyWarehouse->id,
+                            'warehouse_id'   => $kdWarehouse->id,
                             'item_id'        => $targetItemId,
                             'qty'            => $qtyToTake,
-                            'ref_po_id'      => $sourceInv->ref_po_id,
-                            'ref_product_id' => $sourceInv->ref_product_id,
+                            'ref_po_id'      => $data['ref_po_id'],
+                            'ref_product_id' => $productionOrder?->product_id ?? null,
                         ]);
                         Log::info("New Target Inventory ID {$targetInv->id} created with qty {$qtyToTake}");
                     }
 
-                    // Catat ke inventory_logs (IN ke Gudang Candy)
                     InventoryLog::create([
                         'date' => $data['date'],
                         'time' => now()->toTimeString(),
                         'item_id' => $targetItemId,
-                        'warehouse_id' => $candyWarehouse->id,
+                        'warehouse_id' => $kdWarehouse->id,
                         'qty' => $qtyToTake,
                         'direction' => 'IN',
                         'transaction_type' => 'TRANSFER_IN',
-                        'reference_type' => $sourceInv->ref_po_id ? 'ProductionOrder' : 'CandyProduction',
-                        'reference_id' => $sourceInv->ref_po_id ?? null,
+                        'reference_type' => 'ProductionOrder',
+                        'reference_id' => $data['ref_po_id'],
                         'reference_number' => $poNumber,
-                        'notes' => "Hasil proses Candy (pengeringan)",
+                        'notes' => "Hasil proses KD (pengeringan)",
                         'user_id' => Auth::id(),
                     ]);
 
                     $processedInventories[] = [
                         'inventory_id' => $sourceInv->id,
                         'qty_taken'    => $qtyToTake,
-                        'ref_po_id'    => $sourceInv->ref_po_id,
+                        'ref_po_id'    => $data['ref_po_id'],
                     ];
 
                     $qtyRemaining -= $qtyToTake;
-                }
-
-                // Kurangi STOCK pcs di Gudang sumber
-                $fromStock = Stock::where('warehouse_id', $fromWarehouseId)
-                    ->where('item_id', $sourceItemId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($fromStock) {
-                    Log::info("From Stock ID {$fromStock->id}: Current qty = {$fromStock->quantity}, will decrement by {$qtyNeeded}");
-
-                    if ($fromStock->quantity < $qtyNeeded) {
-                        throw ValidationException::withMessages([
-                            "items.{$index}.qty" => [
-                                "Item #" . ($index + 1) . ": Stok pcs di Gudang Sanwil tidak mencukupi. Tersedia: {$fromStock->quantity} pcs."
-                            ],
-                        ]);
-                    }
-                    $fromStock->decrement('quantity', $qtyNeeded);
-
-                    $fromStock->refresh();
-                    Log::info("From Stock ID {$fromStock->id} after decrement: {$fromStock->quantity}");
-                } else {
-                    Log::warning("From Stock NOT FOUND for warehouse_id={$fromWarehouseId}, item_id={$sourceItemId}");
-                }
-
-                // Tambah STOCK pcs di Gudang Candy
-                $toStock = Stock::where('warehouse_id', $candyWarehouse->id)
-                    ->where('item_id', $targetItemId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($toStock) {
-                    Log::info("To Stock ID {$toStock->id}: Current qty = {$toStock->quantity}, will increment by {$qtyNeeded}");
-                    $toStock->increment('quantity', $qtyNeeded);
-
-                    $toStock->refresh();
-                    Log::info("To Stock ID {$toStock->id} after increment: {$toStock->quantity}");
-                } else {
-                    $toStock = Stock::create([
-                        'warehouse_id' => $candyWarehouse->id,
-                        'item_id'      => $targetItemId,
-                        'quantity'     => $qtyNeeded,
-                    ]);
-                    Log::info("New To Stock ID {$toStock->id} created with qty {$qtyNeeded}");
                 }
 
                 $results[] = [
@@ -217,14 +177,18 @@ class CandyProductionController extends Controller
                 ];
             }
 
-            Log::info('=== CANDY PRODUCTION END ===');
+            Log::info('=== KD PRODUCTION END ===');
+
+            $this->poProgress->markOnProgress($data['ref_po_id']);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Proses Candy berhasil disimpan untuk ' . count($results) . ' item.',
+                'message' => 'Proses KD berhasil disimpan untuk ' . count($results) . ' item.',
                 'data'    => [
                     'date'            => $data['date'],
                     'notes'           => $data['notes'],
+                    'ref_po_id'       => $data['ref_po_id'],
+                    'po_number'       => $poNumber,
                     'total_items'     => count($results),
                     'processed_items' => $results,
                 ],

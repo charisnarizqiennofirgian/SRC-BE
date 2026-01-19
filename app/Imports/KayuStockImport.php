@@ -3,7 +3,8 @@
 namespace App\Imports;
 
 use App\Models\Item;
-use App\Models\Inventory; // ✅ TAMBAH: untuk sync inventories
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
@@ -28,7 +29,6 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             ['description' => 'Bahan Baku Kayu RST']
         );
 
-        // fallback kalau kolom satuan kosong
         $this->defaultUnit = Unit::firstOrCreate(
             ['name' => 'Pieces'],
             ['short_name' => 'PCS']
@@ -64,7 +64,6 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             $namaDasar  = trim($row['nama_dasar']);
             $kodeBarang = trim($row['kode_barang'] ?? '');
 
-            // satuan dari Excel
             $satuanName = trim($row['satuan'] ?? '');
             $unit = $satuanName
                 ? Unit::firstOrCreate(
@@ -73,7 +72,6 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                   )
                 : $this->defaultUnit;
 
-            // gudang → uppercase
             $gudangCodeRaw = trim($row['gudang']);
             $gudangCode    = strtoupper($gudangCodeRaw);
 
@@ -90,6 +88,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
 
             // m3 per pcs
             $kubikasiPerPcs = ($t * $l * $p) / 1000000000;
+            $totalM3 = $kubikasiPerPcs * $stokAwal;
 
             $specifications = [
                 't'          => $t,
@@ -101,11 +100,11 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             try {
                 Log::info("ROW #{$index} - ITEM: {$uniqueName}");
 
-                // ✅ FIX: Pakai 'code' sebagai key untuk cegah duplicate, bukan 'name'
+                // 1. Master Item
                 $item = Item::updateOrCreate(
-                    ['code' => $kodeBarang], // ✅ GANTI: was ['name' => $uniqueName]
+                    ['code' => $kodeBarang],
                     [
-                        'name'           => $uniqueName, // ✅ PINDAH KE SINI
+                        'name'           => $uniqueName,
                         'category_id'    => $this->categoryKayu->id,
                         'unit_id'        => $unit->id,
                         'specifications' => $specifications,
@@ -116,7 +115,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     ]
                 );
 
-                // 2. STOCK MOVEMENT saldo awal
+                // 2. Stock Movement (legacy)
                 if ($stokAwal > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
                         ->where('notes', 'LIKE', '%Saldo Awal (Kayu RST)%')
@@ -137,7 +136,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     }
                 }
 
-                // 3. STOK PER GUDANG
+                // 3. Stok per Gudang
                 $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
 
                 if (!$warehouse) {
@@ -148,7 +147,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     ];
                     Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangCodeRaw}");
                 } else {
-                    // ✅ Update tabel stocks (logic TIDAK DIUBAH)
+                    // Update tabel stocks (legacy)
                     Stock::updateOrCreate(
                         [
                             'item_id'      => $item->id,
@@ -160,19 +159,52 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     );
                     Log::info("ROW #{$index} - STOCK GUDANG OK (WH ID {$warehouse->id})");
 
-                    // ✅ TAMBAH: Sync ke tabel inventories (saldo awal)
+                    // Update tabel inventories
                     Inventory::updateOrCreate(
                         [
                             'item_id'        => $item->id,
                             'warehouse_id'   => $warehouse->id,
-                            'ref_po_id'      => null, // Saldo awal tidak punya PO
+                            'ref_po_id'      => null,
                             'ref_product_id' => null,
                         ],
                         [
-                            'qty' => $stokAwal,
+                            'qty'    => $stokAwal,
+                            'qty_m3' => $totalM3,
                         ]
                     );
-                    Log::info("ROW #{$index} - INVENTORY SALDO AWAL SYNCED: Qty {$stokAwal}");
+                    Log::info("ROW #{$index} - INVENTORY SALDO AWAL SYNCED: Qty {$stokAwal}, M3 {$totalM3}");
+
+                    // ✅ Catat ke inventory_logs
+                    $existingLog = InventoryLog::where('item_id', $item->id)
+                        ->where('warehouse_id', $warehouse->id)
+                        ->where('transaction_type', 'INITIAL_STOCK')
+                        ->first();
+
+                    if ($existingLog) {
+                        $existingLog->update([
+                            'qty'    => $stokAwal,
+                            'qty_m3' => $totalM3,
+                            'notes'  => 'Saldo Awal Kayu RST diperbarui via Excel',
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                    } else {
+                        InventoryLog::create([
+                            'date'             => now()->toDateString(),
+                            'time'             => now()->toTimeString(),
+                            'item_id'          => $item->id,
+                            'warehouse_id'     => $warehouse->id,
+                            'qty'              => $stokAwal,
+                            'qty_m3'           => $totalM3,
+                            'direction'        => 'IN',
+                            'transaction_type' => 'INITIAL_STOCK',
+                            'reference_type'   => 'ImportExcel',
+                            'reference_id'     => $item->id,
+                            'reference_number' => 'IMPORT-KAYU-' . $kodeBarang,
+                            'notes'            => 'Saldo Awal Kayu RST dari Excel upload',
+                            'user_id'          => Auth::id(),
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                    }
                 }
 
                 $processedRows++;

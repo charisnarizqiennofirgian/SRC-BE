@@ -7,11 +7,14 @@ use App\Models\Category;
 use App\Models\Unit;
 use App\Models\Warehouse;
 use App\Models\Stock;
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
@@ -41,7 +44,7 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
             $name      = trim($namaItem);
             $qtyBatang = (float) $qtyBatang;
 
-            $warehouseCode = trim($gudangCode); // mis: LOG
+            $warehouseCode = strtoupper(trim($gudangCode)); // mis: LOG
 
             // Dari master
             $kategoriName = trim($row['kategori'] ?? 'Kayu Log');
@@ -81,8 +84,10 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
                     ]
                 );
 
+                Log::info("ROW #{$index} - ITEM SAVED: {$name} (ID: {$item->id})");
+
                 // 2. Gudang
-                $warehouse = Warehouse::where('code', $warehouseCode)->first();
+                $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$warehouseCode])->first();
 
                 if (!$warehouse) {
                     Log::warning('Gudang tidak ditemukan untuk Kayu Log', [
@@ -93,7 +98,7 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
                     continue;
                 }
 
-                // 3. Stok per gudang
+                // 3. Stok per gudang (legacy - tabel stocks)
                 Stock::updateOrCreate(
                     [
                         'item_id'      => $item->id,
@@ -103,6 +108,55 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
                         'quantity' => $qtyBatang,
                     ]
                 );
+
+                Log::info("ROW #{$index} - STOCK GUDANG OK (WH ID {$warehouse->id})");
+
+                // ✅ 4. Update tabel inventories
+                Inventory::updateOrCreate(
+                    [
+                        'item_id'      => $item->id,
+                        'warehouse_id' => $warehouse->id,
+                    ],
+                    [
+                        'qty'    => $qtyBatang,
+                        'qty_m3' => $kubikasi,
+                    ]
+                );
+
+                Log::info("ROW #{$index} - ✅ INVENTORY SAVED: {$qtyBatang} batang, {$kubikasi} m³");
+
+                // ✅ 5. Catat ke inventory_logs
+                $existingLog = InventoryLog::where('item_id', $item->id)
+                    ->where('warehouse_id', $warehouse->id)
+                    ->where('transaction_type', 'INITIAL_STOCK')
+                    ->first();
+
+                if ($existingLog) {
+                    $existingLog->update([
+                        'qty'    => $qtyBatang,
+                        'qty_m3' => $kubikasi,
+                        'notes'  => 'Saldo Awal Kayu Log diperbarui via Excel',
+                    ]);
+                    Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                } else {
+                    InventoryLog::create([
+                        'date'             => now()->toDateString(),
+                        'time'             => now()->toTimeString(),
+                        'item_id'          => $item->id,
+                        'warehouse_id'     => $warehouse->id,
+                        'qty'              => $qtyBatang,
+                        'qty_m3'           => $kubikasi,
+                        'direction'        => 'IN',
+                        'transaction_type' => 'INITIAL_STOCK',
+                        'reference_type'   => 'ImportExcel',
+                        'reference_id'     => $item->id,
+                        'reference_number' => 'IMPORT-LOG-' . $code,
+                        'notes'            => 'Saldo Awal Kayu Log dari Excel upload',
+                        'user_id'          => Auth::id(),
+                    ]);
+                    Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                }
+
             } catch (\Exception $e) {
                 Log::error(
                     'Error import Kayu Log di baris ' . ($index + 2) . ': ' . $e->getMessage(),

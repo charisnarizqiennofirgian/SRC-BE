@@ -7,7 +7,8 @@ use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
 use App\Models\Warehouse;
-use App\Models\Inventory; // ✅ GANTI: Stock → Inventory
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -21,13 +22,11 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
 
     public function __construct()
     {
-        // Default kategori Produk Jadi
         $this->defaultCategory = Category::firstOrCreate(
             ['name' => 'Produk Jadi'],
             ['description' => 'Produk Jadi Furniture']
         );
 
-        // Default satuan PCS (pakai short_name sebagai key unik)
         $this->defaultUnit = Unit::firstOrCreate(
             ['short_name' => 'PCS'],
             [
@@ -52,13 +51,11 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             $rowData = $row->toArray();
             Log::info("ROW #{$index} - RAW DATA:", $rowData);
 
-            // Normalisasi key ke lower-case untuk jaga-jaga header beda kapital
             $normalized = [];
             foreach ($rowData as $key => $value) {
                 $normalized[strtolower(trim($key))] = $value;
             }
 
-            // Ambil kolom dengan nama yang lebih fleksibel
             $namaProduk = trim($normalized['nama_produk'] ?? $normalized['nama produk'] ?? '');
             $kodeBarang = trim($normalized['kode_barang'] ?? $normalized['kode barang'] ?? '');
             $stokAwal   = isset($normalized['stok_awal'])
@@ -67,7 +64,6 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             $gudangRaw  = trim($normalized['gudang'] ?? '');
             $hsCodeRaw  = $normalized['hs_code'] ?? $normalized['hs code'] ?? null;
 
-            // Wajib minimal: nama produk, stok awal, gudang
             if (empty($namaProduk) || $stokAwal <= 0 || empty($gudangRaw)) {
                 Log::warning("ROW #{$index} DITOLAK (kolom wajib kosong / stok <= 0)");
                 $skippedRows[] = [
@@ -78,7 +74,6 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 continue;
             }
 
-            // HS Code: kalau kosong, tidak lagi menggagalkan baris, hanya dicatat null
             $hsCode = null;
             if (!empty($hsCodeRaw)) {
                 $hsCode = $this->sanitizeHsCode((string) $hsCodeRaw);
@@ -86,7 +81,6 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 Log::warning("ROW #{$index} - HS Code kosong, item tetap dibuat tanpa HS Code.");
             }
 
-            // kategori & satuan dari Excel (fallback ke default)
             $kategoriName = trim($normalized['kategori'] ?? '');
             $satuanName   = trim($normalized['satuan'] ?? '');
 
@@ -110,19 +104,17 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 $unit = $this->defaultUnit;
             }
 
-            // Gudang: normalisasi code ke uppercase
             $gudangCode = strtoupper($gudangRaw);
 
             try {
                 Log::info("ROW #{$index} - CREATING/UPDATING ITEM: {$namaProduk}");
 
-                // Kolom-kolom tambahan DNA
                 $nwPerBox   = $normalized['nw_per_box'] ?? $normalized['nw per box'] ?? null;
                 $gwPerBox   = $normalized['gw_per_box'] ?? $normalized['gw per box'] ?? null;
                 $woodPerPcs = $normalized['wood_consumed_per_pcs'] ?? $normalized['wood consumed per pcs'] ?? null;
                 $m3Carton   = $normalized['m3_per_carton'] ?? $normalized['m3 per carton'] ?? null;
 
-                // 1) master item
+                // 1) Master item
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
@@ -139,7 +131,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
 
                 Log::info("ROW #{$index} - ITEM SAVED: ID {$item->id}");
 
-                // 2) stock movement saldo awal (global)
+                // 2) Stock movement saldo awal (legacy)
                 if ($stokAwal > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
                         ->where('notes', 'LIKE', '%Saldo Awal Produk Jadi%')
@@ -162,7 +154,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     }
                 }
 
-                // ✅ 3) FIX: inventory per gudang (GANTI Stock → Inventory)
+                // 3) Inventory per gudang
                 $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
 
                 if (!$warehouse) {
@@ -173,28 +165,65 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     ];
                     Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangRaw}");
                 } else {
-                    // ✅ GANTI: Stock → Inventory
-                    // ✅ GANTI: quantity → qty
-                    // ✅ TAMBAH: qty_m3
-
                     // Hitung qty_m3 kalau ada m3_per_carton
                     $qtyM3 = 0;
                     if ($m3Carton !== null && $m3Carton > 0) {
                         $qtyM3 = (float) $m3Carton * $stokAwal;
                     }
 
+                    // Cek stok lama untuk inventory_logs
+                    $oldInventory = Inventory::where('item_id', $item->id)
+                        ->where('warehouse_id', $warehouse->id)
+                        ->first();
+                    $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
+
+                    // Update inventory
                     Inventory::updateOrCreate(
                         [
                             'item_id'      => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'qty'    => $stokAwal, // ✅ Field: qty (bukan quantity)
-                            'qty_m3' => $qtyM3,     // ✅ Field: qty_m3
+                            'qty'    => $stokAwal,
+                            'qty_m3' => $qtyM3,
                         ]
                     );
 
                     Log::info("ROW #{$index} - ✅ INVENTORY DISIMPAN: {$stokAwal} pcs (Warehouse ID: {$warehouse->id}, qty_m3: {$qtyM3})");
+
+                    // ✅ 4) Catat ke inventory_logs
+                    $existingLog = InventoryLog::where('item_id', $item->id)
+                        ->where('warehouse_id', $warehouse->id)
+                        ->where('transaction_type', 'INITIAL_STOCK')
+                        ->first();
+
+                    if ($existingLog) {
+                        // Update log yang sudah ada (jika re-import)
+                        $existingLog->update([
+                            'qty' => $stokAwal,
+                            'qty_m3' => $qtyM3,
+                            'notes' => 'Saldo Awal Produk Jadi diperbarui via Excel',
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                    } else {
+                        // Buat log baru
+                        InventoryLog::create([
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $item->id,
+                            'warehouse_id' => $warehouse->id,
+                            'qty' => $stokAwal,
+                            'qty_m3' => $qtyM3,
+                            'direction' => 'IN',
+                            'transaction_type' => 'INITIAL_STOCK',
+                            'reference_type' => 'ImportExcel',
+                            'reference_id' => $item->id,
+                            'reference_number' => 'IMPORT-PJ-' . $kodeBarang,
+                            'notes' => 'Saldo Awal Produk Jadi dari Excel upload',
+                            'user_id' => Auth::id(),
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                    }
                 }
 
                 $processedRows++;

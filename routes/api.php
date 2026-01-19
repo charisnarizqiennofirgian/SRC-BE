@@ -221,6 +221,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [MaterialUsageController::class, 'index']);
         Route::post('/', [MaterialUsageController::class, 'store']);
         Route::get('/consumables', [MaterialUsageController::class, 'getConsumableItems']);
+        Route::get('/categories', [MaterialUsageController::class, 'getConsumableCategories']);
         Route::get('/divisions', [MaterialUsageController::class, 'getDivisions']);
         Route::get('/stock/{itemId}', [MaterialUsageController::class, 'checkStock']);
     });

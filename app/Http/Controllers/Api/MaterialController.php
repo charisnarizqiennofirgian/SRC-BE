@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\Category;
 use App\Models\Stock;
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\MaterialsImport;
 
@@ -39,8 +42,6 @@ class MaterialController extends Controller
             }
         }
 
-        // Kayu Log: volume manual dari user, jangan dihitung otomatis
-
         return null;
     }
 
@@ -59,17 +60,32 @@ class MaterialController extends Controller
             }
 
             if ($request->query('all')) {
-    $items = Item::with(['category:id,name', 'unit:id,name'])
-        ->when($request->filled('category_name'), function ($q) use ($request) {
-            $q->whereHas('category', function ($qq) use ($request) {
-                $qq->where('name', 'like', '%'.$request->category_name.'%');
-            });
-        })
-        ->orderBy('name')
-        ->get();
+                $items = Item::with(['category:id,name', 'unit:id,name'])
+                    ->when($request->filled('category_name'), function ($q) use ($request) {
+                        $q->whereHas('category', function ($qq) use ($request) {
+                            $qq->where('name', 'like', '%'.$request->category_name.'%');
+                        });
+                    })
+                    ->orderBy('name')
+                    ->get();
 
-    return response()->json(['success' => true, 'data' => $items]);
-}
+                // ✅ FIX: Ambil stok dari tabel inventories (bukan items.stock)
+                $packingWarehouseId = 11; // Gudang Packing (Barang Jadi)
+
+                $items->transform(function ($item) use ($packingWarehouseId, $request) {
+                    // Jika kategori Produk Jadi, ambil stok dari Gudang Packing
+                    if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
+                        $inventory = Inventory::where('item_id', $item->id)
+                            ->where('warehouse_id', $packingWarehouseId)
+                            ->first();
+                        $item->stock = $inventory ? (float) $inventory->qty : 0;
+                    }
+
+                    return $item;
+                });
+
+                return response()->json(['success' => true, 'data' => $items]);
+            }
 
             $perPage = min($request->input('per_page', 50), 100);
             $search  = $request->input('search');
@@ -144,7 +160,7 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
-                'initial_warehouse_id' => 'nullable|exists:warehouses,id', // ✅ baru
+                'initial_warehouse_id' => 'nullable|exists:warehouses,id',
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
@@ -157,7 +173,7 @@ class MaterialController extends Controller
                 'jenis' => 'nullable|string|max:255',
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
-                'volume_m3' => 'nullable|numeric|min:0', // ✅ tambah validasi
+                'volume_m3' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -209,24 +225,23 @@ class MaterialController extends Controller
                 }
             }
 
-            // ✅ HITUNG volume_m3 OTOMATIS (Kayu RST)
+            // HITUNG volume_m3 OTOMATIS (Kayu RST)
             $volume = $this->calculateVolumeM3($itemData);
             if (!is_null($volume)) {
-                // hanya override kalau bisa dihitung (Kayu RST)
                 $itemData['volume_m3'] = $volume;
             }
-            // kalau null → tetap pakai volume_m3 dari input (misal Kayu Log)
 
             DB::beginTransaction();
 
             $item = Item::create($itemData);
             $item->load(['unit:id,name', 'category:id,name']);
 
-            // FASE 2: alokasikan stok awal ke tabel stocks jika diisi
+            // FASE 2: alokasikan stok awal ke tabel stocks + inventories + inventory_logs
             $initialStock = (float) ($itemData['stock'] ?? 0);
             $initialWarehouseId = $itemData['initial_warehouse_id'] ?? null;
 
             if ($initialStock > 0 && $initialWarehouseId) {
+                // Update tabel stocks (legacy)
                 Stock::updateOrCreate(
                     [
                         'item_id' => $item->id,
@@ -236,6 +251,33 @@ class MaterialController extends Controller
                         'quantity' => $initialStock,
                     ]
                 );
+
+                // ✅ Update tabel inventories
+                Inventory::updateOrCreate(
+                    [
+                        'item_id' => $item->id,
+                        'warehouse_id' => $initialWarehouseId,
+                    ],
+                    [
+                        'qty' => $initialStock,
+                    ]
+                );
+
+                // ✅ Catat ke inventory_logs sebagai INITIAL_STOCK
+                InventoryLog::create([
+                    'date' => now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $item->id,
+                    'warehouse_id' => $initialWarehouseId,
+                    'qty' => $initialStock,
+                    'direction' => 'IN',
+                    'transaction_type' => 'INITIAL_STOCK',
+                    'reference_type' => 'InitialStock',
+                    'reference_id' => $item->id,
+                    'reference_number' => 'INIT-' . $item->code,
+                    'notes' => 'Stok awal saat pembuatan item',
+                    'user_id' => Auth::id(),
+                ]);
             }
 
             DB::commit();
@@ -285,7 +327,7 @@ class MaterialController extends Controller
                 'unit_id' => 'required|exists:units,id',
                 'description' => 'nullable|string',
                 'stock' => 'nullable|numeric|min:0',
-                'initial_warehouse_id' => 'nullable|exists:warehouses,id', // ✅ baru
+                'initial_warehouse_id' => 'nullable|exists:warehouses,id',
                 'specifications' => 'nullable|array',
                 'specifications.t' => 'nullable|numeric|min:0',
                 'specifications.l' => 'nullable|numeric|min:0',
@@ -298,7 +340,7 @@ class MaterialController extends Controller
                 'jenis' => 'nullable|string|max:255',
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
-                'volume_m3' => 'nullable|numeric|min:0', // ✅ tambah validasi
+                'volume_m3' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -350,25 +392,29 @@ class MaterialController extends Controller
                 }
             }
 
-            // ✅ HITUNG/UPDATE volume_m3 untuk RST,
-            // jangan ganggu input manual untuk kategori lain (misal Log)
             $volume = $this->calculateVolumeM3($itemData);
             if (!is_null($volume)) {
                 $itemData['volume_m3'] = $volume;
             }
-            // jika null → biarkan volume_m3 sesuai input user atau tetap nilainya
 
             DB::beginTransaction();
 
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);
 
-            // kalau stok awal + gudang diubah di edit, sinkronkan ke stocks (minimal)
+            // Update stok jika ada perubahan
             if (array_key_exists('stock', $itemData) && isset($itemData['initial_warehouse_id'])) {
                 $initialStock = (float) ($itemData['stock'] ?? 0);
                 $initialWarehouseId = $itemData['initial_warehouse_id'];
 
                 if ($initialStock > 0 && $initialWarehouseId) {
+                    // Cek stok lama
+                    $oldInventory = Inventory::where('item_id', $material->id)
+                        ->where('warehouse_id', $initialWarehouseId)
+                        ->first();
+                    $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
+
+                    // Update stocks (legacy)
                     Stock::updateOrCreate(
                         [
                             'item_id' => $material->id,
@@ -378,8 +424,37 @@ class MaterialController extends Controller
                             'quantity' => $initialStock,
                         ]
                     );
+
+                    // ✅ Update inventories
+                    Inventory::updateOrCreate(
+                        [
+                            'item_id' => $material->id,
+                            'warehouse_id' => $initialWarehouseId,
+                        ],
+                        [
+                            'qty' => $initialStock,
+                        ]
+                    );
+
+                    // ✅ Catat penyesuaian ke inventory_logs jika ada perubahan
+                    $diff = $initialStock - $oldQty;
+                    if ($diff != 0) {
+                        InventoryLog::create([
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $material->id,
+                            'warehouse_id' => $initialWarehouseId,
+                            'qty' => abs($diff),
+                            'direction' => $diff > 0 ? 'IN' : 'OUT',
+                            'transaction_type' => 'ADJUSTMENT',
+                            'reference_type' => 'Adjustment',
+                            'reference_id' => $material->id,
+                            'reference_number' => 'ADJ-' . $material->code,
+                            'notes' => 'Penyesuaian stok via edit item',
+                            'user_id' => Auth::id(),
+                        ]);
+                    }
                 }
-                // kalau 0, untuk saat ini kita tidak hapus / ubah stok per gudang lain (bisa dibahas dengan PM)
             }
 
             DB::commit();
@@ -424,19 +499,19 @@ class MaterialController extends Controller
     {
         try {
             $headers = [
-                'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'deskripsi',
+                'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'gudang_awal', 'deskripsi',
                 'spec_p', 'spec_l', 'spec_t',
                 'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code',
             ];
 
             $example1 = [
-                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'Produk KILT',
+                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'PACKING', 'Produk KILT',
                 '', '', '',
                 '27.0', '42.0', '0.0099', '0.045', '4403.99',
             ];
 
             $example2 = [
-                'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'Box untuk KILT',
+                'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'PACKING', 'Box untuk KILT',
                 '960', '940', '940',
                 '', '', '', '', '',
             ];

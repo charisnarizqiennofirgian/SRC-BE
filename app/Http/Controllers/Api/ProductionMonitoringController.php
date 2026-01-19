@@ -11,7 +11,7 @@ class ProductionMonitoringController extends Controller
 {
     /**
      * Dashboard Monitoring Produksi per SO (Hybrid View)
-     * - Zona Hulu: Status (Ada aktivitas atau tidak)
+     * - Zona Hulu: Status 3 level (WAITING/IN_PROGRESS/DONE)
      * - Zona Hilir: Angka real (SUM qty)
      */
     public function index(Request $request)
@@ -40,13 +40,13 @@ class ProductionMonitoringController extends Controller
 
             $salesOrders = $query->get();
 
-            // ID Gudang HULU (Status: ada aktivitas atau tidak)
+            // ID Gudang HULU (Status: WAITING / IN_PROGRESS / DONE)
             $warehouseHulu = [
-                'sanwil' => 2,
-                'kd' => 3,
-                'pembahanan' => 4,
-                'moulding' => 5,
-                'mesin' => 6,
+                'sanwil' => 2,      // Gudang Sanwil (RST Basah)
+                'kd' => 3,          // Gudang KD (RST Kering)
+                'pembahanan' => 4,  // Gudang Pembahanan (Buffer RST)
+                'moulding' => 5,    // Gudang Moulding (S4S)
+                'mesin' => 6,       // Gudang Mesin (Komponen)
             ];
 
             // ID Gudang HILIR (Angka: SUM qty)
@@ -58,6 +58,13 @@ class ProductionMonitoringController extends Controller
                 'packing' => 11,
             ];
 
+            // ✅ FIX: Daftar reference_type yang valid untuk tracking produksi
+            $validReferenceTypes = [
+                'ProductionOrder',
+                'KDProduction',      // Tambahan untuk proses KD/Candy
+                'CandyProduction',   // Backward compatibility jika ada data lama
+            ];
+
             $result = [];
 
             foreach ($salesOrders as $so) {
@@ -65,33 +72,50 @@ class ProductionMonitoringController extends Controller
                 $poIds = $so->productionOrders->pluck('id')->toArray();
 
                 foreach ($so->details as $detail) {
-                    // === ZONA HULU: Cek ada aktivitas atau tidak ===
+                    // === ZONA HULU: Cek status 3 level (by PO ID saja) ===
                     $statusHulu = [];
 
                     foreach ($warehouseHulu as $key => $warehouseId) {
-                        $hasActivity = false;
+                        $status = 'waiting'; // Default: belum ada aktivitas
 
                         if (!empty($poIds)) {
-                            $count = InventoryLog::where('reference_type', 'ProductionOrder')
+                            // ✅ FIX: Include semua reference_type yang valid
+                            // Hitung total IN ke gudang ini
+                            $qtyIn = InventoryLog::whereIn('reference_type', $validReferenceTypes)
                                 ->whereIn('reference_id', $poIds)
-                                ->where('item_id', $detail->item_id)
                                 ->where('warehouse_id', $warehouseId)
-                                ->count();
+                                ->where('direction', 'IN')
+                                ->sum('qty');
 
-                            $hasActivity = $count > 0;
+                            // Hitung total OUT dari gudang ini
+                            $qtyOut = InventoryLog::whereIn('reference_type', $validReferenceTypes)
+                                ->whereIn('reference_id', $poIds)
+                                ->where('warehouse_id', $warehouseId)
+                                ->where('direction', 'OUT')
+                                ->sum('qty');
+
+                            // Tentukan status
+                            if ($qtyIn == 0) {
+                                $status = 'waiting';      // 🔴 Belum ada aktivitas
+                            } elseif ($qtyIn > $qtyOut) {
+                                $status = 'in_progress';  // 🟡 Ada sisa, belum semua keluar
+                            } else {
+                                $status = 'done';         // ✅ Semua sudah keluar
+                            }
                         }
 
-                        $statusHulu[$key] = $hasActivity;
+                        $statusHulu[$key] = $status;
                     }
 
-                    // === ZONA HILIR: Hitung SUM qty ===
+                    // === ZONA HILIR: Hitung SUM qty (by PO ID + item_id) ===
                     $qtyHilir = [];
 
                     foreach ($warehouseHilir as $key => $warehouseId) {
                         $qtyIn = 0;
 
                         if (!empty($poIds)) {
-                            $qtyIn = InventoryLog::where('reference_type', 'ProductionOrder')
+                            // ✅ FIX: Include semua reference_type yang valid
+                            $qtyIn = InventoryLog::whereIn('reference_type', $validReferenceTypes)
                                 ->whereIn('reference_id', $poIds)
                                 ->where('item_id', $detail->item_id)
                                 ->where('warehouse_id', $warehouseId)
@@ -118,7 +142,7 @@ class ProductionMonitoringController extends Controller
                         'item_code' => $detail->item->code ?? '-',
                         'target' => $target,
 
-                        // Zona Hulu (Status boolean)
+                        // Zona Hulu (Status: waiting / in_progress / done)
                         'status_sanwil' => $statusHulu['sanwil'],
                         'status_kd' => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],

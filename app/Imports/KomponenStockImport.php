@@ -6,7 +6,8 @@ use App\Models\Item;
 use App\Models\Category;
 use App\Models\Unit;
 use App\Models\Warehouse;
-use App\Models\Inventory; // ✅ GANTI: Stock → Inventory
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
@@ -15,6 +16,7 @@ use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 use Maatwebsite\Excel\Concerns\Importable;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class KomponenStockImport implements
     ToCollection,
@@ -39,7 +41,7 @@ class KomponenStockImport implements
                     continue;
                 }
 
-                // Category: dari Excel (biasanya "Komponen")
+                // Category
                 $category = Category::firstOrCreate(
                     ['name' => $kategori],
                     [
@@ -48,7 +50,7 @@ class KomponenStockImport implements
                     ]
                 );
 
-                // Unit: pakai name + short_name (sesuai model Unit)
+                // Unit
                 $unit = Unit::firstOrCreate(
                     ['name' => $satuan],
                     [
@@ -56,13 +58,12 @@ class KomponenStockImport implements
                     ]
                 );
 
-                // Warehouse: wajib dari kolom gudang (pakai code atau name, sesuaikan template)
+                // Warehouse
                 $warehouse = Warehouse::where('code', $gudang)
                     ->orWhere('name', $gudang)
                     ->first();
 
                 if (! $warehouse) {
-                    // Kalau gudang tidak ditemukan, skip baris + log
                     Log::warning(
                         'Gudang tidak ditemukan saat import Komponen di baris ' . ($index + 2),
                         ['gudang' => $gudang, 'row' => $row->toArray()]
@@ -80,6 +81,8 @@ class KomponenStockImport implements
                     $m3PerPcs = ($p * $l * $t) / 1_000_000_000;
                 }
 
+                $totalM3 = $m3PerPcs * $stokAwal;
+
                 $specifications = [
                     'p'          => $p,
                     'l'          => $l,
@@ -87,6 +90,7 @@ class KomponenStockImport implements
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
+                // 1. Master Item
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
@@ -98,34 +102,64 @@ class KomponenStockImport implements
                     ]
                 );
 
-                // Update specs + sinkron kategori/unit kalau ada perubahan
                 $item->specifications = $specifications;
                 $item->category_id    = $category->id;
                 $item->unit_id        = $unit->id;
                 $item->save();
 
-                // ✅ FIX: Stok awal simpan ke tabel inventories
+                // 2. Update Inventory
                 if ($stokAwal > 0) {
-                    // Hitung qty_m3
-                    $qtyM3 = $m3PerPcs * $stokAwal;
+                    // Cek inventory lama
+                    $oldInventory = Inventory::where('item_id', $item->id)
+                        ->where('warehouse_id', $warehouse->id)
+                        ->first();
+                    $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
 
-                    $inventory = Inventory::firstOrCreate(
+                    // Update atau create inventory
+                    Inventory::updateOrCreate(
                         [
                             'item_id'      => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'qty'    => 0,      // ✅ Field: qty (bukan quantity)
-                            'qty_m3' => 0,
+                            'qty'    => $stokAwal,
+                            'qty_m3' => $totalM3,
                         ]
                     );
 
-                    // ✅ INCREMENT (bukan replace)
-                    $inventory->qty    += $stokAwal;
-                    $inventory->qty_m3 += $qtyM3;
-                    $inventory->save();
-
                     Log::info("✅ Import Komponen: {$nama} - Stok {$stokAwal} pcs di {$warehouse->name}");
+
+                    // ✅ 3. Catat ke inventory_logs
+                    $existingLog = InventoryLog::where('item_id', $item->id)
+                        ->where('warehouse_id', $warehouse->id)
+                        ->where('transaction_type', 'INITIAL_STOCK')
+                        ->first();
+
+                    if ($existingLog) {
+                        $existingLog->update([
+                            'qty'    => $stokAwal,
+                            'qty_m3' => $totalM3,
+                            'notes'  => 'Saldo Awal Komponen diperbarui via Excel',
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                    } else {
+                        InventoryLog::create([
+                            'date'             => now()->toDateString(),
+                            'time'             => now()->toTimeString(),
+                            'item_id'          => $item->id,
+                            'warehouse_id'     => $warehouse->id,
+                            'qty'              => $stokAwal,
+                            'qty_m3'           => $totalM3,
+                            'direction'        => 'IN',
+                            'transaction_type' => 'INITIAL_STOCK',
+                            'reference_type'   => 'ImportExcel',
+                            'reference_id'     => $item->id,
+                            'reference_number' => 'IMPORT-KOMP-' . $kode,
+                            'notes'            => 'Saldo Awal Komponen dari Excel upload',
+                            'user_id'          => Auth::id(),
+                        ]);
+                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                    }
                 }
             } catch (\Throwable $e) {
                 Log::error(

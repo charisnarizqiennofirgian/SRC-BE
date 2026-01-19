@@ -16,9 +16,6 @@ use Illuminate\Support\Facades\Validator;
 
 class PackingController extends Controller
 {
-    /**
-     * GET /packing/available-stock
-     */
     public function getAvailableStock(Request $request)
     {
         $productionOrderId = $request->input('production_order_id');
@@ -44,13 +41,12 @@ class PackingController extends Controller
                 $warehouse = Warehouse::where('code', $warehouseCode)->first();
                 if (!$warehouse) continue;
 
-                $inventory = Inventory::where('warehouse_id', $warehouse->id)
+                $available = Inventory::where('warehouse_id', $warehouse->id)
                     ->where('item_id', $detail->item_id)
-                    ->first();
-
-                $available = $inventory ? $inventory->qty : 0;
+                    ->sum('qty');
 
                 $sourceDetails[] = [
+                    'warehouse_id' => $warehouse->id,
                     'warehouse_code' => $warehouse->code,
                     'warehouse_name' => $warehouse->name,
                     'stock_available' => $available,
@@ -76,9 +72,6 @@ class PackingController extends Controller
         ]);
     }
 
-    /**
-     * POST /packing/process
-     */
     public function process(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -107,7 +100,6 @@ class PackingController extends Controller
 
             $warehousePacking = Warehouse::where('code', 'PACKING')->firstOrFail();
 
-            // STEP 1: Loop cari stok dari gudang prioritas
             $totalAvailable = 0;
             $stockSources = [];
 
@@ -115,29 +107,29 @@ class PackingController extends Controller
                 $warehouse = Warehouse::where('code', $warehouseCode)->first();
                 if (!$warehouse) continue;
 
-                $inventory = Inventory::where('warehouse_id', $warehouse->id)
+                $inventories = Inventory::where('warehouse_id', $warehouse->id)
                     ->where('item_id', $detail->item_id)
+                    ->where('qty', '>', 0)
+                    ->orderBy('id', 'asc')
                     ->lockForUpdate()
-                    ->first();
+                    ->get();
 
-                $available = $inventory ? $inventory->qty : 0;
-
-                if ($available > 0) {
-                    $stockSources[] = [
-                        'warehouse' => $warehouse,
-                        'inventory' => $inventory,
-                        'available' => $available,
-                    ];
-                    $totalAvailable += $available;
+                foreach ($inventories as $inventory) {
+                    if ($inventory->qty > 0) {
+                        $stockSources[] = [
+                            'warehouse' => $warehouse,
+                            'inventory' => $inventory,
+                            'available' => $inventory->qty,
+                        ];
+                        $totalAvailable += $inventory->qty;
+                    }
                 }
             }
 
-            // STEP 2: Validasi total stok
             if ($totalAvailable < $qtyPacked) {
                 throw new \Exception("Stok {$detail->item->name} tidak cukup! Butuh {$qtyPacked} pcs, tersedia {$totalAvailable} pcs.");
             }
 
-            // STEP 3: Ambil stok dari gudang (FIFO)
             $remaining = $qtyPacked;
             $usedSources = [];
 
@@ -146,10 +138,8 @@ class PackingController extends Controller
 
                 $toTake = min($remaining, $source['available']);
 
-                // Kurangi stok di gudang sumber
                 $source['inventory']->decrement('qty', $toTake);
 
-                // Catat ke inventory_logs (OUT dari gudang sumber)
                 InventoryLog::create([
                     'date' => now()->toDateString(),
                     'time' => now()->toTimeString(),
@@ -165,30 +155,36 @@ class PackingController extends Controller
                     'user_id' => Auth::id(),
                 ]);
 
-                $usedSources[] = [
-                    'warehouse_id' => $source['warehouse']->id,
-                    'warehouse_name' => $source['warehouse']->name,
-                    'qty' => $toTake,
-                ];
+                if (!isset($usedSources[$source['warehouse']->id])) {
+                    $usedSources[$source['warehouse']->id] = [
+                        'warehouse_id' => $source['warehouse']->id,
+                        'warehouse_name' => $source['warehouse']->name,
+                        'qty' => 0,
+                    ];
+                }
+                $usedSources[$source['warehouse']->id]['qty'] += $toTake;
 
                 $remaining -= $toTake;
             }
 
-            // STEP 4: Tambah stok di Gudang Packing (Barang Jadi)
-            $inventoryPacking = Inventory::firstOrCreate(
-                [
+            $inventoryPacking = Inventory::where('warehouse_id', $warehousePacking->id)
+                ->where('item_id', $detail->item_id)
+                ->where('ref_po_id', $productionOrder->id)
+                ->first();
+
+            if ($inventoryPacking) {
+                $inventoryPacking->increment('qty', $qtyPacked);
+            } else {
+                Inventory::create([
                     'warehouse_id' => $warehousePacking->id,
                     'item_id' => $detail->item_id,
-                ],
-                [
-                    'qty' => 0,
+                    'qty' => $qtyPacked,
                     'qty_m3' => 0,
-                ]
-            );
+                    'ref_po_id' => $productionOrder->id,
+                    'ref_product_id' => $detail->item_id,
+                ]);
+            }
 
-            $inventoryPacking->increment('qty', $qtyPacked);
-
-            // Catat ke inventory_logs (IN ke Gudang Packing)
             InventoryLog::create([
                 'date' => now()->toDateString(),
                 'time' => now()->toTimeString(),
@@ -204,8 +200,8 @@ class PackingController extends Controller
                 'user_id' => Auth::id(),
             ]);
 
-            // STEP 5: Catat di production log
-            $sourcesText = collect($usedSources)->map(function($s) {
+            $usedSourcesArray = array_values($usedSources);
+            $sourcesText = collect($usedSourcesArray)->map(function($s) {
                 return "{$s['qty']} dari {$s['warehouse_name']}";
             })->implode(', ');
 
@@ -214,7 +210,7 @@ class PackingController extends Controller
                 'reference_number' => $productionOrder->po_number,
                 'process_type' => 'packing',
                 'stage' => 'packing',
-                'source_warehouse_id' => $usedSources[0]['warehouse_id'] ?? null,
+                'source_warehouse_id' => $usedSourcesArray[0]['warehouse_id'] ?? null,
                 'destination_warehouse_id' => $warehousePacking->id,
                 'input_item_id' => $detail->item_id,
                 'input_quantity' => $qtyPacked,
@@ -224,7 +220,6 @@ class PackingController extends Controller
                 'user_id' => Auth::id(),
             ]);
 
-            // STEP 6: Cek apakah PO sudah selesai SEMUA
             $allCompleted = $productionOrder->details->every(function ($d) use ($warehousePacking) {
                 $stockPacking = Inventory::where('warehouse_id', $warehousePacking->id)
                     ->where('item_id', $d->item_id)
@@ -244,7 +239,7 @@ class PackingController extends Controller
                 'message' => '✅ Proses Packing berhasil!',
                 'data' => [
                     'qty_packed' => $qtyPacked,
-                    'sources_used' => $usedSources,
+                    'sources_used' => $usedSourcesArray,
                     'destination' => $warehousePacking->name,
                     'po_completed' => $allCompleted,
                 ],

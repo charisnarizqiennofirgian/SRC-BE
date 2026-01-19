@@ -6,24 +6,32 @@ use App\Models\Item;
 use App\Models\StockMovement;
 use App\Models\Category;
 use App\Models\Unit;
+use App\Models\Warehouse;
+use App\Models\Inventory;
+use App\Models\InventoryLog;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 
 class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
     private $productCategoryId;
     private $units;
+    private $packingWarehouseId;
 
     public function __construct()
     {
         $this->productCategoryId = Category::where('name', 'Produk Jadi')->value('id');
-        
+
         $this->units = Unit::pluck('id', 'name')->mapWithKeys(function ($id, $name) {
             return [strtolower(trim($name)) => $id];
         });
+
+        // ✅ Default gudang untuk Produk Jadi = Gudang Packing (ID 11)
+        $this->packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id') ?? 11;
     }
 
     public function collection(Collection $rows)
@@ -34,7 +42,7 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
         $skippedRows = [];
         $processedRows = 0;
 
-        foreach ($rows as $index => $row) 
+        foreach ($rows as $index => $row)
         {
             // ✅ VALIDASI WAJIB
             if (empty($row['kode']) || empty($row['nama_produk']) || empty($row['satuan'])) {
@@ -79,7 +87,7 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
                     ]
                 );
 
-                // ✅ 2. BIKIN STOCK MOVEMENT (kalau ada stok)
+                // ✅ 2. BIKIN STOCK MOVEMENT (legacy - tetap dipertahankan)
                 if ($stok > 0) {
                     $existingMovement = StockMovement::where('item_id', $item->id)
                                                      ->where('notes', 'LIKE', '%Import Excel Produk%')
@@ -98,6 +106,54 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
                             'notes' => 'Import Excel Produk',
                         ]);
                     }
+
+                    // ✅ 3. UPDATE INVENTORY (tabel inventories)
+                    $inventory = Inventory::where('item_id', $item->id)
+                        ->where('warehouse_id', $this->packingWarehouseId)
+                        ->first();
+
+                    $oldQty = $inventory ? (float) $inventory->qty : 0;
+
+                    Inventory::updateOrCreate(
+                        [
+                            'item_id' => $item->id,
+                            'warehouse_id' => $this->packingWarehouseId,
+                        ],
+                        [
+                            'qty' => $stok,
+                        ]
+                    );
+
+                    // ✅ 4. CATAT KE INVENTORY_LOGS
+                    // Cek apakah sudah ada log INITIAL_STOCK untuk item ini
+                    $existingLog = InventoryLog::where('item_id', $item->id)
+                        ->where('warehouse_id', $this->packingWarehouseId)
+                        ->where('transaction_type', 'INITIAL_STOCK')
+                        ->first();
+
+                    if ($existingLog) {
+                        // Update log yang sudah ada (jika re-import)
+                        $existingLog->update([
+                            'qty' => $stok,
+                            'notes' => 'Import Excel Produk Jadi (Updated)',
+                        ]);
+                    } else {
+                        // Buat log baru
+                        InventoryLog::create([
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $item->id,
+                            'warehouse_id' => $this->packingWarehouseId,
+                            'qty' => $stok,
+                            'direction' => 'IN',
+                            'transaction_type' => 'INITIAL_STOCK',
+                            'reference_type' => 'ImportExcel',
+                            'reference_id' => $item->id,
+                            'reference_number' => 'IMPORT-PRODUK-' . $item->code,
+                            'notes' => 'Import Excel Produk Jadi',
+                            'user_id' => Auth::id(),
+                        ]);
+                    }
                 }
 
                 $processedRows++;
@@ -114,7 +170,7 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
         if (!empty($skippedRows)) {
             Log::warning('Baris Excel Product yang ditolak:', $skippedRows);
         }
-        
+
         Log::info("Import Product selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 

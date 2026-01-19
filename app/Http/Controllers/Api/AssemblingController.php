@@ -78,12 +78,10 @@ class AssemblingController extends Controller
         $maxCanProduce = PHP_INT_MAX;
 
         foreach ($detail->item->bomComponents as $bom) {
-
-            $inventory = Inventory::where('warehouse_id', $warehouseKomponen->id)
+            $stockAvailable = Inventory::where('warehouse_id', $warehouseKomponen->id)
                 ->where('item_id', $bom->child_item_id)
-                ->first();
+                ->sum('qty');
 
-            $stockAvailable = $inventory ? $inventory->qty_pcs : 0;
             $qtyNeeded = $bom->qty;
 
             $canProduce = $qtyNeeded > 0 ? floor($stockAvailable / $qtyNeeded) : 0;
@@ -133,96 +131,109 @@ class AssemblingController extends Controller
 
             $productionOrder = ProductionOrder::findOrFail($request->production_order_id);
 
-            // STEP 1: Validasi Stok Komponen yang Dipakai
             foreach ($request->used_components as $comp) {
-                $inventory = Inventory::where('warehouse_id', $warehouseKomponen->id)
+                $stockAvailable = Inventory::where('warehouse_id', $warehouseKomponen->id)
                     ->where('item_id', $comp['item_id'])
-                    ->first();
-
-                $stockAvailable = $inventory ? $inventory->qty : 0;
+                    ->sum('qty');
 
                 if ($stockAvailable < $comp['qty']) {
                     $item = \App\Models\Item::find($comp['item_id']);
-                    throw new \Exception("Stok {$item->name} tidak cukup! Butuh {$comp['qty']}, tersedia {$stockAvailable}");
+                    throw new \Exception("Stok Komponen {$item->name} tidak cukup! Butuh {$comp['qty']}, tersedia {$stockAvailable}");
                 }
             }
 
-            // STEP 2: Kurangi Stok Komponen yang Dipakai + Catat Log
             foreach ($request->used_components as $comp) {
-                $inventory = Inventory::where('warehouse_id', $warehouseKomponen->id)
+                $qtyToDeduct = $comp['qty'];
+
+                $inventories = Inventory::where('warehouse_id', $warehouseKomponen->id)
                     ->where('item_id', $comp['item_id'])
-                    ->first();
+                    ->where('qty', '>', 0)
+                    ->orderBy('id', 'asc')
+                    ->lockForUpdate()
+                    ->get();
 
-                if ($inventory) {
-                    $inventory->decrement('qty', $comp['qty']);
+                foreach ($inventories as $inventory) {
+                    if ($qtyToDeduct <= 0) break;
 
-                    // Catat ke inventory_logs (OUT dari Gudang Komponen)
+                    $qtyTaken = min($qtyToDeduct, $inventory->qty);
+                    $inventory->decrement('qty', $qtyTaken);
+                    $qtyToDeduct -= $qtyTaken;
+                }
+
+                InventoryLog::create([
+                    'date' => now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $comp['item_id'],
+                    'warehouse_id' => $warehouseKomponen->id,
+                    'qty' => $comp['qty'],
+                    'direction' => 'OUT',
+                    'transaction_type' => 'PRODUCTION',
+                    'reference_type' => 'ProductionOrder',
+                    'reference_id' => $productionOrder->id,
+                    'reference_number' => $productionOrder->po_number,
+                    'notes' => "Komponen dipakai untuk assembling",
+                    'user_id' => Auth::id(),
+                ]);
+            }
+
+            if ($request->rejected_components) {
+                foreach ($request->rejected_components as $reject) {
+                    $qtyToDeduct = $reject['qty'];
+
+                    $inventories = Inventory::where('warehouse_id', $warehouseKomponen->id)
+                        ->where('item_id', $reject['item_id'])
+                        ->where('qty', '>', 0)
+                        ->orderBy('id', 'asc')
+                        ->lockForUpdate()
+                        ->get();
+
+                    foreach ($inventories as $inventory) {
+                        if ($qtyToDeduct <= 0) break;
+
+                        $qtyTaken = min($qtyToDeduct, $inventory->qty);
+                        $inventory->decrement('qty', $qtyTaken);
+                        $qtyToDeduct -= $qtyTaken;
+                    }
+
                     InventoryLog::create([
                         'date' => now()->toDateString(),
                         'time' => now()->toTimeString(),
-                        'item_id' => $comp['item_id'],
+                        'item_id' => $reject['item_id'],
                         'warehouse_id' => $warehouseKomponen->id,
-                        'qty' => $comp['qty'],
+                        'qty' => $reject['qty'],
                         'direction' => 'OUT',
-                        'transaction_type' => 'PRODUCTION',
+                        'transaction_type' => 'ADJUSTMENT',
                         'reference_type' => 'ProductionOrder',
                         'reference_id' => $productionOrder->id,
                         'reference_number' => $productionOrder->po_number,
-                        'notes' => "Komponen dipakai untuk assembling",
+                        'notes' => "Komponen reject/rusak saat assembling",
                         'user_id' => Auth::id(),
                     ]);
                 }
             }
 
-            // STEP 3: Kurangi Stok Komponen yang Reject/Rusak + Catat Log
-            if ($request->rejected_components) {
-                foreach ($request->rejected_components as $reject) {
-                    $inventory = Inventory::where('warehouse_id', $warehouseKomponen->id)
-                        ->where('item_id', $reject['item_id'])
-                        ->first();
-
-                    if ($inventory) {
-                        $inventory->decrement('qty', $reject['qty']);
-
-                        // Catat ke inventory_logs (OUT - Reject)
-                        InventoryLog::create([
-                            'date' => now()->toDateString(),
-                            'time' => now()->toTimeString(),
-                            'item_id' => $reject['item_id'],
-                            'warehouse_id' => $warehouseKomponen->id,
-                            'qty' => $reject['qty'],
-                            'direction' => 'OUT',
-                            'transaction_type' => 'ADJUSTMENT',
-                            'reference_type' => 'ProductionOrder',
-                            'reference_id' => $productionOrder->id,
-                            'reference_number' => $productionOrder->po_number,
-                            'notes' => "Komponen reject/rusak saat assembling",
-                            'user_id' => Auth::id(),
-                        ]);
-                    }
-                }
-            }
-
-            // STEP 4: Loop Multiple Products (Bulk)
             foreach ($request->products as $product) {
                 $detail = ProductionOrderDetail::with('item')->findOrFail($product['detail_id']);
                 $qtyGood = $product['qty_good'];
 
-                // STEP 5: Tambah Stok White Body di Gudang Assembling
-                $inventoryWhiteBody = Inventory::firstOrCreate(
-                    [
+                $inventoryWhiteBody = Inventory::where('warehouse_id', $warehouseAssembling->id)
+                    ->where('item_id', $detail->item_id)
+                    ->where('ref_po_id', $productionOrder->id)
+                    ->first();
+
+                if ($inventoryWhiteBody) {
+                    $inventoryWhiteBody->increment('qty', $qtyGood);
+                } else {
+                    Inventory::create([
                         'warehouse_id' => $warehouseAssembling->id,
                         'item_id' => $detail->item_id,
-                    ],
-                    [
-                        'qty' => 0,
+                        'qty' => $qtyGood,
                         'qty_m3' => 0,
-                    ]
-                );
+                        'ref_po_id' => $productionOrder->id,
+                        'ref_product_id' => $detail->item_id,
+                    ]);
+                }
 
-                $inventoryWhiteBody->increment('qty', $qtyGood);
-
-                // Catat ke inventory_logs (IN ke Gudang Assembling)
                 InventoryLog::create([
                     'date' => now()->toDateString(),
                     'time' => now()->toTimeString(),
@@ -238,10 +249,8 @@ class AssemblingController extends Controller
                     'user_id' => Auth::id(),
                 ]);
 
-                // STEP 6: Update Progress PO Detail
                 $detail->increment('qty_produced', $qtyGood);
 
-                // STEP 7: Catat di Production Log
                 ProductionLog::create([
                     'date' => now(),
                     'reference_number' => $detail->productionOrder->po_number,
@@ -256,7 +265,6 @@ class AssemblingController extends Controller
                 ]);
             }
 
-            // STEP 8: Cek apakah semua PO Detail sudah selesai
             $po = ProductionOrder::with('details')->findOrFail($request->production_order_id);
             $allCompleted = $po->details->every(function ($d) {
                 return $d->qty_produced >= $d->qty_planned;
