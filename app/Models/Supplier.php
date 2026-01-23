@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Supplier extends Model
 {
-    use HasFactory;
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -16,5 +15,11 @@ class Supplier extends Model
         'name',
         'address',
         'phone',
+        'payable_account_id',
     ];
+
+    public function payableAccount()
+    {
+        return $this->belongsTo(ChartOfAccount::class, 'payable_account_id');
+    }
 }

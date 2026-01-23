@@ -37,6 +37,10 @@ use App\Http\Controllers\Api\PackingController;
 use App\Http\Controllers\Api\MaterialUsageController;
 use App\Http\Controllers\Api\InventoryLogController;
 use App\Http\Controllers\Api\ProductionMonitoringController;
+use App\Http\Controllers\Api\ChartOfAccountController;
+use App\Http\Controllers\Api\PaymentMethodController;
+use App\Http\Controllers\Api\JournalEntryController;
+use App\Http\Controllers\Api\PurchasePaymentController;
 
 /*
 |--------------------------------------------------------------------------
@@ -138,7 +142,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('goods-receipts/unbilled', [GoodsReceiptController::class, 'getUnbilledReceipts']);
     Route::apiResource('goods-receipts', GoodsReceiptController::class);
+    Route::get('purchase-bills/form-data', [PurchaseBillController::class, 'getFormData']);
     Route::apiResource('purchase-bills', PurchaseBillController::class);
+
+    // --- PEMBAYARAN HUTANG ---
+    Route::prefix('purchase-payments')->group(function () {
+        Route::get('/', [PurchasePaymentController::class, 'index']);
+        Route::post('/', [PurchasePaymentController::class, 'store']);
+        Route::get('/form-data', [PurchasePaymentController::class, 'getFormData']);
+        Route::get('/outstanding-bills', [PurchasePaymentController::class, 'getOutstandingBills']);
+        Route::get('/{id}', [PurchasePaymentController::class, 'show']);
+    });
 
     // --- PENJUALAN ---
     Route::apiResource('sales-orders', SalesOrderController::class);
@@ -237,6 +251,37 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- MONITORING PRODUKSI ---
     Route::prefix('production-monitoring')->group(function () {
         Route::get('/', [ProductionMonitoringController::class, 'index']);
+    });
+
+    // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
+    Route::prefix('coa')->group(function () {
+        Route::get('/', [ChartOfAccountController::class, 'index']);
+        Route::post('/', [ChartOfAccountController::class, 'store']);
+        Route::get('/types', [ChartOfAccountController::class, 'getTypes']);
+        Route::get('/by-type/{type}', [ChartOfAccountController::class, 'getByType']);
+        Route::get('/template', [ChartOfAccountController::class, 'downloadTemplate']);
+        Route::post('/import', [ChartOfAccountController::class, 'import']);
+        Route::get('/export', [ChartOfAccountController::class, 'export']);
+        Route::get('/{id}', [ChartOfAccountController::class, 'show']);
+        Route::put('/{id}', [ChartOfAccountController::class, 'update']);
+        Route::delete('/{id}', [ChartOfAccountController::class, 'destroy']);
+    });
+
+    // --- METODE PEMBAYARAN ---
+    Route::prefix('payment-methods')->group(function () {
+        Route::get('/', [PaymentMethodController::class, 'index']);
+        Route::post('/', [PaymentMethodController::class, 'store']);
+        Route::get('/types', [PaymentMethodController::class, 'getTypes']);
+        Route::get('/active', [PaymentMethodController::class, 'getActive']);
+        Route::get('/{id}', [PaymentMethodController::class, 'show']);
+        Route::put('/{id}', [PaymentMethodController::class, 'update']);
+        Route::delete('/{id}', [PaymentMethodController::class, 'destroy']);
+    });
+
+    // --- JURNAL UMUM ---
+    Route::prefix('journal-entries')->group(function () {
+        Route::get('/', [JournalEntryController::class, 'index']);
+        Route::get('/{id}', [JournalEntryController::class, 'show']);
     });
 
     // --- UTILITAS DASHBOARD ---

@@ -9,10 +9,8 @@ class PurchaseBillDetail extends Model
 {
     use HasFactory;
 
-    // ✅ Nonaktifkan timestamps (created_at, updated_at)
     public $timestamps = false;
 
-    // ✅ KOLOM YANG BOLEH DIISI
     protected $fillable = [
         'purchase_bill_id',
         'goods_receipt_detail_id',
@@ -20,36 +18,34 @@ class PurchaseBillDetail extends Model
         'quantity',
         'price',
         'subtotal',
-        'specifications', 
+        'specifications',
+        'account_id',
     ];
 
-    
     protected $casts = [
         'quantity' => 'decimal:2',
         'price' => 'decimal:2',
         'subtotal' => 'decimal:2',
-        'specifications' => 'array', 
+        'specifications' => 'array',
     ];
 
-    /**
-     * RELASI KE PURCHASE BILL (Header Faktur)
-     */
     public function purchaseBill()
     {
         return $this->belongsTo(PurchaseBill::class);
     }
 
-    /**
-     * RELASI KE ITEM (Barang)
-     */
     public function item()
     {
         return $this->belongsTo(Item::class);
     }
 
-    
     public function goodsReceiptDetail()
     {
         return $this->belongsTo(GoodsReceiptDetail::class);
+    }
+
+    public function account()
+    {
+        return $this->belongsTo(ChartOfAccount::class, 'account_id');
     }
 }

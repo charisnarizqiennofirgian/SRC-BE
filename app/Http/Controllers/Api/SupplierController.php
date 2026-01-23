@@ -18,22 +18,23 @@ class SupplierController extends Controller
             // Ambil parameter dari request
             $perPage = $request->input('per_page', 10);
             $search = $request->input('search');
-            
-            // Query builder dengan latest
-            $query = Supplier::latest();
-            
+
+            // Query builder dengan latest & load relationship
+            $query = Supplier::with('payableAccount:id,code,name') // 👈 TAMBAHAN INI!
+                             ->latest();
+
             // Jika ada parameter search
             if ($search) {
                 $query->where('code', 'like', "%{$search}%")
                       ->orWhere('name', 'like', "%{$search}%")
                       ->orWhere('phone', 'like', "%{$search}%");
             }
-            
+
             // Paginate hasil query
             $suppliers = $query->paginate($perPage);
-            
+
             return response()->json($suppliers, 200);
-            
+
         } catch (\Exception $e) {
             \Log::error('Error saat mengambil data supplier: ' . $e->getMessage());
             return response()->json([
@@ -54,9 +55,13 @@ class SupplierController extends Controller
                 'name' => 'required|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
+                'payable_account_id' => 'nullable|exists:chart_of_accounts,id', // 👈 TAMBAHAN INI!
             ]);
 
             $supplier = Supplier::create($validatedData);
+
+            // Load relationship untuk response
+            $supplier->load('payableAccount:id,code,name');
 
             return response()->json([
                 'success' => true,
@@ -91,9 +96,13 @@ class SupplierController extends Controller
                 'name' => 'required|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
+                'payable_account_id' => 'nullable|exists:chart_of_accounts,id', // 👈 TAMBAHAN INI!
             ]);
 
             $supplier->update($validatedData);
+
+            // Load relationship untuk response
+            $supplier->load('payableAccount:id,code,name');
 
             return response()->json([
                 'success' => true,
@@ -124,12 +133,12 @@ class SupplierController extends Controller
     {
         try {
             $supplier->delete();
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Supplier berhasil dihapus.'
             ], 200);
-            
+
         } catch (\Exception $e) {
             \Log::error('Error saat menghapus supplier: ' . $e->getMessage());
             return response()->json([

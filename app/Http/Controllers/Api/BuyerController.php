@@ -9,31 +9,24 @@ use Illuminate\Validation\ValidationException;
 
 class BuyerController extends Controller
 {
-    /**
-     * Menampilkan semua data buyer dengan pagination.
-     */
     public function index(Request $request)
     {
         try {
-            // Ambil parameter dari request
             $perPage = $request->input('per_page', 10);
             $search = $request->input('search');
-            
-            // Query builder dengan latest
-            $query = Buyer::latest();
-            
-            // Jika ada parameter search
+
+            $query = Buyer::with('receivableAccount')->latest();
+
             if ($search) {
                 $query->where('code', 'like', "%{$search}%")
                       ->orWhere('name', 'like', "%{$search}%")
                       ->orWhere('phone', 'like', "%{$search}%");
             }
-            
-            // Paginate hasil query
+
             $buyers = $query->paginate($perPage);
-            
+
             return response()->json($buyers, 200);
-            
+
         } catch (\Exception $e) {
             \Log::error('Error saat mengambil data buyer: ' . $e->getMessage());
             return response()->json([
@@ -43,9 +36,6 @@ class BuyerController extends Controller
         }
     }
 
-    /**
-     * Menyimpan buyer baru.
-     */
     public function store(Request $request)
     {
         try {
@@ -54,9 +44,11 @@ class BuyerController extends Controller
                 'name' => 'required|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
+                'receivable_account_id' => 'nullable|exists:chart_of_accounts,id',
             ]);
 
             $buyer = Buyer::create($validatedData);
+            $buyer->load('receivableAccount');
 
             return response()->json([
                 'success' => true,
@@ -80,9 +72,6 @@ class BuyerController extends Controller
         }
     }
 
-    /**
-     * Mengupdate data buyer.
-     */
     public function update(Request $request, Buyer $buyer)
     {
         try {
@@ -91,9 +80,11 @@ class BuyerController extends Controller
                 'name' => 'required|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
+                'receivable_account_id' => 'nullable|exists:chart_of_accounts,id',
             ]);
 
             $buyer->update($validatedData);
+            $buyer->load('receivableAccount');
 
             return response()->json([
                 'success' => true,
@@ -117,19 +108,16 @@ class BuyerController extends Controller
         }
     }
 
-    /**
-     * Menghapus buyer.
-     */
     public function destroy(Buyer $buyer)
     {
         try {
             $buyer->delete();
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'Buyer berhasil dihapus.'
             ], 200);
-            
+
         } catch (\Exception $e) {
             \Log::error('Error saat menghapus buyer: ' . $e->getMessage());
             return response()->json([

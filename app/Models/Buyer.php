@@ -6,15 +6,20 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-
 class Buyer extends Model
 {
-    use HasFactory;
-use HasFactory, SoftDeletes;
+    use HasFactory, SoftDeletes;
+
     protected $fillable = [
         'code',
         'name',
         'address',
         'phone',
+        'receivable_account_id',
     ];
+
+    public function receivableAccount()
+    {
+        return $this->belongsTo(ChartOfAccount::class, 'receivable_account_id');
+    }
 }
