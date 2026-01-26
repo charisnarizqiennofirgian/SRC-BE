@@ -41,6 +41,8 @@ use App\Http\Controllers\Api\ChartOfAccountController;
 use App\Http\Controllers\Api\PaymentMethodController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\PurchasePaymentController;
+use App\Http\Controllers\Api\SalesInvoiceController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -160,6 +162,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- PENGIRIMAN ---
     Route::apiResource('delivery-orders', DeliveryOrderController::class);
+
+    // --- SALES INVOICE ---
+    Route::prefix('sales-invoices')->group(function () {
+        Route::get('/', [SalesInvoiceController::class, 'index']);
+        Route::post('/', [SalesInvoiceController::class, 'store']);
+        Route::get('/available-delivery-orders', [SalesInvoiceController::class, 'getAvailableDeliveryOrders']);
+        Route::get('/{id}', [SalesInvoiceController::class, 'show']);
+        Route::post('/{id}/post', [SalesInvoiceController::class, 'post']);
+        Route::post('/{id}/cancel', [SalesInvoiceController::class, 'cancel']);
+        Route::delete('/{id}', [SalesInvoiceController::class, 'destroy']);
+    });
 
     // --- PRODUKSI / BOM ---
     Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);
