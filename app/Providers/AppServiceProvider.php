@@ -6,17 +6,15 @@ use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
-        //
+        // Daftarkan Services
+        $this->app->singleton(\App\Services\JournalService::class);
+        $this->app->singleton(\App\Services\InvoiceService::class);
+        $this->app->singleton(\App\Services\DownPaymentService::class);
+        $this->app->singleton(\App\Services\InvoicePaymentService::class);
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
         //

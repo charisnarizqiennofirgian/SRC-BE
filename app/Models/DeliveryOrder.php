@@ -20,11 +20,7 @@ class DeliveryOrder extends Model
         'notes',
         'driver_name',
         'vehicle_number',
-
-        
         'shipment_mode',
-
-        // Kolom Ekspor
         'incoterm',
         'freight_terms',
         'container_number',
@@ -45,18 +41,14 @@ class DeliveryOrder extends Model
         'rex_certificate_file',
         'goods_description',
         'barcode_image',
-
-        
-        'forwarder_name',    
-        'peb_number',        
-        'container_type',    
+        'forwarder_name',
+        'peb_number',
+        'container_type',
     ];
 
     protected $casts = [
         'delivery_date' => 'date',
         'bl_date' => 'date',
-
-        // Aturan untuk kolom JSON
         'consignee_info' => 'array',
         'applicant_info' => 'array',
         'notify_info' => 'array',
@@ -66,35 +58,33 @@ class DeliveryOrder extends Model
         'details',
     ];
 
-    /**
-     * Relasi: Mendapatkan baris-baris barang (details) dari pengiriman ini.
-     */
     public function details()
     {
         return $this->hasMany(DeliveryOrderDetail::class);
     }
 
-    /**
-     * Relasi: Mendapatkan Pesanan Penjualan (SO) induknya.
-     */
     public function salesOrder()
     {
         return $this->belongsTo(SalesOrder::class);
     }
 
-    /**
-     * Relasi: Mendapatkan data Customer (Buyer).
-     */
     public function buyer()
     {
         return $this->belongsTo(Buyer::class);
     }
 
-    /**
-     * Relasi: Mendapatkan data Admin (User) yang membuat.
-     */
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function salesInvoices()
+    {
+        return $this->hasMany(SalesInvoice::class, 'delivery_order_id');
+    }
+
+    public function salesInvoice()
+    {
+        return $this->hasOne(SalesInvoice::class, 'delivery_order_id');
     }
 }

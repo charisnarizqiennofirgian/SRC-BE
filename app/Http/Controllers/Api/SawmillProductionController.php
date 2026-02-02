@@ -155,7 +155,7 @@ class SawmillProductionController extends Controller
                 ]);
             }
 
-            // === HITUNG TOTAL & RENDEMEN ===
+            // === HITUNG TOTAL & RENDEMEN === 
             $totalLogM3   = $production->logs()->sum('volume_log_m3');
             $totalRstM3   = $production->rsts()->sum('volume_rst_m3');
             $yieldPercent = $totalLogM3 > 0

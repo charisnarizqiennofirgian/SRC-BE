@@ -11,21 +11,22 @@ class SalesOrder extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'so_number',
-        'buyer_id',
-        'user_id',
-        'so_date',
-        'delivery_date',
-        'customer_po_number',
-        'subtotal',
-        'discount',
-        'tax_ppn',
-        'grand_total',
-        'notes',
-        'status',
-        'currency',
-        'exchange_rate',
-    ];
+    'so_number',
+    'buyer_id',
+    'user_id',
+    'so_date',
+    'delivery_date',
+    'customer_po_number',
+    'subtotal',
+    'discount',
+    'tax_ppn',
+    'tax_rate',
+    'grand_total',
+    'notes',
+    'status',
+    'currency',
+    'exchange_rate',
+];
 
     protected $casts = [
         'so_date' => 'date',

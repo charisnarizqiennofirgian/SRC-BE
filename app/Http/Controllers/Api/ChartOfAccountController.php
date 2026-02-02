@@ -12,9 +12,31 @@ use Shuchkin\SimpleXLSX;
 
 class ChartOfAccountController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $accounts = ChartOfAccount::orderBy('code', 'asc')->get();
+        $query = ChartOfAccount::query();
+
+        // Filter by type (ASET, KEWAJIBAN, dll)
+        if ($request->has('type')) {
+            $types = explode(',', $request->type);
+            $query->whereIn('type', $types);
+        }
+
+        // Filter by is_active
+        if ($request->has('is_active')) {
+            $query->where('is_active', $request->is_active);
+        }
+
+        // Search by code or name
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('code', 'like', "%{$search}%")
+                    ->orWhere('name', 'like', "%{$search}%");
+            });
+        }
+
+        $accounts = $query->orderBy('code', 'asc')->get();
 
         return response()->json([
             'success' => true,
@@ -22,6 +44,24 @@ class ChartOfAccountController extends Controller
         ]);
     }
 
+    public function all()
+    {
+        try {
+            $accounts = ChartOfAccount::active()
+                ->orderBy('code', 'asc')
+                ->get();
+            return response()->json([
+                'success' => true,
+                'data' => $accounts
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching all COA: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mengambil data akun.',
+            ], 500);
+        }
+    }
     public function store(Request $request)
     {
         $request->validate([

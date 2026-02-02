@@ -12,14 +12,69 @@ use Illuminate\Support\Facades\Log;
 
 class JournalService
 {
-    /**
-     * Buat jurnal otomatis dari Purchase Bill
-     */
+    public function createJournal(
+        string $date,
+        string $description,
+        array $entries,
+        ?string $referenceType = null,
+        ?int $referenceId = null
+    ): JournalEntry {
+        return DB::transaction(function () use ($date, $description, $entries, $referenceType, $referenceId) {
+
+            $journal = JournalEntry::create([
+                'journal_number' => JournalEntry::generateJournalNumber(),
+                'date' => $date,
+                'description' => $description,
+                'reference_type' => $referenceType,
+                'reference_id' => $referenceId,
+                'total_debit' => 0,
+                'total_credit' => 0,
+                'status' => JournalEntry::STATUS_POSTED,
+                'created_by' => Auth::id(),
+            ]);
+
+            $totalDebit = 0;
+            $totalCredit = 0;
+
+            foreach ($entries as $entry) {
+                JournalEntryLine::create([
+                    'journal_entry_id' => $journal->id,
+                    'account_id' => $entry['account_id'],
+                    'description' => $entry['description'],
+                    'debit' => $entry['debit'] ?? 0,
+                    'credit' => $entry['credit'] ?? 0,
+                ]);
+
+                $totalDebit += $entry['debit'] ?? 0;
+                $totalCredit += $entry['credit'] ?? 0;
+            }
+
+            $journal->update([
+                'total_debit' => $totalDebit,
+                'total_credit' => $totalCredit,
+            ]);
+
+            if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+                throw new \Exception(
+                    "Jurnal tidak balance! Debit: Rp " . number_format($totalDebit, 2, ',', '.') .
+                    ", Kredit: Rp " . number_format($totalCredit, 2, ',', '.')
+                );
+            }
+
+            Log::info('✅ Jurnal berhasil dibuat', [
+                'journal_number' => $journal->journal_number,
+                'debit' => $totalDebit,
+                'credit' => $totalCredit,
+            ]);
+
+            return $journal->fresh(['lines.account']);
+        });
+    }
+
     public function createFromPurchaseBill(PurchaseBill $bill): JournalEntry
     {
         return DB::transaction(function () use ($bill) {
 
-            // 🔍 DEBUG: Log data purchase bill
             Log::info('=== MULAI BUAT JURNAL ===');
             Log::info('Purchase Bill Data:', [
                 'bill_number' => $bill->bill_number,
@@ -30,7 +85,6 @@ class JournalService
                 'payment_type' => $bill->payment_type,
             ]);
 
-            // 1. Buat header jurnal
             $journal = JournalEntry::create([
                 'journal_number' => JournalEntry::generateJournalNumber(),
                 'date' => $bill->bill_date,
@@ -46,7 +100,6 @@ class JournalService
             $totalDebit = 0;
             $totalCredit = 0;
 
-            // 2. DEBIT: Persediaan/Biaya per item (subtotal tanpa PPN)
             Log::info('=== PROSES ITEMS ===');
             foreach ($bill->details as $detail) {
                 if ($detail->account_id && $detail->subtotal > 0) {
@@ -71,7 +124,6 @@ class JournalService
 
             Log::info('Total Debit setelah items:', ['totalDebit' => $totalDebit]);
 
-            // 🆕 3. DEBIT: PPN Masukan (kalau ada PPN)
             Log::info('=== PROSES PPN ===');
             Log::info('PPN Amount:', ['ppn_amount' => $bill->ppn_amount]);
 
@@ -102,7 +154,6 @@ class JournalService
 
             Log::info('Total Debit setelah PPN:', ['totalDebit' => $totalDebit]);
 
-            // 4. KREDIT: Hutang atau Kas/Bank berdasarkan payment type
             Log::info('=== PROSES KREDIT ===');
             Log::info('Payment Type:', ['payment_type' => $bill->payment_type]);
 
@@ -135,13 +186,11 @@ class JournalService
 
             Log::info('Total Credit setelah payment:', ['totalCredit' => $totalCredit]);
 
-            // 5. Update total di header jurnal
             $journal->update([
                 'total_debit' => $totalDebit,
                 'total_credit' => $totalCredit,
             ]);
 
-            // 🔥 6. VALIDASI: Pastikan jurnal balance!
             Log::info('=== VALIDASI BALANCE ===');
             Log::info('Final Totals:', [
                 'totalDebit' => $totalDebit,
@@ -163,7 +212,6 @@ class JournalService
 
             Log::info('✅ Jurnal BALANCE!');
 
-            // 7. Link jurnal ke purchase bill
             $bill->update(['journal_entry_id' => $journal->id]);
 
             Log::info('=== JURNAL SELESAI ===');
@@ -172,48 +220,41 @@ class JournalService
         });
     }
 
-    /**
-     * 🆕 Ambil akun PPN Masukan
-     */
     private function getPPNMasukanAccount(): ?ChartOfAccount
-{
-    // 1. Cari akun PPN Masukan yang sudah ada
-    $ppnAccount = ChartOfAccount::where(function($query) {
-            $query->where('code', '1107')
-                  ->orWhere('name', 'LIKE', '%PPN Masukan%')
-                  ->orWhere('name', 'LIKE', '%Pajak Masukan%');
-        })
-        ->where('is_active', true)
-        ->first();
+    {
+        $ppnAccount = ChartOfAccount::where(function($query) {
+                $query->where('code', '1107')
+                      ->orWhere('name', 'LIKE', '%PPN Masukan%')
+                      ->orWhere('name', 'LIKE', '%Pajak Masukan%');
+            })
+            ->where('is_active', true)
+            ->first();
 
-    // 2. Kalau belum ada, buat otomatis!
-    if (!$ppnAccount) {
-        Log::warning('⚠️ Akun PPN Masukan tidak ditemukan, membuat otomatis...');
+        if (!$ppnAccount) {
+            Log::warning('⚠️ Akun PPN Masukan tidak ditemukan, membuat otomatis...');
 
-        try {
-            $ppnAccount = ChartOfAccount::create([
-                'code' => '1107',
-                'name' => 'PPN Masukan',
-                'type' => 'ASET',
-                'normal_position' => 'debit',
-                'is_active' => true,
-            ]);
+            try {
+                $ppnAccount = ChartOfAccount::create([
+                    'code' => '1107',
+                    'name' => 'PPN Masukan',
+                    'type' => 'ASET',
+                    'normal_position' => 'debit',
+                    'is_active' => true,
+                ]);
 
-            Log::info('✅ Akun PPN Masukan berhasil dibuat otomatis', [
-                'account_id' => $ppnAccount->id,
-                'code' => $ppnAccount->code,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('❌ Gagal membuat akun PPN Masukan otomatis: ' . $e->getMessage());
-            return null;
+                Log::info('✅ Akun PPN Masukan berhasil dibuat otomatis', [
+                    'account_id' => $ppnAccount->id,
+                    'code' => $ppnAccount->code,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('❌ Gagal membuat akun PPN Masukan otomatis: ' . $e->getMessage());
+                return null;
+            }
         }
+
+        return $ppnAccount;
     }
 
-    return $ppnAccount;
-}
-    /**
-     * Buat line kredit untuk Hutang Dagang
-     */
     private function createHutangLine(JournalEntry $journal, PurchaseBill $bill, float $amount): void
     {
         $hutangAccountId = $bill->supplier->payable_account_id;
@@ -236,9 +277,6 @@ class JournalService
         }
     }
 
-    /**
-     * Buat line kredit untuk Kas/Bank
-     */
     private function createKasLine(JournalEntry $journal, PurchaseBill $bill, float $amount): void
     {
         $kasAccountId = $bill->paymentMethod?->account_id;
@@ -254,13 +292,8 @@ class JournalService
         }
     }
 
-    /**
-     * Void/Batalkan jurnal
-     */
     public function voidJournal(JournalEntry $journal): void
     {
         $journal->update(['status' => JournalEntry::STATUS_VOID]);
     }
 }
-
-

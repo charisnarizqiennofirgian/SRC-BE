@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\PaymentMethodController;
 use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\PurchasePaymentController;
 use App\Http\Controllers\Api\SalesInvoiceController;
+use App\Http\Controllers\Api\DownPaymentController;
 
 
 /*
@@ -161,7 +162,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('sales-orders-open', [SalesOrderController::class, 'getOpenSalesOrders']);
 
     // --- PENGIRIMAN ---
-    Route::apiResource('delivery-orders', DeliveryOrderController::class);
+    Route::prefix('delivery-orders')->group(function () {
+        Route::get('/available-for-invoice', [DeliveryOrderController::class, 'getAvailableForInvoice']);
+        Route::get('/', [DeliveryOrderController::class, 'index']);
+        Route::post('/', [DeliveryOrderController::class, 'store']);
+        Route::get('/{delivery_order}', [DeliveryOrderController::class, 'show']);
+        Route::put('/{delivery_order}', [DeliveryOrderController::class, 'update']);
+        Route::delete('/{delivery_order}', [DeliveryOrderController::class, 'destroy']);
+        Route::post('/{id}/ship', [DeliveryOrderController::class, 'ship']);
+        Route::post('/{id}/mark-delivered', [DeliveryOrderController::class, 'markDelivered']);
+    });
 
     // --- SALES INVOICE ---
     Route::prefix('sales-invoices')->group(function () {
@@ -172,6 +182,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/post', [SalesInvoiceController::class, 'post']);
         Route::post('/{id}/cancel', [SalesInvoiceController::class, 'cancel']);
         Route::delete('/{id}', [SalesInvoiceController::class, 'destroy']);
+    });
+
+    // --- UANG MUKA PENJUALAN ---
+    Route::prefix('down-payments')->group(function () {
+        Route::get('/', [DownPaymentController::class, 'index']);
+        Route::post('/', [DownPaymentController::class, 'store']);
+        Route::get('/available/{buyerId}', [DownPaymentController::class, 'getAvailable']);
+        Route::get('/{id}', [DownPaymentController::class, 'show']);
+        Route::delete('/{id}', [DownPaymentController::class, 'destroy']);
     });
 
     // --- PRODUKSI / BOM ---
@@ -268,6 +287,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
     Route::prefix('coa')->group(function () {
+        Route::get('/all', [ChartOfAccountController::class, 'all']);
         Route::get('/', [ChartOfAccountController::class, 'index']);
         Route::post('/', [ChartOfAccountController::class, 'store']);
         Route::get('/types', [ChartOfAccountController::class, 'getTypes']);

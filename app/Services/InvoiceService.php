@@ -7,6 +7,7 @@ use App\Models\SalesInvoiceDetail;
 use App\Models\DeliveryOrder;
 use App\Models\JournalEntry;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class InvoiceService
 {
@@ -17,9 +18,6 @@ class InvoiceService
         $this->journalService = $journalService;
     }
 
-    /**
-     * Buat invoice dari Delivery Order
-     */
     public function createInvoiceFromDeliveryOrder(
         int $deliveryOrderId,
         string $invoiceDate,
@@ -28,7 +26,6 @@ class InvoiceService
         ?string $notes = null,
         ?int $userId = null
     ): SalesInvoice {
-        // Ambil data DO
         $deliveryOrder = DeliveryOrder::with([
             'salesOrder',
             'buyer',
@@ -36,49 +33,35 @@ class InvoiceService
             'details.salesOrderDetail'
         ])->findOrFail($deliveryOrderId);
 
-        // Validasi DO sudah DELIVERED
         if ($deliveryOrder->status !== 'DELIVERED') {
             throw new \Exception('Delivery Order belum DELIVERED');
         }
 
-        // Validasi DO belum ada invoice
         $existingInvoice = SalesInvoice::where('delivery_order_id', $deliveryOrderId)->first();
         if ($existingInvoice) {
             throw new \Exception('Delivery Order sudah memiliki invoice');
         }
 
-        // Ambil currency dari SO
         $currency = $deliveryOrder->salesOrder->currency ?? 'IDR';
 
-        // Hitung total
         $subtotalOriginal = 0;
-        $discountOriginal = 0;
 
         foreach ($deliveryOrder->details as $detail) {
             $soDetail = $detail->salesOrderDetail;
             $lineTotal = $detail->quantity_shipped * $soDetail->unit_price;
-            $lineDiscount = $detail->quantity_shipped * ($soDetail->discount ?? 0);
-
             $subtotalOriginal += $lineTotal;
-            $discountOriginal += $lineDiscount;
         }
 
-        $netSubtotal = $subtotalOriginal - $discountOriginal;
+        $taxRate = floatval($deliveryOrder->salesOrder->tax_rate ?? 0);
+        $taxAmountOriginal = $subtotalOriginal * ($taxRate / 100);
+        $totalOriginal = $subtotalOriginal + $taxAmountOriginal;
 
-        // PPN 11% (jika ada)
-        $taxPpnOriginal = $netSubtotal * 0.11;
-        $grandTotalOriginal = $netSubtotal + $taxPpnOriginal;
-
-        // Konversi ke IDR
         $subtotalIdr = $subtotalOriginal * $exchangeRate;
-        $discountIdr = $discountOriginal * $exchangeRate;
-        $taxPpnIdr = $taxPpnOriginal * $exchangeRate;
-        $grandTotalIdr = $grandTotalOriginal * $exchangeRate;
+        $taxAmountIdr = $taxAmountOriginal * $exchangeRate;
+        $totalIdr = $totalOriginal * $exchangeRate;
 
-        // Generate invoice number
         $invoiceNumber = SalesInvoice::generateInvoiceNumber();
 
-        // Buat invoice
         $invoice = SalesInvoice::create([
             'invoice_number' => $invoiceNumber,
             'sales_order_id' => $deliveryOrder->sales_order_id,
@@ -89,32 +72,26 @@ class InvoiceService
             'due_date' => $dueDate,
             'currency' => $currency,
             'exchange_rate' => $exchangeRate,
-            'subtotal_original' => $subtotalOriginal,
-            'discount_original' => $discountOriginal,
-            'tax_ppn_original' => $taxPpnOriginal,
-            'grand_total_original' => $grandTotalOriginal,
+            'subtotal_currency' => $subtotalOriginal,
+            'tax_amount_currency' => $taxAmountOriginal,
+            'total_currency' => $totalOriginal,
             'subtotal_idr' => $subtotalIdr,
-            'discount_idr' => $discountIdr,
-            'tax_ppn_idr' => $taxPpnIdr,
-            'grand_total_idr' => $grandTotalIdr,
+            'tax_amount_idr' => $taxAmountIdr,
+            'total_idr' => $totalIdr,
             'paid_amount' => 0,
-            'remaining_amount' => $grandTotalIdr,
+            'remaining_amount' => $totalIdr,
             'payment_status' => 'UNPAID',
             'notes' => $notes,
             'status' => 'DRAFT',
         ]);
 
-        // Buat invoice details
         foreach ($deliveryOrder->details as $detail) {
             $soDetail = $detail->salesOrderDetail;
 
             $unitPriceOriginal = $soDetail->unit_price;
-            $discountOriginal = $soDetail->discount ?? 0;
-            $subtotalOriginal = ($unitPriceOriginal - $discountOriginal) * $detail->quantity_shipped;
+            $subtotalOriginal = $unitPriceOriginal * $detail->quantity_shipped;
 
-            // Konversi ke IDR
             $unitPriceIdr = $unitPriceOriginal * $exchangeRate;
-            $discountIdr = $discountOriginal * $exchangeRate;
             $subtotalIdr = $subtotalOriginal * $exchangeRate;
 
             SalesInvoiceDetail::create([
@@ -127,12 +104,12 @@ class InvoiceService
                 'item_unit' => $detail->item_unit,
                 'quantity' => $detail->quantity_shipped,
                 'unit_price_original' => $unitPriceOriginal,
-                'discount_original' => $discountOriginal,
+                'discount_original' => 0,
                 'subtotal_original' => $subtotalOriginal,
                 'unit_price_idr' => $unitPriceIdr,
-                'discount_idr' => $discountIdr,
+                'discount_idr' => 0,
                 'subtotal_idr' => $subtotalIdr,
-                'unit_cost' => null, // Bisa diisi nanti dari HPP
+                'unit_cost' => null,
                 'total_cost' => null,
             ]);
         }
@@ -140,105 +117,117 @@ class InvoiceService
         return $invoice->fresh(['details', 'buyer', 'salesOrder', 'deliveryOrder']);
     }
 
-    /**
-     * Post invoice - buat jurnal piutang
-     */
     public function postInvoice(SalesInvoice $invoice): void
-    {
-        if ($invoice->status === 'POSTED') {
-            throw new \Exception('Invoice sudah di-posting');
-        }
-
-        // Ambil akun piutang buyer
-        $buyer = $invoice->buyer;
-        if (!$buyer->receivable_account_id) {
-            throw new \Exception('Buyer belum memiliki akun piutang');
-        }
-
-        // Cari akun penjualan (asumsi kode 4-1001 atau sejenisnya)
-        $salesAccount = \App\Models\ChartOfAccount::where('code', 'like', '4-1%')
-            ->where('account_type', 'REVENUE')
-            ->first();
-
-        if (!$salesAccount) {
-            throw new \Exception('Akun Penjualan tidak ditemukan');
-        }
-
-        // Cari akun PPN Keluaran (asumsi kode 2-1004 atau sejenisnya)
-        $ppnAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1004%')
-            ->orWhere('account_name', 'like', '%PPN Keluaran%')
-            ->first();
-
-        // Prepare jurnal entries
-        $entries = [
-            [
-                'account_id' => $buyer->receivable_account_id,
-                'debit' => $invoice->grand_total_idr,
-                'credit' => 0,
-                'description' => "Piutang - {$invoice->invoice_number}",
-            ],
-            [
-                'account_id' => $salesAccount->id,
-                'debit' => 0,
-                'credit' => $invoice->subtotal_idr - $invoice->discount_idr,
-                'description' => "Penjualan - {$invoice->invoice_number}",
-            ],
-        ];
-
-        // Tambah PPN jika ada
-        if ($invoice->tax_ppn_idr > 0 && $ppnAccount) {
-            $entries[] = [
-                'account_id' => $ppnAccount->id,
-                'debit' => 0,
-                'credit' => $invoice->tax_ppn_idr,
-                'description' => "PPN Keluaran - {$invoice->invoice_number}",
-            ];
-        }
-
-        // Buat jurnal
-        $journalEntry = $this->journalService->createJournal(
-            date: $invoice->invoice_date,
-            description: "Invoice Penjualan - {$invoice->invoice_number}",
-            entries: $entries,
-            referenceType: 'sales_invoice',
-            referenceId: $invoice->id
-        );
-
-        // Update invoice
-        $invoice->update([
-            'journal_entry_id' => $journalEntry->id,
-            'status' => 'POSTED',
-        ]);
+{
+    if ($invoice->status === 'POSTED') {
+        throw new \Exception('Invoice sudah di-posting');
     }
 
-    /**
-     * Cancel invoice
-     */
+    $buyer = $invoice->buyer;
+    if (!$buyer->receivable_account_id) {
+        throw new \Exception('Buyer belum memiliki akun piutang');
+    }
+
+    // VALIDASI: Cek apakah akun piutang benar-benar ada
+    $receivableAccount = \App\Models\ChartOfAccount::where('id', $buyer->receivable_account_id)
+        ->where('is_active', 1)
+        ->first();
+
+    if (!$receivableAccount) {
+        throw new \Exception("Akun Piutang (ID: {$buyer->receivable_account_id}) tidak ditemukan atau tidak aktif. Silakan periksa data buyer.");
+    }
+
+    $salesAccount = \App\Models\ChartOfAccount::where(function($query) {
+            $query->where('code', 'like', '4%')
+                  ->orWhere('type', 'PENDAPATAN');
+        })
+        ->where('is_active', 1)
+        ->first();
+
+    if (!$salesAccount) {
+        throw new \Exception('Akun Penjualan tidak ditemukan. Pastikan ada akun Pendapatan yang aktif');
+    }
+
+    $ppnAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-%')
+        ->where('name', 'like', '%PPN%')
+        ->where('is_active', 1)
+        ->first();
+
+    $entries = [
+        [
+            'account_id' => $receivableAccount->id,
+            'debit' => $invoice->total_idr,
+            'credit' => 0,
+            'description' => "Piutang - {$invoice->invoice_number}",
+        ],
+        [
+            'account_id' => $salesAccount->id,
+            'debit' => 0,
+            'credit' => $invoice->subtotal_idr,
+            'description' => "Penjualan - {$invoice->invoice_number}",
+        ],
+    ];
+
+    if ($invoice->tax_amount_idr > 0 && $ppnAccount) {
+        $entries[] = [
+            'account_id' => $ppnAccount->id,
+            'debit' => 0,
+            'credit' => $invoice->tax_amount_idr,
+            'description' => "PPN Keluaran - {$invoice->invoice_number}",
+        ];
+    }
+
+    Log::info('Invoice Post - Debug Info:', [
+        'invoice_id' => $invoice->id,
+        'receivable_account' => [
+            'id' => $receivableAccount->id,
+            'code' => $receivableAccount->code,
+            'name' => $receivableAccount->name,
+        ],
+        'sales_account' => [
+            'id' => $salesAccount->id,
+            'code' => $salesAccount->code,
+            'name' => $salesAccount->name,
+        ],
+        'entries' => $entries,
+        'total_debit' => array_sum(array_column($entries, 'debit')),
+        'total_credit' => array_sum(array_column($entries, 'credit')),
+    ]);
+
+    $journalEntry = $this->journalService->createJournal(
+        date: $invoice->invoice_date,
+        description: "Invoice Penjualan - {$invoice->invoice_number}",
+        entries: $entries,
+        referenceType: 'sales_invoice',
+        referenceId: $invoice->id
+    );
+
+    $invoice->update([
+        'journal_entry_id' => $journalEntry->id,
+        'status' => 'POSTED',
+    ]);
+}
+
     public function cancelInvoice(SalesInvoice $invoice): void
     {
         if ($invoice->payment_status !== 'UNPAID') {
             throw new \Exception('Invoice yang sudah ada pembayaran tidak bisa dibatalkan');
         }
 
-        // Jika sudah ada jurnal, reverse jurnal
         if ($invoice->journal_entry_id) {
             $this->journalService->reverseJournal($invoice->journalEntry);
         }
 
-        // Update status
         $invoice->update([
             'status' => 'CANCELLED',
             'journal_entry_id' => null,
         ]);
     }
 
-    /**
-     * Update payment status berdasarkan pembayaran
-     */
     public function updatePaymentStatus(SalesInvoice $invoice): void
     {
         $totalPaid = $invoice->paid_amount;
-        $grandTotal = $invoice->grand_total_idr;
+        $grandTotal = $invoice->total_idr;
         $remaining = $grandTotal - $totalPaid;
 
         if ($remaining <= 0) {

@@ -36,14 +36,16 @@ class JournalEntry extends Model
         return $this->hasMany(JournalEntryLine::class);
     }
 
+    public function details()
+    {
+        return $this->hasMany(JournalEntryLine::class);
+    }
+
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    /**
-     * Generate nomor jurnal otomatis
-     */
     public static function generateJournalNumber(): string
     {
         $prefix = 'JRN';
@@ -65,9 +67,6 @@ class JournalEntry extends Model
         return $prefix . $year . $month . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
     }
 
-    /**
-     * Cek apakah jurnal balance (debit = kredit)
-     */
     public function isBalanced(): bool
     {
         return $this->total_debit == $this->total_credit;

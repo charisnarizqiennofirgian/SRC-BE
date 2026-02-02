@@ -64,10 +64,11 @@ class SalesOrderController extends Controller
             'subtotal' => 'required|numeric',
             'discount' => 'nullable|numeric',
             'tax_ppn' => 'nullable|numeric',
+            'tax_rate' => 'nullable|numeric|in:0,11,12',  // ← TAMBAH INI
             'grand_total' => 'required|numeric',
 
             'currency' => 'required|string|in:IDR,USD',
-            'exchange_rate' => 'required|numeric|min:1',
+            'exchange_rate' => 'nullable|numeric',
         ]);
 
         if ($validator->fails()) {
@@ -82,12 +83,13 @@ class SalesOrderController extends Controller
         try {
             $soData = $request->only([
                 'buyer_id', 'so_date', 'customer_po_number',
-                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
-                'currency', 'exchange_rate'
+                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'tax_rate', 'grand_total',  // ← TAMBAH tax_rate
+                'currency'
             ]);
 
             $soData['user_id'] = Auth::id();
             $soData['so_number'] = $this->generateSoNumber();
+            $soData['exchange_rate'] = 1;
 
             $salesOrder = SalesOrder::create($soData);
 
@@ -151,17 +153,14 @@ class SalesOrderController extends Controller
 
             $salesOrders = $query->paginate($request->input('per_page', 25));
 
-            // Ambil stok dari Gudang Packing untuk setiap item
-            $packingWarehouseId = 11; // Gudang Packing
+            $packingWarehouseId = 11;
 
             $salesOrders->getCollection()->transform(function ($so) use ($packingWarehouseId) {
                 $so->details->transform(function ($detail) use ($packingWarehouseId) {
-                    // Ambil stok dari tabel inventories di Gudang Packing
                     $inventory = Inventory::where('item_id', $detail->item_id)
                         ->where('warehouse_id', $packingWarehouseId)
                         ->first();
 
-                    // Tambahkan current_stock ke detail
                     $detail->current_stock = $inventory ? (float) $inventory->qty : 0;
 
                     return $detail;
@@ -242,10 +241,11 @@ class SalesOrderController extends Controller
             'subtotal' => 'required|numeric',
             'discount' => 'nullable|numeric',
             'tax_ppn' => 'nullable|numeric',
+            'tax_rate' => 'nullable|numeric|in:0,11,12',  // ← TAMBAH INI
             'grand_total' => 'required|numeric',
 
             'currency' => 'required|string|in:IDR,USD',
-            'exchange_rate' => 'required|numeric|min:1',
+            'exchange_rate' => 'nullable|numeric',
         ]);
 
         if ($validator->fails()) {
@@ -262,9 +262,11 @@ class SalesOrderController extends Controller
 
             $soData = $request->only([
                 'buyer_id', 'so_date', 'customer_po_number',
-                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'grand_total',
-                'currency', 'exchange_rate'
+                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'tax_rate', 'grand_total',  // ← TAMBAH tax_rate
+                'currency'
             ]);
+
+            $soData['exchange_rate'] = 1;
 
             $salesOrder->update($soData);
 

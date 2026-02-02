@@ -93,7 +93,7 @@ class DeliveryOrderController extends Controller
                 'driver_name' => $request->driver_name,
                 'vehicle_number' => $request->vehicle_number,
                 'notes' => $request->notes,
-                'status' => 'Shipped',
+                'status' => 'DRAFT',
                 'shipment_mode' => $request->shipment_mode ?? 'SEA',
                 'incoterm' => $request->incoterm,
                 'bl_date' => $request->bl_date,
@@ -125,7 +125,7 @@ class DeliveryOrderController extends Controller
                 $details = json_decode($details, true);
             }
 
-            $packingWarehouseId = 11; // Gudang Packing
+            $packingWarehouseId = 11;
 
             foreach ($details as $detail) {
                 $item = Item::with('unit')->find($detail['item_id']);
@@ -133,7 +133,6 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
 
-                // Cek stok dari tabel inventories di Gudang Packing
                 $inventory = Inventory::where('item_id', $detail['item_id'])
                     ->where('warehouse_id', $packingWarehouseId)
                     ->first();
@@ -153,54 +152,6 @@ class DeliveryOrderController extends Controller
                     'quantity_boxes' => $detail['quantity_boxes'] ?? null,
                     'quantity_crates' => $detail['quantity_crates'] ?? null,
                 ]);
-
-                // Kurangi stok di tabel items
-                $item->decrement('stock', $detail['quantity_shipped']);
-
-                // Kurangi stok di tabel inventories (Gudang Packing)
-                if ($inventory) {
-                    $inventory->decrement('qty', $detail['quantity_shipped']);
-                }
-
-                StockMovement::create([
-                    'item_id' => $detail['item_id'],
-                    'type' => 'OUT',
-                    'quantity' => $detail['quantity_shipped'],
-                    'notes' => "Pengiriman barang (DO: {$doNumber})",
-                ]);
-
-                InventoryLog::create([
-                    'date' => $request->delivery_date ?? now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $detail['item_id'],
-                    'warehouse_id' => $packingWarehouseId,
-                    'qty' => $detail['quantity_shipped'],
-                    'direction' => 'OUT',
-                    'transaction_type' => 'SALE',
-                    'reference_type' => 'DeliveryOrder',
-                    'reference_id' => $deliveryOrder->id,
-                    'reference_number' => $doNumber,
-                    'notes' => "Pengiriman ke " . ($request->buyer_name ?? 'Buyer'),
-                    'user_id' => auth()->id(),
-                ]);
-
-                $soDetail = SalesOrderDetail::find($detail['sales_order_detail_id']);
-                if ($soDetail) {
-                    $soDetail->increment('quantity_shipped', $detail['quantity_shipped']);
-                }
-            }
-
-            $salesOrder = SalesOrder::with('details')->find($request->sales_order_id);
-            if ($salesOrder) {
-                $allDelivered = true;
-                foreach ($salesOrder->details as $detail) {
-                    if ($detail->quantity > $detail->quantity_shipped) {
-                        $allDelivered = false;
-                        break;
-                    }
-                }
-                $salesOrder->status = $allDelivered ? 'Delivered' : 'Partial Delivered';
-                $salesOrder->save();
             }
 
             $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
@@ -212,7 +163,7 @@ class DeliveryOrderController extends Controller
             DB::commit();
             return response()->json([
                 'success' => true,
-                'message' => 'Pengiriman berhasil dibuat dan stok telah dipotong',
+                'message' => 'Delivery Order berhasil dibuat dengan status DRAFT. Stok belum berkurang.',
                 'data' => $deliveryOrder
             ], 201);
 
@@ -225,6 +176,168 @@ class DeliveryOrderController extends Controller
         }
     }
 
+    public function ship($id)
+    {
+        DB::beginTransaction();
+        try {
+            $deliveryOrder = DeliveryOrder::with('details')->findOrFail($id);
+
+            if ($deliveryOrder->status !== 'DRAFT') {
+                throw new \Exception("Hanya DO dengan status DRAFT yang bisa dikirim. Status saat ini: {$deliveryOrder->status}");
+            }
+
+            $packingWarehouseId = 11;
+
+            foreach ($deliveryOrder->details as $detail) {
+                $item = Item::find($detail->item_id);
+                if (!$item) {
+                    throw new \Exception("Item ID {$detail->item_id} tidak ditemukan");
+                }
+
+                $inventory = Inventory::where('item_id', $detail->item_id)
+                    ->where('warehouse_id', $packingWarehouseId)
+                    ->first();
+                $currentStock = $inventory ? (float) $inventory->qty : 0;
+
+                if ($currentStock < $detail->quantity_shipped) {
+                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail->quantity_shipped}");
+                }
+
+                $item->decrement('stock', $detail->quantity_shipped);
+
+                if ($inventory) {
+                    $inventory->decrement('qty', $detail->quantity_shipped);
+                }
+
+                StockMovement::create([
+                    'item_id' => $detail->item_id,
+                    'type' => 'OUT',
+                    'quantity' => $detail->quantity_shipped,
+                    'notes' => "Pengiriman barang (DO: {$deliveryOrder->do_number})",
+                ]);
+
+                InventoryLog::create([
+                    'date' => now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $detail->item_id,
+                    'warehouse_id' => $packingWarehouseId,
+                    'qty' => $detail->quantity_shipped,
+                    'direction' => 'OUT',
+                    'transaction_type' => 'SALE',
+                    'reference_type' => 'DeliveryOrder',
+                    'reference_id' => $deliveryOrder->id,
+                    'reference_number' => $deliveryOrder->do_number,
+                    'notes' => "Pengiriman ke " . $deliveryOrder->buyer->name,
+                    'user_id' => auth()->id(),
+                ]);
+
+                $soDetail = SalesOrderDetail::find($detail->sales_order_detail_id);
+                if ($soDetail) {
+                    $soDetail->increment('quantity_shipped', $detail->quantity_shipped);
+                }
+            }
+
+            $deliveryOrder->status = 'SHIPPED';
+            $deliveryOrder->save();
+
+            $salesOrder = SalesOrder::with('details')->find($deliveryOrder->sales_order_id);
+            if ($salesOrder) {
+                $allDelivered = true;
+                foreach ($salesOrder->details as $detail) {
+                    if ($detail->quantity > $detail->quantity_shipped) {
+                        $allDelivered = false;
+                        break;
+                    }
+                }
+                $salesOrder->status = $allDelivered ? 'Shipped' : 'Partial Shipped';
+                $salesOrder->save();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Barang berhasil dikirim! Status: SHIPPED, Stok telah berkurang.',
+                'data' => $deliveryOrder->fresh(['details', 'salesOrder', 'buyer'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengirim barang: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function markDelivered($id)
+    {
+        DB::beginTransaction();
+        try {
+            $deliveryOrder = DeliveryOrder::with('salesOrder')->findOrFail($id);
+
+            if ($deliveryOrder->status !== 'SHIPPED') {
+                throw new \Exception("Hanya DO dengan status SHIPPED yang bisa dikonfirmasi terima. Status saat ini: {$deliveryOrder->status}");
+            }
+
+            $deliveryOrder->status = 'DELIVERED';
+            $deliveryOrder->save();
+
+            $salesOrder = SalesOrder::with('details')->find($deliveryOrder->sales_order_id);
+            if ($salesOrder) {
+                $allDelivered = true;
+                foreach ($salesOrder->details as $detail) {
+                    if ($detail->quantity > $detail->quantity_shipped) {
+                        $allDelivered = false;
+                        break;
+                    }
+                }
+                $salesOrder->status = $allDelivered ? 'Delivered' : 'Partial Delivered';
+                $salesOrder->save();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Barang berhasil dikonfirmasi diterima customer. Status: DELIVERED. Siap untuk di-invoice!',
+                'data' => $deliveryOrder->fresh(['details', 'salesOrder', 'buyer'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal konfirmasi penerimaan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+   public function getAvailableForInvoice(Request $request)
+{
+    try {
+        $query = DeliveryOrder::with([
+            'salesOrder',
+            'details.item',
+            'details.salesOrderDetail'
+        ])
+            ->where('status', 'DELIVERED')
+            ->whereDoesntHave('salesInvoices');
+
+        if ($request->filled('buyer_id')) {
+            $query->whereHas('salesOrder', function($q) use ($request) {
+                $q->where('buyer_id', $request->buyer_id);
+            });
+        }
+
+        $deliveryOrders = $query->orderBy('delivery_date', 'desc')->get();
+
+        return response()->json($deliveryOrders);
+    } catch (\Exception $e) {
+        \Log::error('Error fetching available DOs: ' . $e->getMessage());
+        return response()->json(['message' => 'Error fetching delivery orders'], 500);
+    }
+}
     public function show($id)
     {
         try {
@@ -263,6 +376,10 @@ class DeliveryOrderController extends Controller
         DB::beginTransaction();
         try {
             $do = DeliveryOrder::findOrFail($id);
+
+            if ($do->status !== 'DRAFT') {
+                throw new \Exception('Hanya DO dengan status DRAFT yang bisa diedit');
+            }
 
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
@@ -370,55 +487,15 @@ class DeliveryOrderController extends Controller
         try {
             $deliveryOrder = DeliveryOrder::with('details')->findOrFail($id);
 
+            if ($deliveryOrder->status !== 'DRAFT') {
+                throw new \Exception('Hanya DO dengan status DRAFT yang bisa dihapus');
+            }
+
             if ($deliveryOrder->barcode_image) {
                 Storage::disk('public')->delete($deliveryOrder->barcode_image);
             }
             if ($deliveryOrder->rex_certificate_file) {
                 Storage::disk('public')->delete($deliveryOrder->rex_certificate_file);
-            }
-
-            $packingWarehouseId = 11; // Gudang Packing
-
-            foreach ($deliveryOrder->details as $detail) {
-                $item = Item::find($detail->item_id);
-                if ($item) {
-                    $item->increment('stock', $detail->quantity_shipped);
-                }
-
-                // Kembalikan stok di tabel inventories (Gudang Packing)
-                $inventory = Inventory::where('item_id', $detail->item_id)
-                    ->where('warehouse_id', $packingWarehouseId)
-                    ->first();
-                if ($inventory) {
-                    $inventory->increment('qty', $detail->quantity_shipped);
-                }
-
-                StockMovement::create([
-                    'item_id' => $detail->item_id,
-                    'type' => 'IN',
-                    'quantity' => $detail->quantity_shipped,
-                    'notes' => "Pembatalan pengiriman (DO: {$deliveryOrder->do_number})",
-                ]);
-
-                InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $detail->item_id,
-                    'warehouse_id' => $packingWarehouseId,
-                    'qty' => $detail->quantity_shipped,
-                    'direction' => 'IN',
-                    'transaction_type' => 'ADJUSTMENT',
-                    'reference_type' => 'DeliveryOrder',
-                    'reference_id' => $deliveryOrder->id,
-                    'reference_number' => $deliveryOrder->do_number,
-                    'notes' => "Pembatalan pengiriman (DO: {$deliveryOrder->do_number})",
-                    'user_id' => auth()->id(),
-                ]);
-
-                $soDetail = SalesOrderDetail::find($detail->sales_order_detail_id);
-                if ($soDetail) {
-                    $soDetail->decrement('quantity_shipped', $detail->quantity_shipped);
-                }
             }
 
             $deliveryOrder->delete();
@@ -427,13 +504,13 @@ class DeliveryOrderController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Pengiriman berhasil dibatalkan, stok dikembalikan'
+                'message' => 'Delivery Order berhasil dihapus'
             ]);
         } catch (\Exception $e) {
             DB::rollback();
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal membatalkan pengiriman: ' . $e->getMessage()
+                'message' => 'Gagal menghapus DO: ' . $e->getMessage()
             ], 500);
         }
     }
