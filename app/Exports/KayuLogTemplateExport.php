@@ -19,6 +19,7 @@ class KayuLogTemplateExport implements FromArray, WithHeadings
             'diameter_cm',
             'panjang_cm',
             'jenis_kayu',
+            'tpk',
             'kubikasi_m3',
         ];
     }
@@ -36,6 +37,7 @@ class KayuLogTemplateExport implements FromArray, WithHeadings
                 40,
                 400,
                 'Jati',
+                'TPK-01',
                 0,
             ],
         ];

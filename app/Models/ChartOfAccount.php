@@ -21,6 +21,7 @@ class ChartOfAccount extends Model
     const TYPE_KEWAJIBAN = 'KEWAJIBAN';
     const TYPE_MODAL = 'MODAL';
     const TYPE_PENDAPATAN = 'PENDAPATAN';
+    const TYPE_HPP = 'HPP';
     const TYPE_BIAYA = 'BIAYA';
 
     public function getAccountNameAttribute()
@@ -35,6 +36,7 @@ class ChartOfAccount extends Model
             self::TYPE_KEWAJIBAN => 'Kewajiban (Hutang)',
             self::TYPE_MODAL => 'Modal (Ekuitas)',
             self::TYPE_PENDAPATAN => 'Pendapatan',
+            self::TYPE_HPP => 'HPP (Harga Pokok Penjualan)',
             self::TYPE_BIAYA => 'Biaya (Beban)',
         ];
     }
@@ -67,5 +69,10 @@ class ChartOfAccount extends Model
     public function scopeAset($query)
     {
         return $query->where('type', self::TYPE_ASET);
+    }
+
+    public function scopeHpp($query)
+    {
+        return $query->where('type', self::TYPE_HPP);
     }
 }

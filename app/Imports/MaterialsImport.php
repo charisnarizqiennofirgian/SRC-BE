@@ -19,11 +19,10 @@ use Illuminate\Support\Facades\Auth;
 
 class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
 {
-    // Mapping kategori ke default gudang
     private $categoryWarehouseMap = [
         'produk jadi' => 'PACKING',
         'karton box' => 'PACKING',
-        'kayu rst' => 'RSTK',        // Gudang KD (RST Kering)
+        'kayu rst' => 'RSTK',
         'kayu log' => 'LOG',
         'komponen' => 'MESIN',
     ];
@@ -39,7 +38,6 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
         DB::transaction(function () use ($rows, &$skippedRows, &$processedRows) {
             foreach ($rows as $index => $row) {
                 try {
-                    // ✅ VALIDASI WAJIB
                     if (empty($row['kode']) || empty($row['nama']) || empty($row['kategori']) || empty($row['satuan'])) {
                         $skippedRows[] = [
                             'row_number' => $index + 2,
@@ -49,26 +47,28 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                     }
 
                     $category = Category::firstOrCreate(
-                        ['name' => $row['kategori']],
-                        ['name' => $row['kategori']]
+                        ['name' => trim($row['kategori'])],
+                        ['name' => trim($row['kategori'])]
                     );
 
+                    $unitShortName = trim($row['satuan']);
                     $unit = Unit::firstOrCreate(
-                        ['name' => $row['satuan']],
-                        ['name' => $row['satuan'], 'short_name' => $row['satuan']]
+                        ['short_name' => $unitShortName],
+                        [
+                            'name' => $unitShortName,
+                            'short_name' => $unitShortName
+                        ]
                     );
 
-                    $item = Item::firstOrNew(['code' => $row['kode']]);
+                    $item = Item::firstOrNew(['code' => trim($row['kode'])]);
 
                     $stokLama = $item->stock ?? 0;
                     $stokBaru = isset($row['stok_awal']) ? (float) $row['stok_awal'] : 0;
 
-                    // ✅ Ambil gudang dari Excel atau default berdasarkan kategori
                     $gudangCode = null;
                     if (!empty($row['gudang_awal'])) {
                         $gudangCode = strtoupper(trim($row['gudang_awal']));
                     } else {
-                        // Default gudang berdasarkan kategori
                         $lowerCat = strtolower($category->name);
                         foreach ($this->categoryWarehouseMap as $key => $code) {
                             if (str_contains($lowerCat, $key)) {
@@ -78,16 +78,46 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         }
                     }
 
-                    $item->name = $row['nama'];
+                    $item->name = trim($row['nama']);
                     $item->category_id = $category->id;
                     $item->unit_id = $unit->id;
-                    $item->description = $row['deskripsi'] ?? null;
+                    $item->description = isset($row['deskripsi']) ? trim($row['deskripsi']) : null;
                     $item->stock = $stokBaru;
 
                     $lowerCategoryName = strtolower($category->name);
 
-                    // ✅ HANDLE KARTON BOX & KAYU RST
-                    if (str_contains($lowerCategoryName, 'karton box') || str_contains($lowerCategoryName, 'kayu rst')) {
+                    if (str_contains($lowerCategoryName, 'kayu log')) {
+                        Log::info("ROW #{$index} - 🪵 KATEGORI: Kayu Log DETECTED");
+                        Log::info("ROW #{$index} - 📋 DATA EXCEL RAW:", [
+                            'jenis_kayu' => $row['jenis_kayu'] ?? 'TIDAK ADA KEY',
+                            'tpk' => $row['tpk'] ?? 'TIDAK ADA KEY',
+                            'diameter' => $row['diameter'] ?? 'TIDAK ADA KEY',
+                            'panjang' => $row['panjang'] ?? 'TIDAK ADA KEY',
+                            'kubikasi' => $row['kubikasi'] ?? 'TIDAK ADA KEY',
+                        ]);
+
+                        $item->specifications = null;
+                        $item->nw_per_box = null;
+                        $item->gw_per_box = null;
+                        $item->wood_consumed_per_pcs = null;
+                        $item->m3_per_carton = null;
+                        $item->hs_code = null;
+
+                        $item->jenis_kayu = isset($row['jenis_kayu']) ? trim($row['jenis_kayu']) : null;
+                        $item->tpk = isset($row['tpk']) ? trim($row['tpk']) : null;
+                        $item->diameter = isset($row['diameter']) ? (float) $row['diameter'] : null;
+                        $item->panjang = isset($row['panjang']) ? (float) $row['panjang'] : null;
+                        $item->kubikasi = isset($row['kubikasi']) ? (float) $row['kubikasi'] : null;
+
+                        Log::info("ROW #{$index} - 💾 AKAN DISAVE:", [
+                            'jenis_kayu' => $item->jenis_kayu,
+                            'tpk' => $item->tpk,
+                            'diameter' => $item->diameter,
+                            'panjang' => $item->panjang,
+                            'kubikasi' => $item->kubikasi,
+                        ]);
+                    }
+                    elseif (str_contains($lowerCategoryName, 'karton box') || str_contains($lowerCategoryName, 'kayu rst')) {
                         $item->specifications = [
                             'p' => isset($row['spec_p']) ? (float) $row['spec_p'] : null,
                             'l' => isset($row['spec_l']) ? (float) $row['spec_l'] : null,
@@ -98,8 +128,13 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         $item->wood_consumed_per_pcs = null;
                         $item->m3_per_carton = null;
                         $item->hs_code = null;
+
+                        $item->jenis_kayu = null;
+                        $item->tpk = null;
+                        $item->diameter = null;
+                        $item->panjang = null;
+                        $item->kubikasi = null;
                     }
-                    // ✅ HANDLE PRODUK JADI
                     elseif (str_contains($lowerCategoryName, 'produk jadi')) {
                         if (empty($row['hs_code'])) {
                             $skippedRows[] = [
@@ -116,8 +151,13 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         $item->wood_consumed_per_pcs = isset($row['wood_consumed_per_pcs']) ? (float) $row['wood_consumed_per_pcs'] : null;
                         $item->m3_per_carton = isset($row['m3_per_carton']) ? (float) $row['m3_per_carton'] : null;
                         $item->hs_code = trim($row['hs_code']);
+
+                        $item->jenis_kayu = null;
+                        $item->tpk = null;
+                        $item->diameter = null;
+                        $item->panjang = null;
+                        $item->kubikasi = null;
                     }
-                    // ✅ KATEGORI LAINNYA
                     else {
                         $item->specifications = null;
                         $item->nw_per_box = null;
@@ -125,11 +165,16 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         $item->wood_consumed_per_pcs = null;
                         $item->m3_per_carton = null;
                         $item->hs_code = null;
+
+                        $item->jenis_kayu = null;
+                        $item->tpk = null;
+                        $item->diameter = null;
+                        $item->panjang = null;
+                        $item->kubikasi = null;
                     }
 
                     $item->save();
 
-                    // ✅ BIKIN STOCK MOVEMENT (legacy)
                     if ((float)$stokBaru !== (float)$stokLama) {
                         $selisih = (float)$stokBaru - (float)$stokLama;
                         $movementType = $selisih > 0 ? 'Stok Masuk' : 'Stok Keluar';
@@ -142,18 +187,15 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         ]);
                     }
 
-                    // ✅ UPDATE INVENTORY & INVENTORY_LOGS (jika ada stok dan gudang)
                     if ($stokBaru > 0 && $gudangCode) {
                         $warehouse = Warehouse::whereRaw('UPPER(code) = ?', [$gudangCode])->first();
 
                         if ($warehouse) {
-                            // Cek stok lama di inventory
                             $oldInventory = Inventory::where('item_id', $item->id)
                                 ->where('warehouse_id', $warehouse->id)
                                 ->first();
                             $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
 
-                            // Update inventory
                             Inventory::updateOrCreate(
                                 [
                                     'item_id'      => $item->id,
@@ -164,9 +206,8 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                                 ]
                             );
 
-                            Log::info("ROW #{$index} - ✅ INVENTORY DISIMPAN: {$stokBaru} (Warehouse: {$gudangCode})");
+                            Log::info("ROW #{$index} - INVENTORY DISIMPAN: {$stokBaru} (Warehouse: {$gudangCode})");
 
-                            // ✅ Catat ke inventory_logs
                             $existingLog = InventoryLog::where('item_id', $item->id)
                                 ->where('warehouse_id', $warehouse->id)
                                 ->where('transaction_type', 'INITIAL_STOCK')
@@ -177,7 +218,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                                     'qty' => $stokBaru,
                                     'notes' => 'Import Excel Material (Updated)',
                                 ]);
-                                Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                                Log::info("ROW #{$index} - INVENTORY_LOG UPDATED");
                             } else {
                                 InventoryLog::create([
                                     'date' => now()->toDateString(),
@@ -189,11 +230,11 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                                     'transaction_type' => 'INITIAL_STOCK',
                                     'reference_type' => 'ImportExcel',
                                     'reference_id' => $item->id,
-                                    'reference_number' => 'IMPORT-MAT-' . $row['kode'],
+                                    'reference_number' => 'IMPORT-MAT-' . trim($row['kode']),
                                     'notes' => 'Import Excel Material - Stok Awal',
                                     'user_id' => Auth::id(),
                                 ]);
-                                Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                                Log::info("ROW #{$index} - INVENTORY_LOG CREATED");
                             }
                         } else {
                             Log::warning("ROW #{$index} - Gudang tidak ditemukan: {$gudangCode}");
@@ -237,6 +278,11 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
             'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
             'm3_per_carton' => 'nullable|numeric|min:0',
             'hs_code' => 'nullable|string|max:50',
+            'jenis_kayu' => 'nullable|string|max:255',
+            'tpk' => 'nullable|string|max:255',
+            'diameter' => 'nullable|numeric|min:0',
+            'panjang' => 'nullable|numeric|min:0',
+            'kubikasi' => 'nullable|numeric|min:0',
         ];
     }
 }

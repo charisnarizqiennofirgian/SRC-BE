@@ -19,7 +19,6 @@ use App\Imports\MaterialsImport;
 
 class MaterialController extends Controller
 {
-    // ✅ Helper: hitung volume_m3 otomatis dari spesifikasi + kategori
     private function calculateVolumeM3(array $itemData): ?float
     {
         $category = Category::find($itemData['category_id'] ?? null);
@@ -27,7 +26,6 @@ class MaterialController extends Controller
 
         $name = strtolower($category->name);
 
-        // Kayu RST → volume balok: p x l x t (mm) → m3
         if (str_contains($name, 'kayu rst')) {
             $specs = $itemData['specifications'] ?? null;
 
@@ -37,7 +35,7 @@ class MaterialController extends Controller
                 $t = (float) $specs['t'];
 
                 if ($p > 0 && $l > 0 && $t > 0) {
-                    return ($p * $l * $t) / 1000000000; // mm³ → m³
+                    return ($p * $l * $t) / 1000000000;
                 }
             }
         }
@@ -69,11 +67,9 @@ class MaterialController extends Controller
                     ->orderBy('name')
                     ->get();
 
-                // ✅ FIX: Ambil stok dari tabel inventories (bukan items.stock)
-                $packingWarehouseId = 11; // Gudang Packing (Barang Jadi)
+                $packingWarehouseId = 11;
 
                 $items->transform(function ($item) use ($packingWarehouseId, $request) {
-                    // Jika kategori Produk Jadi, ambil stok dari Gudang Packing
                     if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
                         $inventory = Inventory::where('item_id', $item->id)
                             ->where('warehouse_id', $packingWarehouseId)
@@ -110,6 +106,11 @@ class MaterialController extends Controller
                     'kualitas',
                     'bentuk',
                     'volume_m3',
+                    'jenis_kayu',
+                    'tpk',
+                    'diameter',
+                    'panjang',
+                    'kubikasi'
                 );
 
             if ($search) {
@@ -174,6 +175,11 @@ class MaterialController extends Controller
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
                 'volume_m3' => 'nullable|numeric|min:0',
+                'jenis_kayu' => 'nullable|string|max:255',
+                'tpk' => 'nullable|string|max:255',
+                'diameter' => 'nullable|numeric|min:0',
+                'panjang' => 'nullable|numeric|min:0',
+                'kubikasi' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -207,8 +213,12 @@ class MaterialController extends Controller
             $itemData['jenis'] = $itemData['jenis'] ?? null;
             $itemData['kualitas'] = $itemData['kualitas'] ?? null;
             $itemData['bentuk'] = $itemData['bentuk'] ?? null;
+            $itemData['jenis_kayu'] = $itemData['jenis_kayu'] ?? null;
+            $itemData['tpk'] = $itemData['tpk'] ?? null;
+            $itemData['diameter'] = $itemData['diameter'] ?? null;
+            $itemData['panjang'] = $itemData['panjang'] ?? null;
+            $itemData['kubikasi'] = $itemData['kubikasi'] ?? null;
 
-            // FORMAT NAMA KHUSUS KAYU RST
             $category = Category::find($itemData['category_id'] ?? null);
             if (
                 $category &&
@@ -225,7 +235,6 @@ class MaterialController extends Controller
                 }
             }
 
-            // HITUNG volume_m3 OTOMATIS (Kayu RST)
             $volume = $this->calculateVolumeM3($itemData);
             if (!is_null($volume)) {
                 $itemData['volume_m3'] = $volume;
@@ -236,12 +245,10 @@ class MaterialController extends Controller
             $item = Item::create($itemData);
             $item->load(['unit:id,name', 'category:id,name']);
 
-            // FASE 2: alokasikan stok awal ke tabel stocks + inventories + inventory_logs
             $initialStock = (float) ($itemData['stock'] ?? 0);
             $initialWarehouseId = $itemData['initial_warehouse_id'] ?? null;
 
             if ($initialStock > 0 && $initialWarehouseId) {
-                // Update tabel stocks (legacy)
                 Stock::updateOrCreate(
                     [
                         'item_id' => $item->id,
@@ -252,7 +259,6 @@ class MaterialController extends Controller
                     ]
                 );
 
-                // ✅ Update tabel inventories
                 Inventory::updateOrCreate(
                     [
                         'item_id' => $item->id,
@@ -263,7 +269,6 @@ class MaterialController extends Controller
                     ]
                 );
 
-                // ✅ Catat ke inventory_logs sebagai INITIAL_STOCK
                 InventoryLog::create([
                     'date' => now()->toDateString(),
                     'time' => now()->toTimeString(),
@@ -341,6 +346,11 @@ class MaterialController extends Controller
                 'kualitas' => 'nullable|string|max:255',
                 'bentuk' => 'nullable|string|max:255',
                 'volume_m3' => 'nullable|numeric|min:0',
+                'jenis_kayu' => 'nullable|string|max:255',
+                'tpk' => 'nullable|string|max:255',
+                'diameter' => 'nullable|numeric|min:0',
+                'panjang' => 'nullable|numeric|min:0',
+                'kubikasi' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -374,8 +384,12 @@ class MaterialController extends Controller
             $itemData['jenis'] = $itemData['jenis'] ?? null;
             $itemData['kualitas'] = $itemData['kualitas'] ?? null;
             $itemData['bentuk'] = $itemData['bentuk'] ?? null;
+            $itemData['jenis_kayu'] = $itemData['jenis_kayu'] ?? null;
+            $itemData['tpk'] = $itemData['tpk'] ?? null;
+            $itemData['diameter'] = $itemData['diameter'] ?? null;
+            $itemData['panjang'] = $itemData['panjang'] ?? null;
+            $itemData['kubikasi'] = $itemData['kubikasi'] ?? null;
 
-            // FORMAT NAMA KHUSUS KAYU RST SAAT UPDATE
             $category = Category::find($itemData['category_id'] ?? null);
             if (
                 $category &&
@@ -402,19 +416,16 @@ class MaterialController extends Controller
             $material->update($itemData);
             $material->load(['unit:id,name', 'category:id,name']);
 
-            // Update stok jika ada perubahan
             if (array_key_exists('stock', $itemData) && isset($itemData['initial_warehouse_id'])) {
                 $initialStock = (float) ($itemData['stock'] ?? 0);
                 $initialWarehouseId = $itemData['initial_warehouse_id'];
 
                 if ($initialStock > 0 && $initialWarehouseId) {
-                    // Cek stok lama
                     $oldInventory = Inventory::where('item_id', $material->id)
                         ->where('warehouse_id', $initialWarehouseId)
                         ->first();
                     $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
 
-                    // Update stocks (legacy)
                     Stock::updateOrCreate(
                         [
                             'item_id' => $material->id,
@@ -425,7 +436,6 @@ class MaterialController extends Controller
                         ]
                     );
 
-                    // ✅ Update inventories
                     Inventory::updateOrCreate(
                         [
                             'item_id' => $material->id,
@@ -436,7 +446,6 @@ class MaterialController extends Controller
                         ]
                     );
 
-                    // ✅ Catat penyesuaian ke inventory_logs jika ada perubahan
                     $diff = $initialStock - $oldQty;
                     if ($diff != 0) {
                         InventoryLog::create([
@@ -502,23 +511,34 @@ class MaterialController extends Controller
                 'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'gudang_awal', 'deskripsi',
                 'spec_p', 'spec_l', 'spec_t',
                 'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code',
+                'jenis_kayu', 'tpk', 'diameter', 'panjang', 'kubikasi'
             ];
 
             $example1 = [
                 'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'PACKING', 'Produk KILT',
                 '', '', '',
                 '27.0', '42.0', '0.0099', '0.045', '4403.99',
+                '', '', '', '', ''
             ];
 
             $example2 = [
                 'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'PACKING', 'Box untuk KILT',
                 '960', '940', '940',
                 '', '', '', '', '',
+                '', '', '', '', ''
+            ];
+
+            $example3 = [
+                'LOG-001', 'Kayu Meranti', 'Kayu Log', 'Set', 50, 'LOG', 'Kayu log dari TPK A',
+                '', '', '',
+                '', '', '', '', '',
+                'Meranti', 'TPK Makmur', '40', '4.5', '0.5655'
             ];
 
             $content = implode(';', $headers) . "\n";
             $content .= implode(';', $example1) . "\n";
             $content .= implode(';', $example2) . "\n";
+            $content .= implode(';', $example3) . "\n";
 
             $fileName = 'template_master_barang_all_' . date('Ymd') . '.csv';
 

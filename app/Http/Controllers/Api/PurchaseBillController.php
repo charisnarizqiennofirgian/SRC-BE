@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\PurchaseBill;
 use App\Models\GoodsReceiptDetail;
 use App\Models\ChartOfAccount;
-use App\Models\PaymentMethod;
 use App\Services\JournalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,16 +29,19 @@ class PurchaseBillController extends Controller
             'due_date' => 'required|date|after_or_equal:bill_date',
             'notes' => 'nullable|string',
             'ppn_percentage' => 'nullable|numeric|min:0|max:100',
+
+            // ✅ GANTI: 1 COA untuk semuanya
+            'coa_id' => 'required|exists:chart_of_accounts,id',
+
+            // ✅ GANTI: Details tidak perlu account_id per item
             'details' => 'required|array|min:1',
             'details.*.goods_receipt_detail_id' => 'nullable|exists:goods_receipt_details,id',
             'details.*.item_id' => 'required|exists:items,id',
             'details.*.quantity' => 'required|numeric|min:0.01',
             'details.*.price' => 'required|numeric|min:0',
-            'details.*.account_id' => 'required|exists:chart_of_accounts,id',
 
-            // Field pembayaran baru
+            // ✅ GANTI: Payment type saja, tidak perlu payment_method_id
             'payment_type' => 'required|in:TEMPO,TUNAI,DP',
-            'payment_method_id' => 'required_if:payment_type,TUNAI,DP|nullable|exists:payment_methods,id',
             'paid_amount' => 'required_if:payment_type,DP|nullable|numeric|min:0',
         ]);
 
@@ -98,13 +100,13 @@ class PurchaseBillController extends Controller
                 'total_amount' => $totalAmount,
                 'status' => 'Posted',
                 'payment_type' => $validatedData['payment_type'],
-                'payment_method_id' => $validatedData['payment_method_id'] ?? null,
+                'coa_id' => $validatedData['coa_id'],  // ✅ Simpan COA yang dipilih
                 'paid_amount' => $paidAmount,
                 'remaining_amount' => $remainingAmount,
                 'notes' => $validatedData['notes'] ?? null,
             ]);
 
-            // Simpan Details dengan account_id
+            // Simpan Details (tanpa account_id per item)
             foreach ($validatedData['details'] as $detail) {
                 $goodsReceiptDetail = null;
                 $specifications = null;
@@ -125,7 +127,6 @@ class PurchaseBillController extends Controller
                     'price' => $detail['price'],
                     'subtotal' => $detail['quantity'] * $detail['price'],
                     'specifications' => $specifications,
-                    'account_id' => $detail['account_id'],
                 ]);
 
                 // Update status billed di goods receipt detail
@@ -135,7 +136,7 @@ class PurchaseBillController extends Controller
             }
 
             // Load relasi untuk jurnal
-            $purchaseBill->load(['supplier', 'details.item', 'details.account', 'paymentMethod']);
+            $purchaseBill->load(['supplier', 'details.item', 'coa']);
 
             // Buat jurnal otomatis
             $journal = $this->journalService->createFromPurchaseBill($purchaseBill);
@@ -145,7 +146,7 @@ class PurchaseBillController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Faktur Pembelian berhasil disimpan.',
-                'data' => $purchaseBill->load(['supplier', 'details.item', 'details.account', 'paymentMethod', 'journalEntry.lines.account'])
+                'data' => $purchaseBill->load(['supplier', 'details.item', 'coa', 'journalEntry.lines.account'])
             ], 201);
 
         } catch (\Exception $e) {
@@ -160,7 +161,7 @@ class PurchaseBillController extends Controller
 
     public function index()
     {
-        $bills = PurchaseBill::with(['supplier:id,name', 'paymentMethod:id,name'])
+        $bills = PurchaseBill::with(['supplier:id,name', 'coa:id,code,name'])
             ->whereNull('deleted_at')
             ->latest()
             ->paginate(15);
@@ -177,9 +178,8 @@ class PurchaseBillController extends Controller
             $purchaseBill = PurchaseBill::with([
                 'supplier',
                 'details.item',
-                'details.account',
                 'details.goodsReceiptDetail.purchaseOrderDetail',
-                'paymentMethod',
+                'coa',
                 'journalEntry.lines.account'
             ])
             ->whereNull('deleted_at')
@@ -203,16 +203,10 @@ class PurchaseBillController extends Controller
     public function getFormData()
     {
         // COA untuk pilihan akun (Persediaan & Biaya)
-        $coaAccounts = ChartOfAccount::whereIn('type', ['ASET', 'BIAYA'])
+        $coaAccounts = ChartOfAccount::whereIn('type', ['ASET', 'BIAYA', 'KEWAJIBAN'])
             ->where('is_active', true)
             ->orderBy('code')
             ->get(['id', 'code', 'name', 'type']);
-
-        // Payment Methods
-        $paymentMethods = PaymentMethod::with('account:id,code,name')
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'name', 'type', 'account_id']);
 
         // Payment Types
         $paymentTypes = PurchaseBill::getPaymentTypes();
@@ -221,7 +215,6 @@ class PurchaseBillController extends Controller
             'success' => true,
             'data' => [
                 'coa_accounts' => $coaAccounts,
-                'payment_methods' => $paymentMethods,
                 'payment_types' => $paymentTypes,
             ]
         ]);

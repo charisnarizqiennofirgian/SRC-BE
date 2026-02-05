@@ -16,18 +16,15 @@ class ChartOfAccountController extends Controller
     {
         $query = ChartOfAccount::query();
 
-        // Filter by type (ASET, KEWAJIBAN, dll)
         if ($request->has('type')) {
             $types = explode(',', $request->type);
             $query->whereIn('type', $types);
         }
 
-        // Filter by is_active
         if ($request->has('is_active')) {
             $query->where('is_active', $request->is_active);
         }
 
-        // Search by code or name
         if ($request->has('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -62,12 +59,13 @@ class ChartOfAccountController extends Controller
             ], 500);
         }
     }
+
     public function store(Request $request)
     {
         $request->validate([
             'code' => 'required|string|max:20|unique:chart_of_accounts,code',
             'name' => 'required|string|max:100',
-            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,BIAYA',
+            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
             'currency' => 'nullable|string|max:3',
         ]);
 
@@ -103,7 +101,7 @@ class ChartOfAccountController extends Controller
         $request->validate([
             'code' => 'required|string|max:20|unique:chart_of_accounts,code,' . $id,
             'name' => 'required|string|max:100',
-            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,BIAYA',
+            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
             'currency' => 'nullable|string|max:3',
             'is_active' => 'nullable|boolean',
         ]);
@@ -187,7 +185,6 @@ class ChartOfAccountController extends Controller
             $file = $request->file('file');
             $filePath = $file->getRealPath();
 
-            // Parse XLSX menggunakan SimpleXLSX
             $xlsx = SimpleXLSX::parse($filePath);
 
             if (!$xlsx) {
@@ -211,7 +208,6 @@ class ChartOfAccountController extends Controller
             $isFirstRow = true;
 
             foreach ($rows as $row) {
-                // Skip header row
                 if ($isFirstRow) {
                     $isFirstRow = false;
                     continue;
@@ -222,25 +218,21 @@ class ChartOfAccountController extends Controller
                 $type = isset($row[2]) ? strtoupper(trim((string) $row[2])) : '';
                 $currency = isset($row[3]) ? strtoupper(trim((string) $row[3])) : 'IDR';
 
-                // Skip jika code atau name kosong
                 if (empty($code) || empty($name)) {
                     continue;
                 }
 
-                // Cek duplikat
                 if (ChartOfAccount::where('code', $code)->exists()) {
                     $skipped++;
                     continue;
                 }
 
-                // Normalize type
                 $type = $this->normalizeType($type);
                 if (!$type) {
                     $skipped++;
                     continue;
                 }
 
-                // Simpan ke database
                 ChartOfAccount::create([
                     'code' => $code,
                     'name' => $name,
@@ -296,6 +288,9 @@ class ChartOfAccountController extends Controller
             'PENGHASILAN' => 'PENDAPATAN',
             'INCOME' => 'PENDAPATAN',
             'REVENUE' => 'PENDAPATAN',
+            'HPP' => 'HPP',
+            'HARGA POKOK PENJUALAN' => 'HPP',
+            'COGS' => 'HPP',
             'BIAYA' => 'BIAYA',
             'BEBAN' => 'BIAYA',
             'EXPENSE' => 'BIAYA',

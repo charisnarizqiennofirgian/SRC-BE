@@ -71,18 +71,22 @@ class JournalService
         });
     }
 
+    /**
+     * ✅ UPDATED: Simple logic dengan 1 COA
+     */
     public function createFromPurchaseBill(PurchaseBill $bill): JournalEntry
     {
         return DB::transaction(function () use ($bill) {
 
-            Log::info('=== MULAI BUAT JURNAL ===');
-            Log::info('Purchase Bill Data:', [
+            Log::info('=== MULAI BUAT JURNAL PEMBELIAN ===');
+            Log::info('Purchase Bill:', [
                 'bill_number' => $bill->bill_number,
                 'subtotal' => $bill->subtotal,
                 'ppn_amount' => $bill->ppn_amount,
-                'ppn_percentage' => $bill->ppn_percentage ?? 'NULL',
                 'total_amount' => $bill->total_amount,
                 'payment_type' => $bill->payment_type,
+                'coa_id' => $bill->coa_id,
+                'paid_amount' => $bill->paid_amount,
             ]);
 
             $journal = JournalEntry::create([
@@ -100,104 +104,95 @@ class JournalService
             $totalDebit = 0;
             $totalCredit = 0;
 
-            Log::info('=== PROSES ITEMS ===');
-            foreach ($bill->details as $detail) {
-                if ($detail->account_id && $detail->subtotal > 0) {
-                    Log::info('Item Detail:', [
-                        'item_name' => $detail->item->name ?? 'N/A',
-                        'quantity' => $detail->quantity,
-                        'price' => $detail->price,
-                        'subtotal' => $detail->subtotal,
-                        'account_id' => $detail->account_id,
-                    ]);
-
-                    JournalEntryLine::create([
-                        'journal_entry_id' => $journal->id,
-                        'account_id' => $detail->account_id,
-                        'description' => $detail->item->name ?? 'Item',
-                        'debit' => $detail->subtotal,
-                        'credit' => 0,
-                    ]);
-                    $totalDebit += $detail->subtotal;
-                }
+            // ✅ DEBIT 1: Persediaan/Beban (Subtotal)
+            if ($bill->subtotal > 0) {
+                JournalEntryLine::create([
+                    'journal_entry_id' => $journal->id,
+                    'account_id' => $bill->coa_id,
+                    'description' => "Pembelian barang dari {$bill->supplier->name}",
+                    'debit' => $bill->subtotal,
+                    'credit' => 0,
+                ]);
+                $totalDebit += $bill->subtotal;
+                Log::info('Debit Persediaan/Beban:', ['amount' => $bill->subtotal]);
             }
 
-            Log::info('Total Debit setelah items:', ['totalDebit' => $totalDebit]);
-
-            Log::info('=== PROSES PPN ===');
-            Log::info('PPN Amount:', ['ppn_amount' => $bill->ppn_amount]);
-
+            // ✅ DEBIT 2: PPN Masukan (jika ada)
             if ($bill->ppn_amount > 0) {
                 $ppnAccount = $this->getPPNMasukanAccount();
-
-                Log::info('PPN Account:', [
-                    'found' => $ppnAccount ? 'YES' : 'NO',
-                    'account_id' => $ppnAccount->id ?? 'NULL',
-                    'account_name' => $ppnAccount->name ?? 'NULL',
-                ]);
 
                 if ($ppnAccount) {
                     JournalEntryLine::create([
                         'journal_entry_id' => $journal->id,
                         'account_id' => $ppnAccount->id,
-                        'description' => 'PPN Masukan ' . ($bill->ppn_percentage ?? 11) . '%',
+                        'description' => 'PPN Masukan ' . ($bill->ppn_percentage ?? 12) . '%',
                         'debit' => $bill->ppn_amount,
                         'credit' => 0,
                     ]);
                     $totalDebit += $bill->ppn_amount;
-
-                    Log::info('PPN Line Created:', ['ppn_amount' => $bill->ppn_amount]);
+                    Log::info('Debit PPN Masukan:', ['amount' => $bill->ppn_amount]);
                 }
-            } else {
-                Log::warning('PPN Amount adalah 0 atau NULL!');
             }
 
-            Log::info('Total Debit setelah PPN:', ['totalDebit' => $totalDebit]);
-
-            Log::info('=== PROSES KREDIT ===');
-            Log::info('Payment Type:', ['payment_type' => $bill->payment_type]);
-
+            // ✅ CREDIT: Berdasarkan Payment Type
             switch ($bill->payment_type) {
                 case PurchaseBill::PAYMENT_TEMPO:
+                    // Credit: Hutang Usaha (full)
                     $this->createHutangLine($journal, $bill, $bill->total_amount);
                     $totalCredit += $bill->total_amount;
-                    Log::info('Hutang Line Created:', ['amount' => $bill->total_amount]);
+                    Log::info('Credit Hutang Usaha (TEMPO):', ['amount' => $bill->total_amount]);
                     break;
 
                 case PurchaseBill::PAYMENT_TUNAI:
-                    $this->createKasLine($journal, $bill, $bill->total_amount);
+                    // Credit: Kas/Bank (full) - pakai coa_id yang sama
+                    JournalEntryLine::create([
+                        'journal_entry_id' => $journal->id,
+                        'account_id' => $bill->coa_id,
+                        'description' => "Pembayaran tunai ke {$bill->supplier->name}",
+                        'debit' => 0,
+                        'credit' => $bill->total_amount,
+                    ]);
                     $totalCredit += $bill->total_amount;
-                    Log::info('Kas Line Created:', ['amount' => $bill->total_amount]);
+                    Log::info('Credit Kas/Bank (TUNAI):', ['amount' => $bill->total_amount]);
                     break;
 
                 case PurchaseBill::PAYMENT_DP:
+                    // Credit 1: Kas/Bank (DP) - pakai coa_id yang sama
                     if ($bill->paid_amount > 0) {
-                        $this->createKasLine($journal, $bill, $bill->paid_amount);
+                        JournalEntryLine::create([
+                            'journal_entry_id' => $journal->id,
+                            'account_id' => $bill->coa_id,
+                            'description' => "Pembayaran DP ke {$bill->supplier->name}",
+                            'debit' => 0,
+                            'credit' => $bill->paid_amount,
+                        ]);
                         $totalCredit += $bill->paid_amount;
-                        Log::info('Kas DP Line Created:', ['amount' => $bill->paid_amount]);
+                        Log::info('Credit Kas/Bank (DP):', ['amount' => $bill->paid_amount]);
                     }
+
+                    // Credit 2: Hutang Usaha (sisa)
                     if ($bill->remaining_amount > 0) {
                         $this->createHutangLine($journal, $bill, $bill->remaining_amount);
                         $totalCredit += $bill->remaining_amount;
-                        Log::info('Hutang Sisa Line Created:', ['amount' => $bill->remaining_amount]);
+                        Log::info('Credit Hutang Usaha (Sisa):', ['amount' => $bill->remaining_amount]);
                     }
                     break;
             }
 
-            Log::info('Total Credit setelah payment:', ['totalCredit' => $totalCredit]);
-
+            // Update totals
             $journal->update([
                 'total_debit' => $totalDebit,
                 'total_credit' => $totalCredit,
             ]);
 
             Log::info('=== VALIDASI BALANCE ===');
-            Log::info('Final Totals:', [
-                'totalDebit' => $totalDebit,
-                'totalCredit' => $totalCredit,
+            Log::info('Totals:', [
+                'debit' => $totalDebit,
+                'credit' => $totalCredit,
                 'difference' => abs($totalDebit - $totalCredit),
             ]);
 
+            // Validasi balance
             if (round($totalDebit, 2) !== round($totalCredit, 2)) {
                 Log::error('JURNAL TIDAK BALANCE!', [
                     'debit' => $totalDebit,
@@ -220,6 +215,9 @@ class JournalService
         });
     }
 
+    /**
+     * Get atau create akun PPN Masukan
+     */
     private function getPPNMasukanAccount(): ?ChartOfAccount
     {
         $ppnAccount = ChartOfAccount::where(function($query) {
@@ -242,12 +240,11 @@ class JournalService
                     'is_active' => true,
                 ]);
 
-                Log::info('✅ Akun PPN Masukan berhasil dibuat otomatis', [
+                Log::info('✅ Akun PPN Masukan berhasil dibuat', [
                     'account_id' => $ppnAccount->id,
-                    'code' => $ppnAccount->code,
                 ]);
             } catch (\Exception $e) {
-                Log::error('❌ Gagal membuat akun PPN Masukan otomatis: ' . $e->getMessage());
+                Log::error('❌ Gagal membuat akun PPN Masukan: ' . $e->getMessage());
                 return null;
             }
         }
@@ -255,14 +252,24 @@ class JournalService
         return $ppnAccount;
     }
 
+    /**
+     * Create Credit line untuk Hutang Usaha
+     */
     private function createHutangLine(JournalEntry $journal, PurchaseBill $bill, float $amount): void
     {
+        // Prioritas: payable_account_id dari supplier
         $hutangAccountId = $bill->supplier->payable_account_id;
 
+        // Fallback: cari akun Hutang Usaha
         if (!$hutangAccountId) {
             $hutangAccount = ChartOfAccount::where('type', 'KEWAJIBAN')
+                ->where(function($query) {
+                    $query->where('name', 'LIKE', '%Hutang Usaha%')
+                          ->orWhere('code', 'LIKE', '2-2%');
+                })
                 ->where('is_active', true)
                 ->first();
+
             $hutangAccountId = $hutangAccount?->id;
         }
 
@@ -274,21 +281,9 @@ class JournalService
                 'debit' => 0,
                 'credit' => $amount,
             ]);
-        }
-    }
-
-    private function createKasLine(JournalEntry $journal, PurchaseBill $bill, float $amount): void
-    {
-        $kasAccountId = $bill->paymentMethod?->account_id;
-
-        if ($kasAccountId) {
-            JournalEntryLine::create([
-                'journal_entry_id' => $journal->id,
-                'account_id' => $kasAccountId,
-                'description' => "Pembayaran via {$bill->paymentMethod->name}",
-                'debit' => 0,
-                'credit' => $amount,
-            ]);
+        } else {
+            Log::error('❌ Akun Hutang Usaha tidak ditemukan!');
+            throw new \Exception('Akun Hutang Usaha tidak ditemukan. Harap buat akun terlebih dahulu.');
         }
     }
 

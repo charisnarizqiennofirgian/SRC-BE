@@ -19,6 +19,11 @@ class Item extends Model
     const TYPE_SPAREPART     = 'sparepart';
     const TYPE_OTHER         = 'other';
 
+    const ROUTE_FROM_LOG = 'from_log';
+    const ROUTE_FROM_RST = 'from_rst';
+    const ROUTE_DIRECT = 'direct';
+    const ROUTE_EXTERNAL = 'external';
+
     protected $fillable = [
         'name',
         'code',
@@ -38,10 +43,23 @@ class Item extends Model
         'bentuk',
         'volume_m3',
         'production_route',
+        'jenis_kayu',
+        'tpk',
+        'diameter',
+        'panjang',
+        'kubikasi',
     ];
 
     protected $casts = [
         'specifications' => 'array',
+        'nw_per_box' => 'decimal:2',
+        'gw_per_box' => 'decimal:2',
+        'wood_consumed_per_pcs' => 'decimal:4',
+        'm3_per_carton' => 'decimal:4',
+        'volume_m3' => 'decimal:4',
+        'diameter' => 'decimal:2',
+        'panjang' => 'decimal:2',
+        'kubikasi' => 'decimal:4',
     ];
 
     public static function getTypes(): array
@@ -80,6 +98,41 @@ class Item extends Model
     public function isRawMaterial(): bool
     {
         return $this->type === self::TYPE_RAW_MATERIAL;
+    }
+
+    public static function getProductionRoutes(): array
+    {
+        return [
+            self::ROUTE_FROM_LOG => 'Dari Log (Lewat Sawmill)',
+            self::ROUTE_FROM_RST => 'Dari RST (Skip Sawmill)',
+            self::ROUTE_DIRECT => 'Langsung (Tidak butuh sawmill)',
+            self::ROUTE_EXTERNAL => 'Beli dari Luar',
+        ];
+    }
+
+    public function needsSawmill(): bool
+    {
+        return $this->production_route === self::ROUTE_FROM_LOG;
+    }
+
+    public function canUseRst(): bool
+    {
+        return in_array($this->production_route, [
+            self::ROUTE_FROM_RST,
+            self::ROUTE_DIRECT,
+            null,
+        ]);
+    }
+
+    public function isExternal(): bool
+    {
+        return $this->production_route === self::ROUTE_EXTERNAL;
+    }
+
+    public function getProductionRouteLabel(): string
+    {
+        $routes = self::getProductionRoutes();
+        return $routes[$this->production_route] ?? 'Belum Ditentukan';
     }
 
     public function category()
@@ -135,5 +188,23 @@ class Item extends Model
     public function scopeByType($query, string $type)
     {
         return $query->where('type', $type);
+    }
+
+    public function scopeNeedsSawmill($query)
+    {
+        return $query->where('production_route', self::ROUTE_FROM_LOG);
+    }
+
+    public function scopeCanUseRst($query)
+    {
+        return $query->whereIn('production_route', [
+            self::ROUTE_FROM_RST,
+            self::ROUTE_DIRECT,
+        ])->orWhereNull('production_route');
+    }
+
+    public function scopeExternal($query)
+    {
+        return $query->where('production_route', self::ROUTE_EXTERNAL);
     }
 }

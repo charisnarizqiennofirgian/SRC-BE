@@ -62,12 +62,15 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
             $diameter  = (float) ($row['diameter_cm'] ?? 0);
             $panjang   = (float) ($row['panjang_cm'] ?? 0);
             $jenisKayu = trim($row['jenis_kayu'] ?? '');
+            $tpk       = trim($row['tpk'] ?? '');
             $kubikasi  = (float) ($row['kubikasi_m3'] ?? 0);
 
             $specs = [
                 'diameter_cm' => $diameter,
                 'panjang_cm'  => $panjang,
                 'jenis_kayu'  => $jenisKayu,
+                'tpk'         => $tpk,
+                'm3_per_pcs'  => $kubikasi, // Tambahkan ini agar report bisa hitung volume total
             ];
 
             try {
@@ -81,6 +84,11 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
                         'specifications' => $specs,
                         'stock'          => $qtyBatang,
                         'volume_m3'      => $kubikasi,
+                        'diameter'       => $diameter,
+                        'panjang'        => $panjang,
+                        'jenis_kayu'     => $jenisKayu,
+                        'tpk'            => $tpk,
+                        'kubikasi'       => $kubikasi,
                     ]
                 );
 
@@ -119,7 +127,7 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
                     ],
                     [
                         'qty'    => $qtyBatang,
-                        'qty_m3' => $kubikasi,
+                        'qty_m3' => $kubikasi, // Gunakan nilai literal sesuai Excel
                     ]
                 );
 

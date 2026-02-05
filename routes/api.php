@@ -43,6 +43,11 @@ use App\Http\Controllers\Api\JournalEntryController;
 use App\Http\Controllers\Api\PurchasePaymentController;
 use App\Http\Controllers\Api\SalesInvoiceController;
 use App\Http\Controllers\Api\DownPaymentController;
+use App\Http\Controllers\Api\InvoicePaymentController;
+use App\Http\Controllers\Api\GeneralLedgerController;
+use App\Http\Controllers\Api\IncomeStatementController;
+use App\Http\Controllers\Api\BalanceSheetController;
+use App\Http\Controllers\Api\PermissionController;
 
 
 /*
@@ -90,8 +95,36 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- PENGATURAN ---
-    Route::apiResource('roles', RoleController::class)->only(['index', 'store']);
-    Route::apiResource('users', UserController::class)->only(['store']);
+    // Roles Management
+    Route::prefix('roles')->group(function () {
+        Route::get('/', [RoleController::class, 'index']);
+        Route::post('/', [RoleController::class, 'store']);
+        Route::get('/{id}', [RoleController::class, 'show']);
+        Route::put('/{id}', [RoleController::class, 'update']);
+        Route::delete('/{id}', [RoleController::class, 'destroy']);
+    });
+
+    // Permissions Management
+    Route::prefix('permissions')->group(function () {
+        Route::get('/', [PermissionController::class, 'index']);
+        Route::post('/', [PermissionController::class, 'store']);
+        Route::get('/{id}', [PermissionController::class, 'show']);
+        Route::put('/{id}', [PermissionController::class, 'update']);
+        Route::delete('/{id}', [PermissionController::class, 'destroy']);
+    });
+
+    // Get all permissions for role form
+    Route::get('/roles-permissions', [RoleController::class, 'getPermissions']);
+
+    // Users Management
+    Route::prefix('users')->group(function () {
+        Route::get('/', [UserController::class, 'index']);
+        Route::post('/', [UserController::class, 'store']);
+        Route::get('/{id}', [UserController::class, 'show']);
+        Route::put('/{id}', [UserController::class, 'update']);
+        Route::delete('/{id}', [UserController::class, 'destroy']);
+        Route::post('/{id}/reset-password', [UserController::class, 'resetPassword']);
+    });
 
     // --- MASTER DATA ---
     Route::get('/categories/all', [CategoryController::class, 'all']);
@@ -179,6 +212,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [SalesInvoiceController::class, 'store']);
         Route::get('/available-delivery-orders', [SalesInvoiceController::class, 'getAvailableDeliveryOrders']);
         Route::get('/{id}', [SalesInvoiceController::class, 'show']);
+        Route::get('/{id}/down-payments', [InvoicePaymentController::class, 'getAvailableDownPayments']);
         Route::post('/{id}/post', [SalesInvoiceController::class, 'post']);
         Route::post('/{id}/cancel', [SalesInvoiceController::class, 'cancel']);
         Route::delete('/{id}', [SalesInvoiceController::class, 'destroy']);
@@ -191,6 +225,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/available/{buyerId}', [DownPaymentController::class, 'getAvailable']);
         Route::get('/{id}', [DownPaymentController::class, 'show']);
         Route::delete('/{id}', [DownPaymentController::class, 'destroy']);
+    });
+
+    // --- PEMBAYARAN FAKTUR ---
+    Route::prefix('invoice-payments')->group(function () {
+        Route::get('/', [InvoicePaymentController::class, 'index']);
+        Route::post('/cash', [InvoicePaymentController::class, 'receiveCashPayment']);
+        Route::post('/down-payment', [InvoicePaymentController::class, 'receiveDownPaymentDeduction']);
+        Route::get('/{id}', [InvoicePaymentController::class, 'show']);
+        Route::delete('/{id}', [InvoicePaymentController::class, 'destroy']);
     });
 
     // --- PRODUKSI / BOM ---
@@ -211,9 +254,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- PROSES PEMBAHANAN ---
-    Route::post('/pembahanan', [PembahananController::class, 'store']);
-    Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
+    Route::get('/produksi/pembahanan/available-pos', [PembahananController::class, 'getAvailableProductionOrders']);
     Route::get('/produksi/pembahanan/source-inventories', [PembahananController::class, 'sourceInventories']);
+    Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
 
     // --- PROSES MOULDING ---
     Route::get('produksi/moulding/source-inventories', [MouldingController::class, 'sourceInventories']);
@@ -314,8 +357,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- JURNAL UMUM ---
     Route::prefix('journal-entries')->group(function () {
         Route::get('/', [JournalEntryController::class, 'index']);
+        Route::post('/manual', [JournalEntryController::class, 'storeManual']);
         Route::get('/{id}', [JournalEntryController::class, 'show']);
     });
+
+    // --- BUKU BESAR (GENERAL LEDGER) ---
+    Route::get('general-ledger', [GeneralLedgerController::class, 'index']);
+
+    // --- LAPORAN LABA RUGI (INCOME STATEMENT) ---
+    Route::get('income-statement', [IncomeStatementController::class, 'index']);
+
+    // --- NERACA (BALANCE SHEET) ---
+    Route::get('balance-sheet', [BalanceSheetController::class, 'index']);
 
     // --- UTILITAS DASHBOARD ---
     Route::get('/dashboard-route', function (Request $request) {

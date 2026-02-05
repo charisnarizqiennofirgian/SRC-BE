@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\InvoicePayment;
+use App\Models\SalesInvoice;
+use App\Models\DownPayment;
 use App\Services\InvoicePaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +26,7 @@ class InvoicePaymentController extends Controller
             $query = InvoicePayment::with([
                 'salesInvoice',
                 'buyer',
-                'account',  // ← GANTI dari 'paymentMethod'
+                'account',
                 'downPayment',
                 'createdBy'
             ]);
@@ -60,13 +62,32 @@ class InvoicePaymentController extends Controller
         }
     }
 
+    public function getAvailableDownPayments($invoiceId)
+    {
+        try {
+            $invoice = SalesInvoice::findOrFail($invoiceId);
+
+            $downPayments = DownPayment::where('sales_order_id', $invoice->sales_order_id)
+                ->where('status', 'PENDING')
+                ->where('remaining_amount', '>', 0)
+                ->get();
+
+            return response()->json([
+                'data' => $downPayments
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error getting down payments: ' . $e->getMessage());
+            return response()->json(['message' => $e->getMessage()], 500);
+        }
+    }
+
     public function receiveCashPayment(Request $request)
     {
         $request->validate([
             'sales_invoice_id' => 'required|exists:sales_invoices,id',
             'payment_date' => 'required|date',
             'amount' => 'required|numeric|min:0',
-            'account_id' => 'required|exists:chart_of_accounts,id',  // ← GANTI dari 'payment_method_id'
+            'account_id' => 'required|exists:chart_of_accounts,id',
             'notes' => 'nullable|string',
         ]);
 
@@ -77,7 +98,7 @@ class InvoicePaymentController extends Controller
                 salesInvoiceId: $request->sales_invoice_id,
                 paymentDate: $request->payment_date,
                 amount: $request->amount,
-                accountId: $request->account_id,  // ← GANTI dari paymentMethodId
+                accountId: $request->account_id,
                 notes: $request->notes,
                 userId: auth()->id()
             );
@@ -89,7 +110,7 @@ class InvoicePaymentController extends Controller
                 'data' => $payment->load([
                     'salesInvoice',
                     'buyer',
-                    'account',  // ← GANTI dari 'paymentMethod'
+                    'account',
                     'journalEntry.details'
                 ])
             ], 201);
@@ -146,7 +167,7 @@ class InvoicePaymentController extends Controller
             $payment = InvoicePayment::with([
                 'salesInvoice',
                 'buyer',
-                'account',  // ← GANTI dari 'paymentMethod'
+                'account',
                 'downPayment',
                 'journalEntry.details',
                 'createdBy'

@@ -13,7 +13,6 @@ class StockReportController extends Controller
     public function index(Request $request)
     {
         try {
-            // 1. Filter kategori wajib
             if (!$request->has('categories')) {
                 return response()->json([
                     'success' => false,
@@ -35,7 +34,6 @@ class StockReportController extends Controller
                 return response()->json(['success' => true, 'data' => []]);
             }
 
-            // 2. Query items + relasi inventories (BUKAN stocks)
             $query = Item::select(
                     'items.id',
                     'items.name',
@@ -46,17 +44,21 @@ class StockReportController extends Controller
                     'items.specifications',
                     'items.jenis',
                     'items.kualitas',
-                    'items.bentuk'
+                    'items.bentuk',
+                    'items.jenis_kayu',
+                    'items.tpk',
+                    'items.diameter',
+                    'items.panjang',
+                    'items.kubikasi'
                 )
                 ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'inventories:id,item_id,warehouse_id,qty', // ✅ GANTI stocks → inventories
-                    'inventories.warehouse:id,name,code',      // ✅ GANTI stocks.warehouse → inventories.warehouse
+                    'inventories:id,item_id,warehouse_id,qty',
+                    'inventories.warehouse:id,name,code',
                 ])
                 ->whereIn('items.category_id', $categoryIds);
 
-            // 3. Search
             if ($request->filled('search')) {
                 $search = $request->input('search');
                 $query->where(function ($q) use ($search) {
@@ -65,7 +67,6 @@ class StockReportController extends Controller
                 });
             }
 
-            // 4. Sorting
             $sortBy    = $request->input('sort_by', 'name');
             $sortOrder = $request->input('sort_order', 'asc');
             $allowedSortFields = ['name', 'code', 'created_at'];
@@ -76,27 +77,24 @@ class StockReportController extends Controller
                 $query->orderBy('items.name', 'asc');
             }
 
-            // 5. Pagination
             $perPage = min($request->input('per_page', 50), 100);
             $items   = $query->paginate($perPage);
 
             $warehouseId = $request->input('warehouse_id');
 
-            // 6. Hitung total stok + kubikasi
             $collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {
-                // ✅ Ganti stocks → inventories
                 $allInventories = $item->inventories ?? collect();
-                
+
                 if ($warehouseId) {
                     $filteredInventories = $allInventories->filter(function ($inv) use ($warehouseId) {
                         return (int) $inv->warehouse_id === (int) $warehouseId;
                     })->values();
-                    
+
                     $item->setRelation('inventories', $filteredInventories);
-                    $item->stocks = $filteredInventories; // ✅ Set stocks untuk frontend
+                    $item->stocks = $filteredInventories;
                     $inventories = $filteredInventories;
                 } else {
-                    $item->stocks = $allInventories; // ✅ Set stocks untuk frontend
+                    $item->stocks = $allInventories;
                     $inventories = $allInventories;
                 }
 
@@ -104,7 +102,6 @@ class StockReportController extends Controller
                     return (float) ($inv->qty ?? 0);
                 });
 
-                // fallback
                 if ($totalFromStocks == 0) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
@@ -118,10 +115,14 @@ class StockReportController extends Controller
 
                 $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
 
+                // Jika kategori Kayu Log, gunakan nilai kubikasi dari master (karena klien minta sesuai excel, bukan total)
+                if (str_contains(strtolower($item->category->name ?? ''), 'kayu log')) {
+                    $item->total_volume_m3 = (float) ($item->kubikasi ?? 0);
+                }
+
                 return $item;
             });
 
-            // 7. Filter item dengan stok 0
             if ($warehouseId) {
                 $collection = $collection->filter(function ($item) {
                     return ($item->total_stock_from_stocks ?? 0) > 0;

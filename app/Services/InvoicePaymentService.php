@@ -181,8 +181,8 @@ class InvoicePaymentService
 
         $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1%')
             ->where(function($q) {
-                $q->where('account_name', 'like', '%Uang Muka Penjualan%')
-                  ->orWhere('account_name', 'like', '%Customer Deposit%');
+                $q->where('name', 'like', '%Uang Muka Penjualan%')
+                  ->orWhere('name', 'like', '%Customer Deposit%');
             })
             ->first();
 

@@ -17,11 +17,12 @@ class PurchaseBill extends Model
         'bill_date',
         'due_date',
         'subtotal',
+        'ppn_percentage',  // ✅ TAMBAH
         'ppn_amount',
         'total_amount',
         'status',
         'payment_type',
-        'payment_method_id',
+        'coa_id',  // ✅ GANTI: dari payment_method_id jadi coa_id
         'paid_amount',
         'remaining_amount',
         'journal_entry_id',
@@ -32,6 +33,7 @@ class PurchaseBill extends Model
         'bill_date' => 'date',
         'due_date' => 'date',
         'subtotal' => 'decimal:2',
+        'ppn_percentage' => 'decimal:2',  // ✅ TAMBAH
         'ppn_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
@@ -62,9 +64,10 @@ class PurchaseBill extends Model
         return $this->hasMany(PurchaseBillDetail::class);
     }
 
-    public function paymentMethod()
+    // ✅ GANTI: Relationship ke COA
+    public function coa()
     {
-        return $this->belongsTo(PaymentMethod::class);
+        return $this->belongsTo(ChartOfAccount::class, 'coa_id');
     }
 
     public function journalEntry()

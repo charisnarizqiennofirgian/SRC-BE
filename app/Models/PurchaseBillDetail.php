@@ -19,7 +19,7 @@ class PurchaseBillDetail extends Model
         'price',
         'subtotal',
         'specifications',
-        'account_id',
+        // ❌ HAPUS: 'account_id',
     ];
 
     protected $casts = [
@@ -44,8 +44,9 @@ class PurchaseBillDetail extends Model
         return $this->belongsTo(GoodsReceiptDetail::class);
     }
 
-    public function account()
-    {
-        return $this->belongsTo(ChartOfAccount::class, 'account_id');
-    }
+    // ❌ HAPUS: Relationship account()
+    // public function account()
+    // {
+    //     return $this->belongsTo(ChartOfAccount::class, 'account_id');
+    // }
 }

@@ -29,7 +29,7 @@ class AuthController extends Controller
 
         $cacheKey = 'user.' . md5($request->email);
         $user = Cache::remember($cacheKey, 300, function () use ($request) {
-            return User::where('email', $request->email)->first();
+            return User::with('roles.permissions')->where('email', $request->email)->first();  // ✅ LOAD PERMISSIONS
         });
 
         if (!$user || !Hash::check($request->password, $user->password)) {
@@ -46,6 +46,9 @@ class AuthController extends Controller
 
         Cache::put('user.' . $user->id, $user, 3600);
 
+        // ✅ COLLECT PERMISSIONS
+        $permissions = $this->getUserPermissions($user);
+
         // Tentukan dashboard route berdasarkan role
         $dashboardRoute = $this->getDashboardRouteByRole($user->roles->pluck('name')->toArray());
 
@@ -58,8 +61,9 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'roles' => $user->roles->pluck('name')
+                'roles' => $user->roles->pluck('name'),
             ],
+            'permissions' => $permissions,  // ✅ RETURN PERMISSIONS
             'dashboard_route' => $dashboardRoute
         ], 200);
     }
@@ -72,6 +76,28 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Logout successful'
         ], 200);
+    }
+
+    /**
+     * ✅ GET USER PERMISSIONS
+     */
+    private function getUserPermissions(User $user): array
+    {
+        // Jika super-admin, return wildcard
+        if ($user->hasRole('super-admin')) {
+            return ['*'];
+        }
+
+        // Collect all permissions dari semua roles
+        $permissions = [];
+        foreach ($user->roles as $role) {
+            foreach ($role->permissions as $permission) {
+                $permissions[] = $permission->name;
+            }
+        }
+
+        // Return unique permissions
+        return array_values(array_unique($permissions));
     }
 
     /**

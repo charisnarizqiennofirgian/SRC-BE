@@ -48,9 +48,26 @@ class InvoiceService
 
         foreach ($deliveryOrder->details as $detail) {
             $soDetail = $detail->salesOrderDetail;
+
+            Log::info('Processing DO Detail:', [
+                'item_name' => $detail->item_name,
+                'quantity_shipped' => $detail->quantity_shipped,
+                'unit_price' => $soDetail->unit_price ?? 'NULL',
+                'soDetail_exists' => $soDetail ? 'YES' : 'NO',
+            ]);
+
+            if (!$soDetail) {
+                throw new \Exception("SO Detail tidak ditemukan untuk item: {$detail->item_name}");
+            }
+
             $lineTotal = $detail->quantity_shipped * $soDetail->unit_price;
             $subtotalOriginal += $lineTotal;
         }
+
+        Log::info('Subtotal Calculation:', [
+            'subtotalOriginal' => $subtotalOriginal,
+            'taxRate' => $deliveryOrder->salesOrder->tax_rate ?? 'NULL',
+        ]);
 
         $taxRate = floatval($deliveryOrder->salesOrder->tax_rate ?? 0);
         $taxAmountOriginal = $subtotalOriginal * ($taxRate / 100);
@@ -59,6 +76,17 @@ class InvoiceService
         $subtotalIdr = $subtotalOriginal * $exchangeRate;
         $taxAmountIdr = $taxAmountOriginal * $exchangeRate;
         $totalIdr = $totalOriginal * $exchangeRate;
+
+        Log::info('Final Calculation:', [
+            'subtotalOriginal' => $subtotalOriginal,
+            'taxRate' => $taxRate,
+            'taxAmountOriginal' => $taxAmountOriginal,
+            'totalOriginal' => $totalOriginal,
+            'exchangeRate' => $exchangeRate,
+            'subtotalIdr' => $subtotalIdr,
+            'taxAmountIdr' => $taxAmountIdr,
+            'totalIdr' => $totalIdr,
+        ]);
 
         $invoiceNumber = SalesInvoice::generateInvoiceNumber();
 
@@ -118,95 +146,107 @@ class InvoiceService
     }
 
     public function postInvoice(SalesInvoice $invoice): void
-{
-    if ($invoice->status === 'POSTED') {
-        throw new \Exception('Invoice sudah di-posting');
-    }
+    {
+        if ($invoice->status === 'POSTED') {
+            throw new \Exception('Invoice sudah di-posting');
+        }
 
-    $buyer = $invoice->buyer;
-    if (!$buyer->receivable_account_id) {
-        throw new \Exception('Buyer belum memiliki akun piutang');
-    }
+        $buyer = $invoice->buyer;
+        if (!$buyer->receivable_account_id) {
+            throw new \Exception('Buyer belum memiliki akun piutang');
+        }
 
-    // VALIDASI: Cek apakah akun piutang benar-benar ada
-    $receivableAccount = \App\Models\ChartOfAccount::where('id', $buyer->receivable_account_id)
-        ->where('is_active', 1)
-        ->first();
+        $receivableAccount = \App\Models\ChartOfAccount::where('id', $buyer->receivable_account_id)
+            ->where('is_active', 1)
+            ->first();
 
-    if (!$receivableAccount) {
-        throw new \Exception("Akun Piutang (ID: {$buyer->receivable_account_id}) tidak ditemukan atau tidak aktif. Silakan periksa data buyer.");
-    }
+        if (!$receivableAccount) {
+            throw new \Exception("Akun Piutang (ID: {$buyer->receivable_account_id}) tidak ditemukan atau tidak aktif.");
+        }
 
-    $salesAccount = \App\Models\ChartOfAccount::where(function($query) {
-            $query->where('code', 'like', '4%')
-                  ->orWhere('type', 'PENDAPATAN');
-        })
-        ->where('is_active', 1)
-        ->first();
+        $salesAccount = \App\Models\ChartOfAccount::where(function($query) {
+                $query->where('code', 'like', '4%')
+                      ->orWhere('type', 'PENDAPATAN');
+            })
+            ->where('is_active', 1)
+            ->first();
 
-    if (!$salesAccount) {
-        throw new \Exception('Akun Penjualan tidak ditemukan. Pastikan ada akun Pendapatan yang aktif');
-    }
+        if (!$salesAccount) {
+            throw new \Exception('Akun Penjualan tidak ditemukan. Pastikan ada akun Pendapatan yang aktif');
+        }
 
-    $ppnAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-%')
-        ->where('name', 'like', '%PPN%')
-        ->where('is_active', 1)
-        ->first();
+        $ppnAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-%')
+            ->where('name', 'like', '%PPN%')
+            ->where('is_active', 1)
+            ->first();
 
-    $entries = [
-        [
-            'account_id' => $receivableAccount->id,
-            'debit' => $invoice->total_idr,
-            'credit' => 0,
-            'description' => "Piutang - {$invoice->invoice_number}",
-        ],
-        [
-            'account_id' => $salesAccount->id,
-            'debit' => 0,
-            'credit' => $invoice->subtotal_idr,
-            'description' => "Penjualan - {$invoice->invoice_number}",
-        ],
-    ];
-
-    if ($invoice->tax_amount_idr > 0 && $ppnAccount) {
-        $entries[] = [
-            'account_id' => $ppnAccount->id,
-            'debit' => 0,
-            'credit' => $invoice->tax_amount_idr,
-            'description' => "PPN Keluaran - {$invoice->invoice_number}",
+        $entries = [
+            [
+                'account_id' => $receivableAccount->id,
+                'debit' => floatval($invoice->total_idr),
+                'credit' => 0,
+                'description' => "Piutang - {$invoice->invoice_number}",
+            ],
+            [
+                'account_id' => $salesAccount->id,
+                'debit' => 0,
+                'credit' => floatval($invoice->subtotal_idr),
+                'description' => "Penjualan - {$invoice->invoice_number}",
+            ],
         ];
+
+        if ($invoice->tax_amount_idr > 0 && $ppnAccount) {
+            $entries[] = [
+                'account_id' => $ppnAccount->id,
+                'debit' => 0,
+                'credit' => floatval($invoice->tax_amount_idr),
+                'description' => "PPN Keluaran - {$invoice->invoice_number}",
+            ];
+        }
+
+        $totalDebit = array_sum(array_column($entries, 'debit'));
+        $totalCredit = array_sum(array_column($entries, 'credit'));
+
+        Log::info('=== BEFORE SEND TO JOURNAL SERVICE ===', [
+            'invoice_id' => $invoice->id,
+            'invoice_number' => $invoice->invoice_number,
+            'invoice_total_idr' => $invoice->total_idr,
+            'invoice_total_idr_type' => gettype($invoice->total_idr),
+            'invoice_subtotal_idr' => $invoice->subtotal_idr,
+            'invoice_tax_amount_idr' => $invoice->tax_amount_idr,
+            'receivable_account_id' => $receivableAccount->id,
+            'sales_account_id' => $salesAccount->id,
+            'entries' => $entries,
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit,
+            'is_balance' => ($totalDebit === $totalCredit),
+        ]);
+
+        if ($totalDebit != $totalCredit) {
+            throw new \Exception("Entries tidak balance SEBELUM kirim ke JournalService! Debit: Rp " . number_format($totalDebit, 2, ',', '.') . ", Kredit: Rp " . number_format($totalCredit, 2, ',', '.'));
+        }
+
+        try {
+            $journalEntry = $this->journalService->createJournal(
+                date: $invoice->invoice_date,
+                description: "Invoice Penjualan - {$invoice->invoice_number}",
+                entries: $entries,
+                referenceType: 'sales_invoice',
+                referenceId: $invoice->id
+            );
+        } catch (\Exception $e) {
+            Log::error('JournalService Error:', [
+                'message' => $e->getMessage(),
+                'entries_sent' => $entries,
+            ]);
+            throw $e;
+        }
+
+        $invoice->update([
+            'journal_entry_id' => $journalEntry->id,
+            'status' => 'POSTED',
+        ]);
     }
-
-    Log::info('Invoice Post - Debug Info:', [
-        'invoice_id' => $invoice->id,
-        'receivable_account' => [
-            'id' => $receivableAccount->id,
-            'code' => $receivableAccount->code,
-            'name' => $receivableAccount->name,
-        ],
-        'sales_account' => [
-            'id' => $salesAccount->id,
-            'code' => $salesAccount->code,
-            'name' => $salesAccount->name,
-        ],
-        'entries' => $entries,
-        'total_debit' => array_sum(array_column($entries, 'debit')),
-        'total_credit' => array_sum(array_column($entries, 'credit')),
-    ]);
-
-    $journalEntry = $this->journalService->createJournal(
-        date: $invoice->invoice_date,
-        description: "Invoice Penjualan - {$invoice->invoice_number}",
-        entries: $entries,
-        referenceType: 'sales_invoice',
-        referenceId: $invoice->id
-    );
-
-    $invoice->update([
-        'journal_entry_id' => $journalEntry->id,
-        'status' => 'POSTED',
-    ]);
-}
 
     public function cancelInvoice(SalesInvoice $invoice): void
     {
