@@ -35,26 +35,30 @@ class StockReportController extends Controller
             }
 
             $query = Item::select(
-                    'items.id',
-                    'items.name',
-                    'items.code',
-                    'items.unit_id',
-                    'items.category_id',
-                    'items.stock',
-                    'items.specifications',
-                    'items.jenis',
-                    'items.kualitas',
-                    'items.bentuk',
-                    'items.jenis_kayu',
-                    'items.tpk',
-                    'items.diameter',
-                    'items.panjang',
-                    'items.kubikasi'
-                )
+                'items.id',
+                'items.name',
+                'items.code',
+                'items.unit_id',
+                'items.category_id',
+                'items.stock',
+                'items.specifications',
+                'items.jenis',
+                'items.kualitas',
+                'items.bentuk',
+                'items.jenis_kayu',
+                'items.tpk',
+                'items.diameter',
+                'items.panjang',
+                'items.kubikasi',
+                'items.tanggal_terima',
+                'items.no_skshhk',
+                'items.no_kapling',
+                'items.mutu'
+            )
                 ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'inventories:id,item_id,warehouse_id,qty',
+                    'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3',
                     'inventories.warehouse:id,name,code',
                 ])
                 ->whereIn('items.category_id', $categoryIds);
@@ -67,9 +71,21 @@ class StockReportController extends Controller
                 });
             }
 
-            $sortBy    = $request->input('sort_by', 'name');
+            if ($request->filled('tpk')) {
+                $query->where('items.tpk', $request->input('tpk'));
+            }
+
+            if ($request->filled('jenis_kayu')) {
+                $query->where('items.jenis_kayu', $request->input('jenis_kayu'));
+            }
+
+            if ($request->filled('mutu')) {
+                $query->where('items.mutu', $request->input('mutu'));
+            }
+
+            $sortBy = $request->input('sort_by', 'name');
             $sortOrder = $request->input('sort_order', 'asc');
-            $allowedSortFields = ['name', 'code', 'created_at'];
+            $allowedSortFields = ['name', 'code', 'created_at', 'tanggal_terima'];
 
             if (in_array($sortBy, $allowedSortFields)) {
                 $query->orderBy("items.$sortBy", $sortOrder);
@@ -77,10 +93,54 @@ class StockReportController extends Controller
                 $query->orderBy('items.name', 'asc');
             }
 
-            $perPage = min($request->input('per_page', 50), 100);
-            $items   = $query->paginate($perPage);
-
+            // Clone query untuk hitung total kubikasi SEBELUM paginate
+            $sumQuery = clone $query;
             $warehouseId = $request->input('warehouse_id');
+            $totalKubikasi = 0;
+
+            // Hitung total kubikasi dari SEMUA data yang ter-filter
+            $allItemsForSum = $sumQuery->with([
+                'category:id,name',
+                'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3',
+            ])->get();
+
+            foreach ($allItemsForSum as $item) {
+                $allInventories = $item->inventories ?? collect();
+
+                if ($warehouseId) {
+                    $filteredInventories = $allInventories->filter(function ($inv) use ($warehouseId) {
+                        return (int) $inv->warehouse_id === (int) $warehouseId;
+                    });
+                    $inventories = $filteredInventories;
+                } else {
+                    $inventories = $allInventories;
+                }
+
+                $totalFromStocks = $inventories->sum(function ($inv) {
+                    return (float) ($inv->qty_pcs ?? 0);
+                });
+
+                if ($totalFromStocks == 0) {
+                    $totalFromStocks = (float) ($item->stock ?? 0);
+                }
+
+                $m3PerPcs = 0;
+                if (is_array($item->specifications) && isset($item->specifications['m3_per_pcs'])) {
+                    $m3PerPcs = (float) $item->specifications['m3_per_pcs'];
+                }
+
+                $volumeM3 = $totalFromStocks * $m3PerPcs;
+
+                if (str_contains(strtolower($item->category->name ?? ''), 'kayu log')) {
+                    $volumeM3 = (float) ($item->kubikasi ?? 0);
+                }
+
+                $totalKubikasi += $volumeM3;
+            }
+
+            // Baru paginate untuk display
+            $perPage = min($request->input('per_page', 50), 100);
+            $items = $query->paginate($perPage);
 
             $collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {
                 $allInventories = $item->inventories ?? collect();
@@ -99,7 +159,7 @@ class StockReportController extends Controller
                 }
 
                 $totalFromStocks = $inventories->sum(function ($inv) {
-                    return (float) ($inv->qty ?? 0);
+                    return (float) ($inv->qty_pcs ?? 0);
                 });
 
                 if ($totalFromStocks == 0) {
@@ -115,7 +175,6 @@ class StockReportController extends Controller
 
                 $item->total_volume_m3 = $totalFromStocks * $m3PerPcs;
 
-                // Jika kategori Kayu Log, gunakan nilai kubikasi dari master (karena klien minta sesuai excel, bukan total)
                 if (str_contains(strtolower($item->category->name ?? ''), 'kayu log')) {
                     $item->total_volume_m3 = (float) ($item->kubikasi ?? 0);
                 }
@@ -133,7 +192,10 @@ class StockReportController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data'    => $items,
+                'data' => $items,
+                'summary' => [
+                    'total_kubikasi' => round($totalKubikasi, 4)
+                ]
             ]);
         } catch (\Exception $e) {
             Log::error('Gagal mengambil laporan stok: ' . $e->getMessage());

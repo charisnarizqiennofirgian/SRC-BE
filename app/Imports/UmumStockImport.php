@@ -46,9 +46,9 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
                 $category = Category::firstOrCreate(
                     ['name' => $row['kategori']],
                     [
-                        'type'        => 'umum',
+                        'type' => 'umum',
                         'description' => 'Kategori untuk barang umum',
-                        'created_by'  => 1,
+                        'created_by' => 1,
                     ]
                 );
 
@@ -56,8 +56,8 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
                 $unit = Unit::firstOrCreate(
                     ['name' => $row['satuan']],
                     [
-                        'short_name'  => $row['satuan'],
-                        'symbol'      => $row['satuan'],
+                        'short_name' => $row['satuan'],
+                        'symbol' => $row['satuan'],
                         'description' => 'Satuan untuk ' . $row['satuan'],
                     ]
                 );
@@ -79,11 +79,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
-                        'name'        => $nama,
+                        'name' => $nama,
                         'category_id' => $category->id,
-                        'unit_id'     => $unit->id,
-                        'type'        => 'um',
-                        'uuid'        => Str::uuid(),
+                        'unit_id' => $unit->id,
+                        'type' => 'um',
+                        'uuid' => Str::uuid(),
                     ]
                 );
 
@@ -98,11 +98,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
                 if ($stokAwal > 0 && $warehouseId) {
                     Inventory::updateOrCreate(
                         [
-                            'item_id'      => $item->id,
+                            'item_id' => $item->id,
                             'warehouse_id' => $warehouseId,
                         ],
                         [
-                            'qty' => $stokAwal,
+                            'qty_pcs' => $stokAwal,
                         ]
                     );
 
@@ -116,24 +116,24 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
 
                     if ($existingLog) {
                         $existingLog->update([
-                            'qty'   => $stokAwal,
+                            'qty' => $stokAwal,
                             'notes' => 'Saldo Awal Barang Umum diperbarui via Excel',
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
                     } else {
                         InventoryLog::create([
-                            'date'             => now()->toDateString(),
-                            'time'             => now()->toTimeString(),
-                            'item_id'          => $item->id,
-                            'warehouse_id'     => $warehouseId,
-                            'qty'              => $stokAwal,
-                            'direction'        => 'IN',
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $item->id,
+                            'warehouse_id' => $warehouseId,
+                            'qty' => $stokAwal,
+                            'direction' => 'IN',
                             'transaction_type' => 'INITIAL_STOCK',
-                            'reference_type'   => 'ImportExcel',
-                            'reference_id'     => $item->id,
+                            'reference_type' => 'ImportExcel',
+                            'reference_id' => $item->id,
                             'reference_number' => 'IMPORT-UMUM-' . $kode,
-                            'notes'            => 'Saldo Awal Barang Umum dari Excel upload',
-                            'user_id'          => Auth::id(),
+                            'notes' => 'Saldo Awal Barang Umum dari Excel upload',
+                            'user_id' => Auth::id(),
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
                     }
@@ -150,11 +150,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
     public function rules(): array
     {
         return [
-            'kode'      => 'required|string|max:255',
-            'nama'      => 'required|string|max:255',
-            'kategori'  => 'required|string|max:255',
-            'satuan'    => 'required|string|max:255',
-            'gudang'    => 'nullable|string|max:255',
+            'kode' => 'required|string|max:255',
+            'nama' => 'required|string|max:255',
+            'kategori' => 'required|string|max:255',
+            'satuan' => 'required|string|max:255',
+            'gudang' => 'nullable|string|max:255',
             'stok_awal' => 'required|numeric|min:0',
         ];
     }

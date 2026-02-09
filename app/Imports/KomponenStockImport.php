@@ -31,11 +31,11 @@ class KomponenStockImport implements
         foreach ($rows as $index => $row) {
             try {
                 // Normalisasi string
-                $kode     = trim((string) ($row['kode'] ?? ''));
-                $nama     = trim((string) ($row['nama'] ?? ''));
+                $kode = trim((string) ($row['kode'] ?? ''));
+                $nama = trim((string) ($row['nama'] ?? ''));
                 $kategori = trim((string) ($row['kategori'] ?? ''));
-                $satuan   = trim((string) ($row['satuan'] ?? ''));
-                $gudang   = trim((string) ($row['gudang'] ?? ''));
+                $satuan = trim((string) ($row['satuan'] ?? ''));
+                $gudang = trim((string) ($row['gudang'] ?? ''));
 
                 if ($kode === '' || $nama === '') {
                     continue;
@@ -46,7 +46,7 @@ class KomponenStockImport implements
                     ['name' => $kategori],
                     [
                         'description' => 'Kategori untuk Komponen',
-                        'created_by'  => 1,
+                        'created_by' => 1,
                     ]
                 );
 
@@ -63,7 +63,7 @@ class KomponenStockImport implements
                     ->orWhere('name', $gudang)
                     ->first();
 
-                if (! $warehouse) {
+                if (!$warehouse) {
                     Log::warning(
                         'Gudang tidak ditemukan saat import Komponen di baris ' . ($index + 2),
                         ['gudang' => $gudang, 'row' => $row->toArray()]
@@ -84,9 +84,9 @@ class KomponenStockImport implements
                 $totalM3 = $m3PerPcs * $stokAwal;
 
                 $specifications = [
-                    'p'          => $p,
-                    'l'          => $l,
-                    't'          => $t,
+                    'p' => $p,
+                    'l' => $l,
+                    't' => $t,
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
@@ -94,17 +94,17 @@ class KomponenStockImport implements
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
-                        'name'        => $nama,
+                        'name' => $nama,
                         'category_id' => $category->id,
-                        'unit_id'     => $unit->id,
-                        'uuid'        => Str::uuid(),
-                        'type'        => 'component',
+                        'unit_id' => $unit->id,
+                        'uuid' => Str::uuid(),
+                        'type' => 'component',
                     ]
                 );
 
                 $item->specifications = $specifications;
-                $item->category_id    = $category->id;
-                $item->unit_id        = $unit->id;
+                $item->category_id = $category->id;
+                $item->unit_id = $unit->id;
                 $item->save();
 
                 // 2. Update Inventory
@@ -118,11 +118,11 @@ class KomponenStockImport implements
                     // Update atau create inventory
                     Inventory::updateOrCreate(
                         [
-                            'item_id'      => $item->id,
+                            'item_id' => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'qty'    => $stokAwal,
+                            'qty_pcs' => $stokAwal,
                             'qty_m3' => $totalM3,
                         ]
                     );
@@ -137,26 +137,26 @@ class KomponenStockImport implements
 
                     if ($existingLog) {
                         $existingLog->update([
-                            'qty'    => $stokAwal,
+                            'qty' => $stokAwal,
                             'qty_m3' => $totalM3,
-                            'notes'  => 'Saldo Awal Komponen diperbarui via Excel',
+                            'notes' => 'Saldo Awal Komponen diperbarui via Excel',
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
                     } else {
                         InventoryLog::create([
-                            'date'             => now()->toDateString(),
-                            'time'             => now()->toTimeString(),
-                            'item_id'          => $item->id,
-                            'warehouse_id'     => $warehouse->id,
-                            'qty'              => $stokAwal,
-                            'qty_m3'           => $totalM3,
-                            'direction'        => 'IN',
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $item->id,
+                            'warehouse_id' => $warehouse->id,
+                            'qty' => $stokAwal,
+                            'qty_m3' => $totalM3,
+                            'direction' => 'IN',
                             'transaction_type' => 'INITIAL_STOCK',
-                            'reference_type'   => 'ImportExcel',
-                            'reference_id'     => $item->id,
+                            'reference_type' => 'ImportExcel',
+                            'reference_id' => $item->id,
                             'reference_number' => 'IMPORT-KOMP-' . $kode,
-                            'notes'            => 'Saldo Awal Komponen dari Excel upload',
-                            'user_id'          => Auth::id(),
+                            'notes' => 'Saldo Awal Komponen dari Excel upload',
+                            'user_id' => Auth::id(),
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
                     }
@@ -173,14 +173,14 @@ class KomponenStockImport implements
     public function rules(): array
     {
         return [
-            'kode'      => 'required|string|max:255',
-            'nama'      => 'required|string|max:255',
-            'kategori'  => 'required|string|max:255',
-            'satuan'    => 'required|string|max:255',
-            'gudang'    => 'required|string|max:255',
-            'p'         => 'required|numeric|min:0',
-            'l'         => 'required|numeric|min:0',
-            't'         => 'required|numeric|min:0',
+            'kode' => 'required|string|max:255',
+            'nama' => 'required|string|max:255',
+            'kategori' => 'required|string|max:255',
+            'satuan' => 'required|string|max:255',
+            'gudang' => 'required|string|max:255',
+            'p' => 'required|numeric|min:0',
+            'l' => 'required|numeric|min:0',
+            't' => 'required|numeric|min:0',
             'stok_awal' => 'required|numeric|min:0',
         ];
     }

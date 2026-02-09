@@ -10,14 +10,14 @@ class Item extends Model
 {
     use HasFactory, SoftDeletes;
 
-    const TYPE_RAW_MATERIAL  = 'raw_material';
-    const TYPE_CONSUMABLE    = 'consumable';
-    const TYPE_COMPONENT     = 'component';
-    const TYPE_WIP           = 'wip';
+    const TYPE_RAW_MATERIAL = 'raw_material';
+    const TYPE_CONSUMABLE = 'consumable';
+    const TYPE_COMPONENT = 'component';
+    const TYPE_WIP = 'wip';
     const TYPE_FINISHED_GOOD = 'finished_good';
-    const TYPE_PACKAGING     = 'packaging';
-    const TYPE_SPAREPART     = 'sparepart';
-    const TYPE_OTHER         = 'other';
+    const TYPE_PACKAGING = 'packaging';
+    const TYPE_SPAREPART = 'sparepart';
+    const TYPE_OTHER = 'other';
 
     const ROUTE_FROM_LOG = 'from_log';
     const ROUTE_FROM_RST = 'from_rst';
@@ -48,6 +48,10 @@ class Item extends Model
         'diameter',
         'panjang',
         'kubikasi',
+        'tanggal_terima',
+        'no_skshhk',
+        'no_kapling',
+        'mutu',
     ];
 
     protected $casts = [
@@ -65,14 +69,14 @@ class Item extends Model
     public static function getTypes(): array
     {
         return [
-            self::TYPE_RAW_MATERIAL  => 'Bahan Baku Utama',
-            self::TYPE_CONSUMABLE    => 'Bahan Pendukung (Consumable)',
-            self::TYPE_COMPONENT     => 'Komponen',
-            self::TYPE_WIP           => 'Barang Setengah Jadi (WIP)',
+            self::TYPE_RAW_MATERIAL => 'Bahan Baku Utama',
+            self::TYPE_CONSUMABLE => 'Bahan Pendukung (Consumable)',
+            self::TYPE_COMPONENT => 'Komponen',
+            self::TYPE_WIP => 'Barang Setengah Jadi (WIP)',
             self::TYPE_FINISHED_GOOD => 'Produk Jadi',
-            self::TYPE_PACKAGING     => 'Packaging',
-            self::TYPE_SPAREPART     => 'Sparepart',
-            self::TYPE_OTHER         => 'Lainnya',
+            self::TYPE_PACKAGING => 'Packaging',
+            self::TYPE_SPAREPART => 'Sparepart',
+            self::TYPE_OTHER => 'Lainnya',
         ];
     }
 

@@ -22,7 +22,8 @@ class MaterialController extends Controller
     private function calculateVolumeM3(array $itemData): ?float
     {
         $category = Category::find($itemData['category_id'] ?? null);
-        if (!$category) return null;
+        if (!$category)
+            return null;
 
         $name = strtolower($category->name);
 
@@ -61,7 +62,7 @@ class MaterialController extends Controller
                 $items = Item::with(['category:id,name', 'unit:id,name'])
                     ->when($request->filled('category_name'), function ($q) use ($request) {
                         $q->whereHas('category', function ($qq) use ($request) {
-                            $qq->where('name', 'like', '%'.$request->category_name.'%');
+                            $qq->where('name', 'like', '%' . $request->category_name . '%');
                         });
                     })
                     ->orderBy('name')
@@ -84,7 +85,7 @@ class MaterialController extends Controller
             }
 
             $perPage = min($request->input('per_page', 50), 100);
-            $search  = $request->input('search');
+            $search = $request->input('search');
 
             $query = Item::with($relations)
                 ->select(
@@ -110,7 +111,11 @@ class MaterialController extends Controller
                     'tpk',
                     'diameter',
                     'panjang',
-                    'kubikasi'
+                    'kubikasi',
+                    'tanggal_terima',
+                    'no_skshhk',
+                    'no_kapling',
+                    'mutu'
                 );
 
             if ($search) {
@@ -128,7 +133,7 @@ class MaterialController extends Controller
                 });
             }
 
-            $sortBy    = $request->input('sort_by', 'created_at');
+            $sortBy = $request->input('sort_by', 'created_at');
             $sortOrder = $request->input('sort_order', 'desc');
 
             $allowedSortFields = ['name', 'code', 'stock', 'created_at'];
@@ -180,6 +185,10 @@ class MaterialController extends Controller
                 'diameter' => 'nullable|numeric|min:0',
                 'panjang' => 'nullable|numeric|min:0',
                 'kubikasi' => 'nullable|numeric|min:0',
+                'tanggal_terima' => 'nullable|date',
+                'no_skshhk' => 'nullable|string|max:255',
+                'no_kapling' => 'nullable|string|max:255',
+                'mutu' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -218,6 +227,10 @@ class MaterialController extends Controller
             $itemData['diameter'] = $itemData['diameter'] ?? null;
             $itemData['panjang'] = $itemData['panjang'] ?? null;
             $itemData['kubikasi'] = $itemData['kubikasi'] ?? null;
+            $itemData['tanggal_terima'] = $itemData['tanggal_terima'] ?? null;
+            $itemData['no_skshhk'] = $itemData['no_skshhk'] ?? null;
+            $itemData['no_kapling'] = $itemData['no_kapling'] ?? null;
+            $itemData['mutu'] = $itemData['mutu'] ?? null;
 
             $category = Category::find($itemData['category_id'] ?? null);
             if (
@@ -351,6 +364,10 @@ class MaterialController extends Controller
                 'diameter' => 'nullable|numeric|min:0',
                 'panjang' => 'nullable|numeric|min:0',
                 'kubikasi' => 'nullable|numeric|min:0',
+                'tanggal_terima' => 'nullable|date',
+                'no_skshhk' => 'nullable|string|max:255',
+                'no_kapling' => 'nullable|string|max:255',
+                'mutu' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -389,6 +406,10 @@ class MaterialController extends Controller
             $itemData['diameter'] = $itemData['diameter'] ?? null;
             $itemData['panjang'] = $itemData['panjang'] ?? null;
             $itemData['kubikasi'] = $itemData['kubikasi'] ?? null;
+            $itemData['tanggal_terima'] = $itemData['tanggal_terima'] ?? null;
+            $itemData['no_skshhk'] = $itemData['no_skshhk'] ?? null;
+            $itemData['no_kapling'] = $itemData['no_kapling'] ?? null;
+            $itemData['mutu'] = $itemData['mutu'] ?? null;
 
             $category = Category::find($itemData['category_id'] ?? null);
             if (
@@ -508,31 +529,111 @@ class MaterialController extends Controller
     {
         try {
             $headers = [
-                'kode', 'nama', 'kategori', 'satuan', 'stok_awal', 'gudang_awal', 'deskripsi',
-                'spec_p', 'spec_l', 'spec_t',
-                'nw_per_box', 'gw_per_box', 'wood_consumed_per_pcs', 'm3_per_carton', 'hs_code',
-                'jenis_kayu', 'tpk', 'diameter', 'panjang', 'kubikasi'
+                'kode',
+                'nama',
+                'kategori',
+                'satuan',
+                'stok_awal',
+                'gudang_awal',
+                'deskripsi',
+                'spec_p',
+                'spec_l',
+                'spec_t',
+                'nw_per_box',
+                'gw_per_box',
+                'wood_consumed_per_pcs',
+                'm3_per_carton',
+                'hs_code',
+                'jenis_kayu',
+                'tpk',
+                'diameter',
+                'panjang',
+                'kubikasi',
+                'tanggal_terima',
+                'no_skshhk',
+                'no_kapling',
+                'mutu'
             ];
 
             $example1 = [
-                'PJ-001', 'KILT DINING', 'Produk Jadi', 'Pcs', 10, 'PACKING', 'Produk KILT',
-                '', '', '',
-                '27.0', '42.0', '0.0099', '0.045', '4403.99',
-                '', '', '', '', ''
+                'PJ-001',
+                'KILT DINING',
+                'Produk Jadi',
+                'Pcs',
+                10,
+                'PACKING',
+                'Produk KILT',
+                '',
+                '',
+                '',
+                '27.0',
+                '42.0',
+                '0.0099',
+                '0.045',
+                '4403.99',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                ''
             ];
 
             $example2 = [
-                'BOX-001', 'BOX A KILT', 'Karton Box', 'Pcs', 100, 'PACKING', 'Box untuk KILT',
-                '960', '940', '940',
-                '', '', '', '', '',
-                '', '', '', '', ''
+                'BOX-001',
+                'BOX A KILT',
+                'Karton Box',
+                'Pcs',
+                100,
+                'PACKING',
+                'Box untuk KILT',
+                '960',
+                '940',
+                '940',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                ''
             ];
 
             $example3 = [
-                'LOG-001', 'Kayu Meranti', 'Kayu Log', 'Set', 50, 'LOG', 'Kayu log dari TPK A',
-                '', '', '',
-                '', '', '', '', '',
-                'Meranti', 'TPK Makmur', '40', '4.5', '0.5655'
+                'LOG-001',
+                'Kayu Meranti',
+                'Kayu Log',
+                'Set',
+                50,
+                'LOG',
+                'Kayu log dari TPK A',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                'Meranti',
+                'TPK Makmur',
+                '40',
+                '4.5',
+                '0.5655',
+                '2026-02-01',
+                '3358693',
+                '2412502005843',
+                'A'
             ];
 
             $content = implode(';', $headers) . "\n";

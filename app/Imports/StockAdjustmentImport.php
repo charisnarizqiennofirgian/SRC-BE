@@ -102,16 +102,16 @@ class StockAdjustmentImport implements ToCollection, WithHeadingRow, WithCustomC
                         $oldInventory = Inventory::where('item_id', $item->id)
                             ->where('warehouse_id', $warehouseId)
                             ->first();
-                        $oldQtyInventory = $oldInventory ? (float) $oldInventory->qty : 0;
+                        $oldQtyInventory = $oldInventory ? (float) $oldInventory->qty_pcs : 0;
 
                         // Update inventory
                         Inventory::updateOrCreate(
                             [
-                                'item_id'      => $item->id,
+                                'item_id' => $item->id,
                                 'warehouse_id' => $warehouseId,
                             ],
                             [
-                                'qty' => $quantity,
+                                'qty_pcs' => $quantity,
                             ]
                         );
 
@@ -121,20 +121,21 @@ class StockAdjustmentImport implements ToCollection, WithHeadingRow, WithCustomC
                         $diff = $quantity - $oldQtyInventory;
                         if ($diff != 0) {
                             InventoryLog::create([
-                                'date'             => now()->toDateString(),
-                                'time'             => now()->toTimeString(),
-                                'item_id'          => $item->id,
-                                'warehouse_id'     => $warehouseId,
-                                'qty'              => abs($diff),
-                                'direction'        => $diff > 0 ? 'IN' : 'OUT',
+                                'date' => now()->toDateString(),
+                                'time' => now()->toTimeString(),
+                                'item_id' => $item->id,
+                                'warehouse_id' => $warehouseId,
+                                'qty' => abs($diff),
+                                'direction' => $diff > 0 ? 'IN' : 'OUT',
                                 'transaction_type' => 'ADJUSTMENT',
-                                'reference_type'   => 'StockAdjustment',
-                                'reference_id'     => $item->id,
+                                'reference_type' => 'StockAdjustment',
+                                'reference_id' => $item->id,
                                 'reference_number' => 'ADJ-IMPORT-' . $kodeBarang,
-                                'notes'            => $notes . " (Perubahan: {$oldQtyInventory} → {$quantity})",
-                                'user_id'          => Auth::id(),
+                                'notes' => $notes . " (Perubahan: {$oldQtyInventory} → {$quantity})",
+                                'user_id' => Auth::id(),
                             ]);
-                            Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED: {$diff} ({$diff > 0 ? 'IN' : 'OUT'})");
+                            $direction = $diff > 0 ? 'IN' : 'OUT';
+                            Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED: {$diff} ({$direction})");
                         }
                     } else {
                         Log::warning("ROW #{$index} - Gudang tidak ditemukan, inventory tidak diupdate");

@@ -30,7 +30,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
         $this->defaultUnit = Unit::firstOrCreate(
             ['short_name' => 'PCS'],
             [
-                'name'        => 'PCS',
+                'name' => 'PCS',
                 'description' => 'Pieces',
             ]
         );
@@ -41,7 +41,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $skippedRows   = [];
+        $skippedRows = [];
         $processedRows = 0;
 
         Log::info('========== MULAI IMPORT PRODUK JADI ==========');
@@ -58,18 +58,18 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
 
             $namaProduk = trim($normalized['nama_produk'] ?? $normalized['nama produk'] ?? '');
             $kodeBarang = trim($normalized['kode_barang'] ?? $normalized['kode barang'] ?? '');
-            $stokAwal   = isset($normalized['stok_awal'])
+            $stokAwal = isset($normalized['stok_awal'])
                 ? (float) $normalized['stok_awal']
                 : (isset($normalized['stok awal']) ? (float) $normalized['stok awal'] : 0);
-            $gudangRaw  = trim($normalized['gudang'] ?? '');
-            $hsCodeRaw  = $normalized['hs_code'] ?? $normalized['hs code'] ?? null;
+            $gudangRaw = trim($normalized['gudang'] ?? '');
+            $hsCodeRaw = $normalized['hs_code'] ?? $normalized['hs code'] ?? null;
 
             if (empty($namaProduk) || $stokAwal <= 0 || empty($gudangRaw)) {
                 Log::warning("ROW #{$index} DITOLAK (kolom wajib kosong / stok <= 0)");
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'reason'     => 'Kolom nama_produk, stok_awal, atau gudang kosong / stok <= 0',
-                    'data'       => $normalized,
+                    'reason' => 'Kolom nama_produk, stok_awal, atau gudang kosong / stok <= 0',
+                    'data' => $normalized,
                 ];
                 continue;
             }
@@ -82,13 +82,13 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             }
 
             $kategoriName = trim($normalized['kategori'] ?? '');
-            $satuanName   = trim($normalized['satuan'] ?? '');
+            $satuanName = trim($normalized['satuan'] ?? '');
 
             $category = $kategoriName
                 ? Category::firstOrCreate(
                     ['name' => $kategoriName],
                     ['description' => 'Kategori dari import Produk Jadi']
-                  )
+                )
                 : $this->defaultCategory;
 
             if ($satuanName) {
@@ -96,7 +96,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 $unit = Unit::firstOrCreate(
                     ['short_name' => $short],
                     [
-                        'name'        => $satuanName,
+                        'name' => $satuanName,
                         'description' => 'Satuan dari import Produk Jadi',
                     ]
                 );
@@ -109,23 +109,23 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             try {
                 Log::info("ROW #{$index} - CREATING/UPDATING ITEM: {$namaProduk}");
 
-                $nwPerBox   = $normalized['nw_per_box'] ?? $normalized['nw per box'] ?? null;
-                $gwPerBox   = $normalized['gw_per_box'] ?? $normalized['gw per box'] ?? null;
+                $nwPerBox = $normalized['nw_per_box'] ?? $normalized['nw per box'] ?? null;
+                $gwPerBox = $normalized['gw_per_box'] ?? $normalized['gw per box'] ?? null;
                 $woodPerPcs = $normalized['wood_consumed_per_pcs'] ?? $normalized['wood consumed per pcs'] ?? null;
-                $m3Carton   = $normalized['m3_per_carton'] ?? $normalized['m3 per carton'] ?? null;
+                $m3Carton = $normalized['m3_per_carton'] ?? $normalized['m3 per carton'] ?? null;
 
                 // 1) Master item
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
-                        'name'                  => $namaProduk,
-                        'category_id'           => $category->id,
-                        'unit_id'               => $unit->id,
-                        'hs_code'               => $hsCode,
-                        'nw_per_box'            => $nwPerBox !== null ? (float) $nwPerBox : null,
-                        'gw_per_box'            => $gwPerBox !== null ? (float) $gwPerBox : null,
+                        'name' => $namaProduk,
+                        'category_id' => $category->id,
+                        'unit_id' => $unit->id,
+                        'hs_code' => $hsCode,
+                        'nw_per_box' => $nwPerBox !== null ? (float) $nwPerBox : null,
+                        'gw_per_box' => $gwPerBox !== null ? (float) $gwPerBox : null,
                         'wood_consumed_per_pcs' => $woodPerPcs !== null ? (float) $woodPerPcs : null,
-                        'm3_per_carton'         => $m3Carton !== null ? (float) $m3Carton : null,
+                        'm3_per_carton' => $m3Carton !== null ? (float) $m3Carton : null,
                     ]
                 );
 
@@ -140,15 +140,15 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     if ($existingMovement) {
                         $existingMovement->update([
                             'quantity' => $stokAwal,
-                            'notes'    => 'Saldo Awal Produk Jadi diperbarui via Excel upload.',
+                            'notes' => 'Saldo Awal Produk Jadi diperbarui via Excel upload.',
                         ]);
                         Log::info("ROW #{$index} - MOVEMENT UPDATED");
                     } else {
                         StockMovement::create([
-                            'item_id'  => $item->id,
-                            'type'     => 'Stok Masuk',
+                            'item_id' => $item->id,
+                            'type' => 'Stok Masuk',
                             'quantity' => $stokAwal,
-                            'notes'    => 'Saldo Awal Produk Jadi dari Excel upload.',
+                            'notes' => 'Saldo Awal Produk Jadi dari Excel upload.',
                         ]);
                         Log::info("ROW #{$index} - MOVEMENT CREATED");
                     }
@@ -160,8 +160,8 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 if (!$warehouse) {
                     $skippedRows[] = [
                         'row_number' => $index + 2,
-                        'item_name'  => $namaProduk,
-                        'reason'     => 'Kode gudang tidak ditemukan: ' . $gudangRaw,
+                        'item_name' => $namaProduk,
+                        'reason' => 'Kode gudang tidak ditemukan: ' . $gudangRaw,
                     ];
                     Log::warning("ROW #{$index} - GUDANG TIDAK DITEMUKAN: {$gudangRaw}");
                 } else {
@@ -180,11 +180,11 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     // Update inventory
                     Inventory::updateOrCreate(
                         [
-                            'item_id'      => $item->id,
+                            'item_id' => $item->id,
                             'warehouse_id' => $warehouse->id,
                         ],
                         [
-                            'qty'    => $stokAwal,
+                            'qty_pcs' => $stokAwal,
                             'qty_m3' => $qtyM3,
                         ]
                     );
@@ -233,8 +233,8 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
 
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'item_name'  => $namaProduk,
-                    'reason'     => 'Error: ' . $e->getMessage(),
+                    'item_name' => $namaProduk,
+                    'reason' => 'Error: ' . $e->getMessage(),
                 ];
             }
         }

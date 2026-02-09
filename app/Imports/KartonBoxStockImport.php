@@ -46,9 +46,9 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 $category = Category::firstOrCreate(
                     ['name' => $row['kategori']],
                     [
-                        'type'        => 'karton',
+                        'type' => 'karton',
                         'description' => 'Kategori untuk Karton Box',
-                        'created_by'  => 1,
+                        'created_by' => 1,
                     ]
                 );
 
@@ -56,8 +56,8 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 $unit = Unit::firstOrCreate(
                     ['name' => $row['satuan']],
                     [
-                        'short_name'  => $row['satuan'],
-                        'symbol'      => $row['satuan'],
+                        'short_name' => $row['satuan'],
+                        'symbol' => $row['satuan'],
                         'description' => 'Satuan untuk ' . $row['satuan'],
                     ]
                 );
@@ -86,9 +86,9 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 $totalM3 = $m3PerPcs * $stokAwal;
 
                 $specifications = [
-                    'p'          => $p,
-                    'l'          => $l,
-                    't'          => $t,
+                    'p' => $p,
+                    'l' => $l,
+                    't' => $t,
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
@@ -96,10 +96,10 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
-                        'name'        => $nama,
+                        'name' => $nama,
                         'category_id' => $category->id,
-                        'unit_id'     => $unit->id,
-                        'uuid'        => Str::uuid(),
+                        'unit_id' => $unit->id,
+                        'uuid' => Str::uuid(),
                     ]
                 );
 
@@ -115,11 +115,11 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 if ($stokAwal > 0 && $warehouseId) {
                     Inventory::updateOrCreate(
                         [
-                            'item_id'      => $item->id,
+                            'item_id' => $item->id,
                             'warehouse_id' => $warehouseId,
                         ],
                         [
-                            'qty'    => $stokAwal,
+                            'qty_pcs' => $stokAwal,
                             'qty_m3' => $totalM3,
                         ]
                     );
@@ -134,26 +134,26 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
 
                     if ($existingLog) {
                         $existingLog->update([
-                            'qty'    => $stokAwal,
+                            'qty' => $stokAwal,
                             'qty_m3' => $totalM3,
-                            'notes'  => 'Saldo Awal Karton Box diperbarui via Excel',
+                            'notes' => 'Saldo Awal Karton Box diperbarui via Excel',
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
                     } else {
                         InventoryLog::create([
-                            'date'             => now()->toDateString(),
-                            'time'             => now()->toTimeString(),
-                            'item_id'          => $item->id,
-                            'warehouse_id'     => $warehouseId,
-                            'qty'              => $stokAwal,
-                            'qty_m3'           => $totalM3,
-                            'direction'        => 'IN',
+                            'date' => now()->toDateString(),
+                            'time' => now()->toTimeString(),
+                            'item_id' => $item->id,
+                            'warehouse_id' => $warehouseId,
+                            'qty' => $stokAwal,
+                            'qty_m3' => $totalM3,
+                            'direction' => 'IN',
                             'transaction_type' => 'INITIAL_STOCK',
-                            'reference_type'   => 'ImportExcel',
-                            'reference_id'     => $item->id,
+                            'reference_type' => 'ImportExcel',
+                            'reference_id' => $item->id,
                             'reference_number' => 'IMPORT-BOX-' . $kode,
-                            'notes'            => 'Saldo Awal Karton Box dari Excel upload',
-                            'user_id'          => Auth::id(),
+                            'notes' => 'Saldo Awal Karton Box dari Excel upload',
+                            'user_id' => Auth::id(),
                         ]);
                         Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
                     }
@@ -170,14 +170,14 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
     public function rules(): array
     {
         return [
-            'kode'      => 'required|string|max:255',
-            'nama'      => 'required|string|max:255',
-            'kategori'  => 'required|string|max:255',
-            'satuan'    => 'required|string|max:255',
-            'gudang'    => 'nullable|string|max:255',
-            'p'         => 'required|numeric|min:0',
-            'l'         => 'required|numeric|min:0',
-            't'         => 'required|numeric|min:0',
+            'kode' => 'required|string|max:255',
+            'nama' => 'required|string|max:255',
+            'kategori' => 'required|string|max:255',
+            'satuan' => 'required|string|max:255',
+            'gudang' => 'nullable|string|max:255',
+            'p' => 'required|numeric|min:0',
+            'l' => 'required|numeric|min:0',
+            't' => 'required|numeric|min:0',
             'stok_awal' => 'required|numeric|min:0',
         ];
     }
