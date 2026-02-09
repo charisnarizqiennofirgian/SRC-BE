@@ -136,7 +136,7 @@ class DeliveryOrderController extends Controller
                 $inventory = Inventory::where('item_id', $detail['item_id'])
                     ->where('warehouse_id', $packingWarehouseId)
                     ->first();
-                $currentStock = $inventory ? (float) $inventory->qty : 0;
+                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0; // ← FIXED
 
                 if ($currentStock < $detail['quantity_shipped']) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
@@ -197,7 +197,7 @@ class DeliveryOrderController extends Controller
                 $inventory = Inventory::where('item_id', $detail->item_id)
                     ->where('warehouse_id', $packingWarehouseId)
                     ->first();
-                $currentStock = $inventory ? (float) $inventory->qty : 0;
+                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0; // ← FIXED
 
                 if ($currentStock < $detail->quantity_shipped) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail->quantity_shipped}");
@@ -206,7 +206,7 @@ class DeliveryOrderController extends Controller
                 $item->decrement('stock', $detail->quantity_shipped);
 
                 if ($inventory) {
-                    $inventory->decrement('qty', $detail->quantity_shipped);
+                    $inventory->decrement('qty_pcs', $detail->quantity_shipped); // ← FIXED
                 }
 
                 StockMovement::create([

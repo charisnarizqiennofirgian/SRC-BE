@@ -10,6 +10,11 @@ class DownPayment extends Model
 {
     use HasFactory, SoftDeletes;
 
+    // ✅ TAMBAH: Status Constants
+    const STATUS_PENDING = 'PENDING';
+    const STATUS_PARTIALLY_USED = 'PARTIALLY_USED';
+    const STATUS_FULLY_USED = 'FULLY_USED';
+
     protected $fillable = [
         'dp_number',
         'sales_order_id',
@@ -39,7 +44,7 @@ class DownPayment extends Model
 
     protected $with = [
         'buyer',
-        'account',  // ← GANTI dari paymentMethod
+        'account',
     ];
 
     /**
@@ -116,24 +121,56 @@ class DownPayment extends Model
     }
 
     /**
-     * Cek apakah DP masih bisa dipakai
+     * ✅ UPDATED: Cek apakah DP masih bisa dipakai
      */
     public function isAvailable(): bool
     {
-        return $this->status === 'PENDING' && $this->remaining_amount > 0;
+        return in_array($this->status, [self::STATUS_PENDING, self::STATUS_PARTIALLY_USED])
+            && $this->remaining_amount > 0;
     }
 
     /**
-     * Update remaining amount
+     * ✅ UPDATED: Update remaining amount & status
      */
     public function updateRemaining(): void
     {
         $this->remaining_amount = $this->amount_idr - $this->used_amount;
 
+        // Update status based on usage
         if ($this->remaining_amount <= 0) {
-            $this->status = 'USED';
+            $this->status = self::STATUS_FULLY_USED;
+        } elseif ($this->used_amount > 0) {
+            $this->status = self::STATUS_PARTIALLY_USED;
+        } else {
+            $this->status = self::STATUS_PENDING;
         }
 
         $this->save();
+    }
+
+    /**
+     * ✅ NEW: Get status label for display
+     */
+    public function getStatusLabelAttribute(): string
+    {
+        return match($this->status) {
+            self::STATUS_PENDING => 'Belum Terpakai',
+            self::STATUS_PARTIALLY_USED => 'Sebagian Terpakai',
+            self::STATUS_FULLY_USED => 'Sudah Terpakai',
+            default => $this->status,
+        };
+    }
+
+    /**
+     * ✅ NEW: Get status badge color for UI
+     */
+    public function getStatusColorAttribute(): string
+    {
+        return match($this->status) {
+            self::STATUS_PENDING => 'warning',
+            self::STATUS_PARTIALLY_USED => 'info',
+            self::STATUS_FULLY_USED => 'success',
+            default => 'secondary',
+        };
     }
 }

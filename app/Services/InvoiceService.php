@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\SalesInvoice;
 use App\Models\SalesInvoiceDetail;
 use App\Models\DeliveryOrder;
+use App\Models\DownPayment;
 use App\Models\JournalEntry;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -12,10 +13,14 @@ use Illuminate\Support\Facades\Log;
 class InvoiceService
 {
     protected $journalService;
+    protected $downPaymentService;
 
-    public function __construct(JournalService $journalService)
-    {
+    public function __construct(
+        JournalService $journalService,
+        DownPaymentService $downPaymentService
+    ) {
         $this->journalService = $journalService;
+        $this->downPaymentService = $downPaymentService;
     }
 
     public function createInvoiceFromDeliveryOrder(
@@ -77,6 +82,36 @@ class InvoiceService
         $taxAmountIdr = $taxAmountOriginal * $exchangeRate;
         $totalIdr = $totalOriginal * $exchangeRate;
 
+        // ✅ CEK DAN APPLY DOWN PAYMENT
+        $availableDownPayments = $this->downPaymentService->getAvailableDownPayments($deliveryOrder->buyer_id);
+
+        $totalDpApplied = 0;
+        $dpAllocations = [];
+
+        foreach ($availableDownPayments as $dp) {
+            $remainingInvoice = $totalIdr - $totalDpApplied;
+
+            if ($remainingInvoice <= 0) {
+                break; // Invoice sudah lunas dari DP
+            }
+
+            $dpToUse = min($dp->remaining_amount, $remainingInvoice);
+
+            if ($dpToUse > 0) {
+                $dpAllocations[] = [
+                    'down_payment_id' => $dp->id,
+                    'amount_used' => $dpToUse
+                ];
+                $totalDpApplied += $dpToUse;
+            }
+        }
+
+        Log::info('Down Payment Application:', [
+            'totalIdr' => $totalIdr,
+            'totalDpApplied' => $totalDpApplied,
+            'dpAllocations' => $dpAllocations,
+        ]);
+
         Log::info('Final Calculation:', [
             'subtotalOriginal' => $subtotalOriginal,
             'taxRate' => $taxRate,
@@ -86,6 +121,8 @@ class InvoiceService
             'subtotalIdr' => $subtotalIdr,
             'taxAmountIdr' => $taxAmountIdr,
             'totalIdr' => $totalIdr,
+            'totalDpApplied' => $totalDpApplied,
+            'remainingAmount' => $totalIdr - $totalDpApplied,
         ]);
 
         $invoiceNumber = SalesInvoice::generateInvoiceNumber();
@@ -106,12 +143,37 @@ class InvoiceService
             'subtotal_idr' => $subtotalIdr,
             'tax_amount_idr' => $taxAmountIdr,
             'total_idr' => $totalIdr,
-            'paid_amount' => 0,
-            'remaining_amount' => $totalIdr,
-            'payment_status' => 'UNPAID',
+            'paid_amount' => $totalDpApplied, // ✅ APPLIED DP
+            'remaining_amount' => $totalIdr - $totalDpApplied, // ✅ SISA SETELAH DP
+            'payment_status' => $totalDpApplied >= $totalIdr ? 'PAID' : ($totalDpApplied > 0 ? 'PARTIAL' : 'UNPAID'), // ✅ AUTO STATUS
             'notes' => $notes,
             'status' => 'DRAFT',
         ]);
+
+        // ✅ APPLY DOWN PAYMENT & UPDATE STATUS
+        foreach ($dpAllocations as $allocation) {
+            $dp = DownPayment::find($allocation['down_payment_id']);
+
+            // Update DP using service method
+            $this->downPaymentService->useDownPayment($dp, $allocation['amount_used']);
+
+            // Update status
+            if ($dp->remaining_amount <= 0) {
+                $dp->update(['status' => 'FULLY_USED']);
+            } else {
+                $dp->update(['status' => 'PARTIALLY_USED']);
+            }
+
+            $dp->save();
+
+            Log::info('DP Applied:', [
+                'dp_id' => $dp->id,
+                'dp_number' => $dp->dp_number,
+                'amount_used' => $allocation['amount_used'],
+                'remaining_after' => $dp->remaining_amount,
+                'status' => $dp->status,
+            ]);
+        }
 
         foreach ($deliveryOrder->details as $detail) {
             $soDetail = $detail->salesOrderDetail;
@@ -180,10 +242,11 @@ class InvoiceService
             ->where('is_active', 1)
             ->first();
 
+        // ✅ JURNAL UNTUK INVOICE (Piutang dikurangi DP yang sudah dibayar)
         $entries = [
             [
                 'account_id' => $receivableAccount->id,
-                'debit' => floatval($invoice->total_idr),
+                'debit' => floatval($invoice->remaining_amount), // ✅ HANYA SISA SETELAH DP
                 'credit' => 0,
                 'description' => "Piutang - {$invoice->invoice_number}",
             ],
@@ -204,6 +267,25 @@ class InvoiceService
             ];
         }
 
+        // ✅ JURNAL UNTUK DP YANG DIPAKAI
+        if ($invoice->paid_amount > 0) {
+            $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1%')
+                ->where(function($q) {
+                    $q->where('name', 'like', '%Uang Muka Penjualan%')
+                      ->orWhere('name', 'like', '%Customer Deposit%');
+                })
+                ->first();
+
+            if ($depositAccount) {
+                $entries[] = [
+                    'account_id' => $depositAccount->id,
+                    'debit' => floatval($invoice->paid_amount),
+                    'credit' => 0,
+                    'description' => "Pelunasan Uang Muka - {$invoice->invoice_number}",
+                ];
+            }
+        }
+
         $totalDebit = array_sum(array_column($entries, 'debit'));
         $totalCredit = array_sum(array_column($entries, 'credit'));
 
@@ -211,9 +293,8 @@ class InvoiceService
             'invoice_id' => $invoice->id,
             'invoice_number' => $invoice->invoice_number,
             'invoice_total_idr' => $invoice->total_idr,
-            'invoice_total_idr_type' => gettype($invoice->total_idr),
-            'invoice_subtotal_idr' => $invoice->subtotal_idr,
-            'invoice_tax_amount_idr' => $invoice->tax_amount_idr,
+            'invoice_paid_amount' => $invoice->paid_amount,
+            'invoice_remaining_amount' => $invoice->remaining_amount,
             'receivable_account_id' => $receivableAccount->id,
             'sales_account_id' => $salesAccount->id,
             'entries' => $entries,
