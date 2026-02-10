@@ -145,12 +145,15 @@ class DeliveryOrderController extends Controller
                 $nwPerBox = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
                 $gwPerBox = $detail['gw_per_box'] ?? $item->gw_per_box ?? null;
                 $m3PerCarton = $detail['m3_per_carton'] ?? $item->m3_per_carton ?? null;
+                $woodPerPcs = $detail['wood_consumed_per_pcs'] ?? $item->wood_consumed_per_pcs ?? null;
 
                 $quantityBoxes = $detail['quantity_boxes'] ?? null;
+                $quantityShipped = $detail['quantity_shipped'];
 
                 $totalNw = null;
                 $totalGw = null;
                 $totalM3 = null;
+                $totalWood = null;
 
                 if ($nwPerBox && $quantityBoxes) {
                     $totalNw = $nwPerBox * $quantityBoxes;
@@ -164,21 +167,28 @@ class DeliveryOrderController extends Controller
                     $totalM3 = $m3PerCarton * $quantityBoxes;
                 }
 
+                if ($woodPerPcs && $quantityShipped) {
+                    $totalWood = $woodPerPcs * $quantityShipped;
+                }
+
                 DeliveryOrderDetail::create([
                     'delivery_order_id' => $deliveryOrder->id,
                     'sales_order_detail_id' => $detail['sales_order_detail_id'],
                     'item_id' => $detail['item_id'],
                     'item_name' => $item->name,
                     'item_unit' => $item->unit->name ?? 'Pcs',
-                    'quantity_shipped' => $detail['quantity_shipped'],
+                    'hs_code' => $item->hs_code ?? null,
+                    'quantity_shipped' => $quantityShipped,
                     'quantity_boxes' => $quantityBoxes,
                     'quantity_crates' => $detail['quantity_crates'] ?? null,
                     'nw_per_box' => $nwPerBox,
                     'gw_per_box' => $gwPerBox,
                     'm3_per_carton' => $m3PerCarton,
+                    'wood_consumed_per_pcs' => $woodPerPcs,
                     'total_nw' => $totalNw,
                     'total_gw' => $totalGw,
                     'total_m3' => $totalM3,
+                    'total_wood_consumed' => $totalWood,
                 ]);
             }
 
@@ -492,22 +502,27 @@ class DeliveryOrderController extends Controller
                             $nwPerBox = $detail['nw_per_box'] ?? $doDetail->nw_per_box;
                             $gwPerBox = $detail['gw_per_box'] ?? $doDetail->gw_per_box;
                             $m3PerCarton = $detail['m3_per_carton'] ?? $doDetail->m3_per_carton;
+                            $woodPerPcs = $detail['wood_consumed_per_pcs'] ?? $doDetail->wood_consumed_per_pcs;
                             $quantityBoxes = $detail['quantity_boxes'] ?? $doDetail->quantity_boxes;
+                            $quantityShipped = $detail['quantity_shipped'] ?? $doDetail->quantity_shipped;
 
                             $totalNw = ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null;
                             $totalGw = ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null;
                             $totalM3 = ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null;
+                            $totalWood = ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null;
 
                             $doDetail->update([
-                                'quantity_shipped' => $detail['quantity_shipped'] ?? $doDetail->quantity_shipped,
+                                'quantity_shipped' => $quantityShipped,
                                 'quantity_boxes' => $quantityBoxes,
                                 'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
                                 'nw_per_box' => $nwPerBox,
                                 'gw_per_box' => $gwPerBox,
                                 'm3_per_carton' => $m3PerCarton,
+                                'wood_consumed_per_pcs' => $woodPerPcs,
                                 'total_nw' => $totalNw,
                                 'total_gw' => $totalGw,
                                 'total_m3' => $totalM3,
+                                'total_wood_consumed' => $totalWood,
                             ]);
                         }
                     }

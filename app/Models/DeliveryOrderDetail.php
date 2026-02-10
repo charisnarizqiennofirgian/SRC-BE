@@ -17,15 +17,18 @@ class DeliveryOrderDetail extends Model
         'item_id',
         'item_name',
         'item_unit',
+        'hs_code',
         'quantity_shipped',
         'quantity_boxes',
         'quantity_crates',
         'nw_per_box',
         'gw_per_box',
         'm3_per_carton',
+        'wood_consumed_per_pcs',
         'total_nw',
         'total_gw',
         'total_m3',
+        'total_wood_consumed',
     ];
 
     protected $casts = [
@@ -35,9 +38,11 @@ class DeliveryOrderDetail extends Model
         'nw_per_box' => 'decimal:2',
         'gw_per_box' => 'decimal:2',
         'm3_per_carton' => 'decimal:4',
+        'wood_consumed_per_pcs' => 'decimal:4',
         'total_nw' => 'decimal:2',
         'total_gw' => 'decimal:2',
         'total_m3' => 'decimal:4',
+        'total_wood_consumed' => 'decimal:4',
     ];
 
     public function deliveryOrder()
@@ -67,6 +72,10 @@ class DeliveryOrderDetail extends Model
 
         if ($this->m3_per_carton && $this->quantity_boxes) {
             $this->total_m3 = $this->m3_per_carton * $this->quantity_boxes;
+        }
+
+        if ($this->wood_consumed_per_pcs && $this->quantity_shipped) {
+            $this->total_wood_consumed = $this->wood_consumed_per_pcs * $this->quantity_shipped;
         }
     }
 }
