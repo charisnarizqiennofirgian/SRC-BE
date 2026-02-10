@@ -12,12 +12,13 @@ use App\Models\StockMovement;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
+// ✅ REMOVED: use Maatwebsite\Excel\Concerns\WithValidation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 
-class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
+// ✅ REMOVED WithValidation
+class MaterialsImport implements ToCollection, WithHeadingRow
 {
     private $categoryWarehouseMap = [
         'produk jadi' => 'PACKING',
@@ -38,6 +39,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
         DB::transaction(function () use ($rows, &$skippedRows, &$processedRows) {
             foreach ($rows as $index => $row) {
                 try {
+                    // ✅ Validation tetap ada di sini
                     if (empty($row['kode']) || empty($row['nama']) || empty($row['kategori']) || empty($row['satuan'])) {
                         $skippedRows[] = [
                             'row_number' => $index + 2,
@@ -60,7 +62,9 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         ]
                     );
 
-                    $item = Item::firstOrNew(['code' => trim($row['kode'])]);
+                    // ✅ Cast kode to string (handle numeric from Excel)
+                    $kode = (string) trim($row['kode']);
+                    $item = Item::firstOrNew(['code' => $kode]);
 
                     $stokLama = $item->stock ?? 0;
                     $stokBaru = isset($row['stok_awal']) ? (float) $row['stok_awal'] : 0;
@@ -116,8 +120,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                             'panjang' => $item->panjang,
                             'kubikasi' => $item->kubikasi,
                         ]);
-                    }
-                    elseif (str_contains($lowerCategoryName, 'karton box') || str_contains($lowerCategoryName, 'kayu rst')) {
+                    } elseif (str_contains($lowerCategoryName, 'karton box') || str_contains($lowerCategoryName, 'kayu rst')) {
                         $item->specifications = [
                             'p' => isset($row['spec_p']) ? (float) $row['spec_p'] : null,
                             'l' => isset($row['spec_l']) ? (float) $row['spec_l'] : null,
@@ -134,8 +137,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         $item->diameter = null;
                         $item->panjang = null;
                         $item->kubikasi = null;
-                    }
-                    elseif (str_contains($lowerCategoryName, 'produk jadi')) {
+                    } elseif (str_contains($lowerCategoryName, 'produk jadi')) {
                         if (empty($row['hs_code'])) {
                             $skippedRows[] = [
                                 'row_number' => $index + 2,
@@ -157,8 +159,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
                         $item->diameter = null;
                         $item->panjang = null;
                         $item->kubikasi = null;
-                    }
-                    else {
+                    } else {
                         $item->specifications = null;
                         $item->nw_per_box = null;
                         $item->gw_per_box = null;
@@ -175,15 +176,15 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
 
                     $item->save();
 
-                    if ((float)$stokBaru !== (float)$stokLama) {
-                        $selisih = (float)$stokBaru - (float)$stokLama;
+                    if ((float) $stokBaru !== (float) $stokLama) {
+                        $selisih = (float) $stokBaru - (float) $stokLama;
                         $movementType = $selisih > 0 ? 'Stok Masuk' : 'Stok Keluar';
 
                         StockMovement::create([
-                            'item_id'  => $item->id,
-                            'type'     => $movementType,
+                            'item_id' => $item->id,
+                            'type' => $movementType,
                             'quantity' => $selisih,
-                            'notes'    => "Import Excel: Stok berubah dari {$stokLama} menjadi {$stokBaru}",
+                            'notes' => "Import Excel: Stok berubah dari {$stokLama} menjadi {$stokBaru}",
                         ]);
                     }
 
@@ -198,7 +199,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
 
                             Inventory::updateOrCreate(
                                 [
-                                    'item_id'      => $item->id,
+                                    'item_id' => $item->id,
                                     'warehouse_id' => $warehouse->id,
                                 ],
                                 [
@@ -260,29 +261,5 @@ class MaterialsImport implements ToCollection, WithHeadingRow, WithValidation
         Log::info("Import Material selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 
-    public function rules(): array
-    {
-        return [
-            'kode' => 'required|string',
-            'nama' => 'required',
-            'kategori' => 'required|string',
-            'satuan' => 'required|string',
-            'deskripsi' => 'nullable',
-            'stok_awal' => 'nullable|numeric|min:0',
-            'gudang_awal' => 'nullable|string',
-            'spec_p' => 'nullable|numeric|min:0',
-            'spec_l' => 'nullable|numeric|min:0',
-            'spec_t' => 'nullable|numeric|min:0',
-            'nw_per_box' => 'nullable|numeric|min:0',
-            'gw_per_box' => 'nullable|numeric|min:0',
-            'wood_consumed_per_pcs' => 'nullable|numeric|min:0',
-            'm3_per_carton' => 'nullable|numeric|min:0',
-            'hs_code' => 'nullable|string|max:50',
-            'jenis_kayu' => 'nullable|string|max:255',
-            'tpk' => 'nullable|string|max:255',
-            'diameter' => 'nullable|numeric|min:0',
-            'panjang' => 'nullable|numeric|min:0',
-            'kubikasi' => 'nullable|numeric|min:0',
-        ];
-    }
+    // ✅ REMOVED rules() method completely
 }

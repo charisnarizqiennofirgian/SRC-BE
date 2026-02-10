@@ -12,13 +12,12 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 use Maatwebsite\Excel\Concerns\Importable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 
-class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidation, WithCustomCsvSettings
+class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
     use Importable;
 
@@ -26,7 +25,6 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
 
     public function __construct()
     {
-        // Default gudang untuk Karton Box = Gudang Packing (ID 11)
         $this->defaultWarehouseId = Warehouse::where('code', 'PACKING')->value('id') ?? 11;
     }
 
@@ -34,7 +32,7 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
     {
         foreach ($rows as $index => $row) {
             try {
-                $kode = trim((string) ($row['kode'] ?? ''));
+                $kode = (string) trim($row['kode'] ?? '');
                 $nama = trim((string) ($row['nama'] ?? ''));
 
                 if ($kode === '' || $nama === '') {
@@ -42,7 +40,6 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                     continue;
                 }
 
-                // Category
                 $category = Category::firstOrCreate(
                     ['name' => $row['kategori']],
                     [
@@ -52,17 +49,15 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                     ]
                 );
 
-                // Unit
                 $unit = Unit::firstOrCreate(
-                    ['name' => $row['satuan']],
+                    ['short_name' => $row['satuan']],
                     [
-                        'short_name' => $row['satuan'],
+                        'name' => $row['satuan'],
                         'symbol' => $row['satuan'],
                         'description' => 'Satuan untuk ' . $row['satuan'],
                     ]
                 );
 
-                // Gudang dari Excel atau default
                 $gudangCode = strtoupper(trim($row['gudang'] ?? ''));
                 $warehouseId = $this->defaultWarehouseId;
 
@@ -92,7 +87,6 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
-                // 1. Master Item
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
@@ -111,7 +105,6 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
 
                 Log::info("ROW #{$index} - ITEM SAVED: {$nama} (ID: {$item->id})");
 
-                // 2. Update Inventory
                 if ($stokAwal > 0 && $warehouseId) {
                     Inventory::updateOrCreate(
                         [
@@ -124,9 +117,8 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                         ]
                     );
 
-                    Log::info("ROW #{$index} - ✅ INVENTORY SAVED: {$stokAwal} pcs (Warehouse ID: {$warehouseId})");
+                    Log::info("ROW #{$index} - INVENTORY SAVED: {$stokAwal} pcs (Warehouse ID: {$warehouseId})");
 
-                    // ✅ 3. Catat ke inventory_logs
                     $existingLog = InventoryLog::where('item_id', $item->id)
                         ->where('warehouse_id', $warehouseId)
                         ->where('transaction_type', 'INITIAL_STOCK')
@@ -138,7 +130,7 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                             'qty_m3' => $totalM3,
                             'notes' => 'Saldo Awal Karton Box diperbarui via Excel',
                         ]);
-                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG UPDATED");
+                        Log::info("ROW #{$index} - INVENTORY_LOG UPDATED");
                     } else {
                         InventoryLog::create([
                             'date' => now()->toDateString(),
@@ -155,7 +147,7 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                             'notes' => 'Saldo Awal Karton Box dari Excel upload',
                             'user_id' => Auth::id(),
                         ]);
-                        Log::info("ROW #{$index} - ✅ INVENTORY_LOG CREATED");
+                        Log::info("ROW #{$index} - INVENTORY_LOG CREATED");
                     }
                 }
             } catch (\Throwable $e) {
@@ -165,21 +157,6 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithValidati
                 );
             }
         }
-    }
-
-    public function rules(): array
-    {
-        return [
-            'kode' => 'required|string|max:255',
-            'nama' => 'required|string|max:255',
-            'kategori' => 'required|string|max:255',
-            'satuan' => 'required|string|max:255',
-            'gudang' => 'nullable|string|max:255',
-            'p' => 'required|numeric|min:0',
-            'l' => 'required|numeric|min:0',
-            't' => 'required|numeric|min:0',
-            'stok_awal' => 'required|numeric|min:0',
-        ];
     }
 
     public function getCsvSettings(): array

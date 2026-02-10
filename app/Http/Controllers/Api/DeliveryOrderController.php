@@ -136,10 +136,32 @@ class DeliveryOrderController extends Controller
                 $inventory = Inventory::where('item_id', $detail['item_id'])
                     ->where('warehouse_id', $packingWarehouseId)
                     ->first();
-                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0; // ← FIXED
+                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0;
 
                 if ($currentStock < $detail['quantity_shipped']) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
+                }
+
+                $nwPerBox = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
+                $gwPerBox = $detail['gw_per_box'] ?? $item->gw_per_box ?? null;
+                $m3PerCarton = $detail['m3_per_carton'] ?? $item->m3_per_carton ?? null;
+
+                $quantityBoxes = $detail['quantity_boxes'] ?? null;
+
+                $totalNw = null;
+                $totalGw = null;
+                $totalM3 = null;
+
+                if ($nwPerBox && $quantityBoxes) {
+                    $totalNw = $nwPerBox * $quantityBoxes;
+                }
+
+                if ($gwPerBox && $quantityBoxes) {
+                    $totalGw = $gwPerBox * $quantityBoxes;
+                }
+
+                if ($m3PerCarton && $quantityBoxes) {
+                    $totalM3 = $m3PerCarton * $quantityBoxes;
                 }
 
                 DeliveryOrderDetail::create([
@@ -149,8 +171,14 @@ class DeliveryOrderController extends Controller
                     'item_name' => $item->name,
                     'item_unit' => $item->unit->name ?? 'Pcs',
                     'quantity_shipped' => $detail['quantity_shipped'],
-                    'quantity_boxes' => $detail['quantity_boxes'] ?? null,
+                    'quantity_boxes' => $quantityBoxes,
                     'quantity_crates' => $detail['quantity_crates'] ?? null,
+                    'nw_per_box' => $nwPerBox,
+                    'gw_per_box' => $gwPerBox,
+                    'm3_per_carton' => $m3PerCarton,
+                    'total_nw' => $totalNw,
+                    'total_gw' => $totalGw,
+                    'total_m3' => $totalM3,
                 ]);
             }
 
@@ -189,6 +217,10 @@ class DeliveryOrderController extends Controller
             $packingWarehouseId = 11;
 
             foreach ($deliveryOrder->details as $detail) {
+                if (!$detail->nw_per_box || !$detail->gw_per_box) {
+                    throw new \Exception("Item {$detail->item_name} belum memiliki data NW/GW. Harap lengkapi data timbangan sebelum mengirim!");
+                }
+
                 $item = Item::find($detail->item_id);
                 if (!$item) {
                     throw new \Exception("Item ID {$detail->item_id} tidak ditemukan");
@@ -197,7 +229,7 @@ class DeliveryOrderController extends Controller
                 $inventory = Inventory::where('item_id', $detail->item_id)
                     ->where('warehouse_id', $packingWarehouseId)
                     ->first();
-                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0; // ← FIXED
+                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0;
 
                 if ($currentStock < $detail->quantity_shipped) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail->quantity_shipped}");
@@ -206,7 +238,7 @@ class DeliveryOrderController extends Controller
                 $item->decrement('stock', $detail->quantity_shipped);
 
                 if ($inventory) {
-                    $inventory->decrement('qty_pcs', $detail->quantity_shipped); // ← FIXED
+                    $inventory->decrement('qty_pcs', $detail->quantity_shipped);
                 }
 
                 StockMovement::create([
@@ -313,31 +345,32 @@ class DeliveryOrderController extends Controller
         }
     }
 
-   public function getAvailableForInvoice(Request $request)
-{
-    try {
-        $query = DeliveryOrder::with([
-            'salesOrder',
-            'details.item',
-            'details.salesOrderDetail'
-        ])
-            ->where('status', 'DELIVERED')
-            ->whereDoesntHave('salesInvoices');
+    public function getAvailableForInvoice(Request $request)
+    {
+        try {
+            $query = DeliveryOrder::with([
+                'salesOrder',
+                'details.item',
+                'details.salesOrderDetail'
+            ])
+                ->where('status', 'DELIVERED')
+                ->whereDoesntHave('salesInvoices');
 
-        if ($request->filled('buyer_id')) {
-            $query->whereHas('salesOrder', function($q) use ($request) {
-                $q->where('buyer_id', $request->buyer_id);
-            });
+            if ($request->filled('buyer_id')) {
+                $query->whereHas('salesOrder', function ($q) use ($request) {
+                    $q->where('buyer_id', $request->buyer_id);
+                });
+            }
+
+            $deliveryOrders = $query->orderBy('delivery_date', 'desc')->get();
+
+            return response()->json($deliveryOrders);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching available DOs: ' . $e->getMessage());
+            return response()->json(['message' => 'Error fetching delivery orders'], 500);
         }
-
-        $deliveryOrders = $query->orderBy('delivery_date', 'desc')->get();
-
-        return response()->json($deliveryOrders);
-    } catch (\Exception $e) {
-        \Log::error('Error fetching available DOs: ' . $e->getMessage());
-        return response()->json(['message' => 'Error fetching delivery orders'], 500);
     }
-}
+
     public function show($id)
     {
         try {
@@ -352,7 +385,7 @@ class DeliveryOrderController extends Controller
             $fields = ['consignee_info', 'applicant_info', 'notify_info'];
             foreach ($fields as $f) {
                 $val = $deliveryOrder->$f;
-                $deliveryOrder->$f = $val && is_string($val) ? json_decode($val) : (object)[];
+                $deliveryOrder->$f = $val && is_string($val) ? json_decode($val) : (object) [];
             }
 
             $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
@@ -375,7 +408,7 @@ class DeliveryOrderController extends Controller
     {
         DB::beginTransaction();
         try {
-            $do = DeliveryOrder::findOrFail($id);
+            $do = DeliveryOrder::with('details')->findOrFail($id);
 
             if ($do->status !== 'DRAFT') {
                 throw new \Exception('Hanya DO dengan status DRAFT yang bisa diedit');
@@ -446,7 +479,42 @@ class DeliveryOrderController extends Controller
                 $do->save();
             }
 
-            $do = DeliveryOrder::find($do->id);
+            if ($request->has('details')) {
+                $details = $request->details;
+                if (is_string($details)) {
+                    $details = json_decode($details, true);
+                }
+
+                foreach ($details as $detail) {
+                    if (isset($detail['id'])) {
+                        $doDetail = DeliveryOrderDetail::find($detail['id']);
+                        if ($doDetail && $doDetail->delivery_order_id == $do->id) {
+                            $nwPerBox = $detail['nw_per_box'] ?? $doDetail->nw_per_box;
+                            $gwPerBox = $detail['gw_per_box'] ?? $doDetail->gw_per_box;
+                            $m3PerCarton = $detail['m3_per_carton'] ?? $doDetail->m3_per_carton;
+                            $quantityBoxes = $detail['quantity_boxes'] ?? $doDetail->quantity_boxes;
+
+                            $totalNw = ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null;
+                            $totalGw = ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null;
+                            $totalM3 = ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null;
+
+                            $doDetail->update([
+                                'quantity_shipped' => $detail['quantity_shipped'] ?? $doDetail->quantity_shipped,
+                                'quantity_boxes' => $quantityBoxes,
+                                'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
+                                'nw_per_box' => $nwPerBox,
+                                'gw_per_box' => $gwPerBox,
+                                'm3_per_carton' => $m3PerCarton,
+                                'total_nw' => $totalNw,
+                                'total_gw' => $totalGw,
+                                'total_m3' => $totalM3,
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            $do = DeliveryOrder::with(['details.item'])->find($do->id);
             $do->barcode_image = $do->barcode_image
                 ? asset('storage/' . $do->barcode_image)
                 : null;

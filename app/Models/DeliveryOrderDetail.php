@@ -19,9 +19,25 @@ class DeliveryOrderDetail extends Model
         'item_unit',
         'quantity_shipped',
         'quantity_boxes',
+        'quantity_crates',
+        'nw_per_box',
+        'gw_per_box',
+        'm3_per_carton',
+        'total_nw',
+        'total_gw',
+        'total_m3',
+    ];
 
-        
-        'quantity_crates',   
+    protected $casts = [
+        'quantity_shipped' => 'decimal:4',
+        'quantity_boxes' => 'integer',
+        'quantity_crates' => 'integer',
+        'nw_per_box' => 'decimal:2',
+        'gw_per_box' => 'decimal:2',
+        'm3_per_carton' => 'decimal:4',
+        'total_nw' => 'decimal:2',
+        'total_gw' => 'decimal:2',
+        'total_m3' => 'decimal:4',
     ];
 
     public function deliveryOrder()
@@ -37,5 +53,20 @@ class DeliveryOrderDetail extends Model
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function calculateTotals()
+    {
+        if ($this->nw_per_box && $this->quantity_boxes) {
+            $this->total_nw = $this->nw_per_box * $this->quantity_boxes;
+        }
+
+        if ($this->gw_per_box && $this->quantity_boxes) {
+            $this->total_gw = $this->gw_per_box * $this->quantity_boxes;
+        }
+
+        if ($this->m3_per_carton && $this->quantity_boxes) {
+            $this->total_m3 = $this->m3_per_carton * $this->quantity_boxes;
+        }
     }
 }
