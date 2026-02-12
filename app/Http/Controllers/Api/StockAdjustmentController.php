@@ -27,20 +27,20 @@ class StockAdjustmentController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'item_id'  => 'required|integer|exists:items,id',
-            'type'     => 'required|string|in:Stok Masuk,Stok Keluar',
+            'item_id' => 'required|integer|exists:items,id',
+            'type' => 'required|string|in:Stok Masuk,Stok Keluar',
             'quantity' => 'required|numeric|min:0.01',
-            'notes'    => 'nullable|string|max:1000',
+            'notes' => 'nullable|string|max:1000',
         ], [
             'quantity.min' => 'Kuantitas harus lebih besar dari 0.',
-            'type.in'      => 'Tipe penyesuaian tidak valid.'
+            'type.in' => 'Tipe penyesuaian tidak valid.'
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
@@ -48,15 +48,15 @@ class StockAdjustmentController extends Controller
         try {
             $item = Item::lockForUpdate()->findOrFail($request->item_id);
 
-            $quantity         = (float) $request->quantity;
-            $type             = $request->type;
+            $quantity = (float) $request->quantity;
+            $type = $request->type;
             $movementQuantity = ($type === 'Stok Keluar') ? -$quantity : $quantity;
 
             StockMovement::create([
-                'item_id'  => $item->id,
-                'type'     => $type,
+                'item_id' => $item->id,
+                'type' => $type,
                 'quantity' => $movementQuantity,
-                'notes'    => $request->notes ?? 'Penyesuaian manual dari admin.',
+                'notes' => $request->notes ?? 'Penyesuaian manual dari admin.',
             ]);
 
             $item->increment('stock', $movementQuantity);
@@ -65,8 +65,8 @@ class StockAdjustmentController extends Controller
             DB::commit();
 
             return response()->json([
-                'success'   => true,
-                'message'   => 'Penyesuaian stok berhasil disimpan.',
+                'success' => true,
+                'message' => 'Penyesuaian stok berhasil disimpan.',
                 'new_stock' => $item->stock
             ], 201);
 
@@ -78,7 +78,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan pada server.',
-                'error'   => config('app.debug') ? $e->getMessage() : null
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -120,31 +120,35 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file saldo awal umum gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new UmumStockImport, $request->file('file'));
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new UmumStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -161,7 +165,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -172,7 +176,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -214,31 +218,35 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file karton box gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new KartonBoxStockImport, $request->file('file'));
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new KartonBoxStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -255,7 +263,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -266,7 +274,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -308,31 +316,36 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file komponen gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new KomponenStockImport, $request->file('file'));
+
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new KomponenStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -349,7 +362,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -360,7 +373,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -385,31 +398,36 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file kayu log gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new KayuLogStockImport, $request->file('file'));
+
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new KayuLogStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -426,7 +444,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -437,7 +455,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -496,31 +514,36 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file kayu RST gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new KayuStockImport, $request->file('file'));
+
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new KayuStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -537,7 +560,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -548,7 +571,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -567,7 +590,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mendownload template produk jadi. Pastikan file export sudah diperbarui.',
-                'error'   => config('app.debug') ? $e->getMessage() : null
+                'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
     }
@@ -590,31 +613,36 @@ class StockAdjustmentController extends Controller
             ]
         ], [
             'file.required' => 'File wajib di-upload.',
-            'file.file'     => 'File yang di-upload tidak valid.',
-            'file.mimetypes'=> 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
-            'file.max'      => 'Ukuran file maksimal 5MB.'
+            'file.file' => 'File yang di-upload tidak valid.',
+            'file.mimetypes' => 'File harus berformat Excel (.xls, .xlsx) atau CSV (.csv).',
+            'file.max' => 'Ukuran file maksimal 5MB.'
         ]);
 
         if ($validator->fails()) {
             Log::warning('Validasi file produk jadi gagal:', [
-                'errors'    => $validator->errors()->toArray(),
+                'errors' => $validator->errors()->toArray(),
                 'file_info' => $request->hasFile('file') ? [
                     'original_name' => $request->file('file')->getClientOriginalName(),
-                    'mime_type'     => $request->file('file')->getMimeType(),
-                    'size'          => $request->file('file')->getSize(),
+                    'mime_type' => $request->file('file')->getMimeType(),
+                    'size' => $request->file('file')->getSize(),
                 ] : 'No file uploaded'
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new \App\Imports\ProdukJadiStockImport, $request->file('file'));
+
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new \App\Imports\ProdukJadiStockImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -631,7 +659,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
 
         } catch (\Exception $e) {
@@ -642,7 +670,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -657,7 +685,7 @@ class StockAdjustmentController extends Controller
                 'template_bom_produk.xlsx'
             );
         } catch (\Exception $e) {
-            Log::error('Gagal download template BOM: '.$e->getMessage());
+            Log::error('Gagal download template BOM: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -692,13 +720,18 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi file gagal.',
-                'errors'  => $validator->errors()
+                'errors' => $validator->errors()
             ], 422);
         }
 
         DB::beginTransaction();
         try {
-            Excel::import(new \App\Imports\ProductBomImport, $request->file('file'));
+
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new \App\Imports\ProductBomImport, $file, null, $readerType);
 
             DB::commit();
 
@@ -714,7 +747,7 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Data di Excel tidak valid.',
-                'errors'  => $failures,
+                'errors' => $failures,
             ], 422);
         } catch (\Exception $e) {
             DB::rollBack();

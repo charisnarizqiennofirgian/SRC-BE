@@ -6,10 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Item; // 
 use App\Models\Category; // 
 use Illuminate\Http\Request;
-use App\Imports\ProductsImport; 
+use App\Imports\ProductsImport;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
 use Maatwebsite\Excel\Validators\ValidationException;
+use Illuminate\Support\Facades\Cache;
 
 class ProductController extends Controller
 {
@@ -25,8 +26,8 @@ class ProductController extends Controller
         // Jika ada permintaan ?all=true (untuk dropdown)
         if ($request->query('all')) {
             $items = Item::with(['unit', 'category'])
-                         ->where('category_id', $productCategoryId)
-                         ->orderBy('name')->get();
+                ->where('category_id', $productCategoryId)
+                ->orderBy('name')->get();
             return response()->json(['success' => true, 'data' => $items]);
         }
 
@@ -49,7 +50,7 @@ class ProductController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:255|unique:items,code', 
+            'code' => 'required|string|max:255|unique:items,code',
             'category_id' => 'required|exists:categories,id',
             'unit_id' => 'required|exists:units,id',
             'description' => 'nullable|string',
@@ -103,8 +104,18 @@ class ProductController extends Controller
         ]);
 
         try {
-            Excel::import(new ProductsImport, $request->file('file'));
-            return response()->json(['success' => true, 'message' => 'Produk berhasil di-import.'], 200);
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new ProductsImport(), $file, null, $readerType);
+
+            Cache::forget('products_all');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data berhasil di-import.',
+            ], 200);
         } catch (ValidationException $e) {
             // ... (error handling Anda sudah bagus)
         }

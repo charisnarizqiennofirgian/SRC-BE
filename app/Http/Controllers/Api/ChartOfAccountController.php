@@ -6,9 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\ChartOfAccount;
 use App\Exports\ChartOfAccountExport;
 use App\Exports\ChartOfAccountTemplateExport;
+use App\Imports\ChartOfAccountImport;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
-use Shuchkin\SimpleXLSX;
 
 class ChartOfAccountController extends Controller
 {
@@ -175,90 +175,94 @@ class ChartOfAccountController extends Controller
         return Excel::download(new ChartOfAccountTemplateExport(), 'template_coa.xlsx');
     }
 
+    /**
+     * Import COA - Support 2 format:
+     * 1. Format Standard (4 kolom): Code | Name | Type | Currency
+     * 2. Format Klien (2 kolom): No.Id | Name (auto-detect type dari kode)
+     */
     public function import(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|max:2048',
+            'file' => 'required|mimes:xlsx,xls|max:5120', // Hanya Excel, hapus CSV
         ]);
 
         try {
             $file = $request->file('file');
-            $filePath = $file->getRealPath();
+            $extension = strtolower($file->getClientOriginalExtension());
 
-            $xlsx = SimpleXLSX::parse($filePath);
-
-            if (!$xlsx) {
+            // Validasi extension sekali lagi
+            if (!in_array($extension, ['xlsx', 'xls'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Gagal membaca file: ' . SimpleXLSX::parseError()
+                    'message' => 'Format file tidak valid. Gunakan file Excel (.xlsx atau .xls)',
                 ], 400);
             }
 
-            $rows = $xlsx->rows();
-
-            if (empty($rows)) {
+            // Cek apakah file bisa dibaca
+            if (!$file->isValid()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'File kosong atau format tidak valid'
+                    'message' => 'File yang diupload tidak valid atau corrupt.',
                 ], 400);
             }
 
-            $imported = 0;
-            $skipped = 0;
-            $isFirstRow = true;
+            $import = new ChartOfAccountImport();
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+            Excel::import($import, $file, null, $readerType);
 
-            foreach ($rows as $row) {
-                if ($isFirstRow) {
-                    $isFirstRow = false;
-                    continue;
-                }
+            $imported = $import->getRowCount();
+            $skipped = $import->getSkippedCount();
+            $errors = $import->getErrors();
 
-                $code = isset($row[0]) ? trim((string) $row[0]) : '';
-                $name = isset($row[1]) ? trim((string) $row[1]) : '';
-                $type = isset($row[2]) ? strtoupper(trim((string) $row[2])) : '';
-                $currency = isset($row[3]) ? strtoupper(trim((string) $row[3])) : 'IDR';
-
-                if (empty($code) || empty($name)) {
-                    continue;
-                }
-
-                if (ChartOfAccount::where('code', $code)->exists()) {
-                    $skipped++;
-                    continue;
-                }
-
-                $type = $this->normalizeType($type);
-                if (!$type) {
-                    $skipped++;
-                    continue;
-                }
-
-                ChartOfAccount::create([
-                    'code' => $code,
-                    'name' => $name,
-                    'type' => $type,
-                    'currency' => $currency ?: 'IDR',
-                    'is_active' => true,
-                ]);
-
-                $imported++;
+            $message = "Import selesai! $imported akun berhasil diimport";
+            if ($skipped > 0) {
+                $message .= ", $skipped baris dilewati";
             }
+            $message .= ".";
 
-            return response()->json([
+            $response = [
                 'success' => true,
-                'message' => 'Import berhasil!',
+                'message' => $message,
                 'data' => [
                     'imported' => $imported,
                     'skipped' => $skipped,
                 ]
-            ]);
+            ];
+
+            if (!empty($errors)) {
+                $response['errors'] = $errors;
+                $response['message'] .= " Lihat detail error untuk baris yang dilewati.";
+            }
+
+            return response()->json($response);
+
+        } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
+            // Excel validation error
+            \Log::error('Excel Validation Error: ' . json_encode($e->failures()));
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi Excel gagal. Periksa format data di file Excel.',
+                'errors' => $e->failures()
+            ], 422);
+
+        } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
+            // File tidak bisa dibaca
+            \Log::error('Excel Reader Error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'File Excel tidak valid atau corrupt. Pastikan file berformat .xlsx atau .xls dan bisa dibuka di Microsoft Excel.',
+            ], 400);
 
         } catch (\Exception $e) {
             \Log::error('Error import COA: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal import data.',
-                'detail' => $e->getMessage()
+                'message' => 'Gagal import Chart of Account. Pastikan format Excel benar dan file tidak corrupt.',
+                'detail' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
         }
     }
@@ -270,6 +274,9 @@ class ChartOfAccountController extends Controller
         return Excel::download(new ChartOfAccountExport(), $filename);
     }
 
+    /**
+     * Normalize type untuk backward compatibility
+     */
     private function normalizeType(string $type): ?string
     {
         $mapping = [

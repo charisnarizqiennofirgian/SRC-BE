@@ -693,7 +693,12 @@ class MaterialController extends Controller
         }
 
         try {
-            Excel::import(new MaterialsImport(), $request->file('file'));
+            $file = $request->file('file');
+            $extension = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new MaterialsImport(), $file, null, $readerType);
+
             Cache::forget('materials_all');
 
             return response()->json([
