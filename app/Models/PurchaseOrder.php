@@ -19,6 +19,7 @@ class PurchaseOrder extends Model
         'status',
         'subtotal',
         'type',
+        'delivery_date',
         'ppn_percentage',
         'ppn_amount',
         'grand_total',
@@ -33,9 +34,9 @@ class PurchaseOrder extends Model
         return $this->belongsTo(Supplier::class);
     }
     public function receipts()
-{
-    return $this->hasMany(GoodsReceipt::class);
-}
+    {
+        return $this->hasMany(GoodsReceipt::class);
+    }
 
     /**
      * Relasi ke Detail Pesanan.

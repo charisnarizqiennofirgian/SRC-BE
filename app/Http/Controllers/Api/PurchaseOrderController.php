@@ -11,20 +11,20 @@ use Illuminate\Support\Facades\Validator;
 class PurchaseOrderController extends Controller
 {
     public function index(Request $request)
-{
-    $query = PurchaseOrder::with('supplier')->latest();
+    {
+        $query = PurchaseOrder::with('supplier')->latest();
 
-    if ($request->has('type')) {
-        $query->where('type', $request->type);
-    }
+        if ($request->has('type')) {
+            $query->where('type', $request->type);
+        }
 
-    if ($request->has('search')) {
-        $query->where('po_number', 'like', '%' . $request->search . '%');
+        if ($request->has('search')) {
+            $query->where('po_number', 'like', '%' . $request->search . '%');
+        }
+
+        $orders = $query->paginate(15);
+        return response()->json(['success' => true, 'data' => $orders]);
     }
-    
-    $orders = $query->paginate(15);
-    return response()->json(['success' => true, 'data' => $orders]);
-}
 
     public function store(Request $request)
     {
@@ -36,7 +36,7 @@ class PurchaseOrderController extends Controller
         DB::beginTransaction();
         try {
             $validatedData = $validator->validated();
-            
+
             // ✅ FIX: Ganti apply_ppn jadi ppn_percentage
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
 
@@ -44,6 +44,7 @@ class PurchaseOrderController extends Controller
                 'po_number' => $this->generatePoNumber(),
                 'supplier_id' => $validatedData['supplier_id'],
                 'order_date' => $validatedData['order_date'],
+                'delivery_date' => $validatedData['delivery_date'] ?? null,
                 'status' => 'Open',
                 'notes' => $validatedData['notes'] ?? null,
                 'type' => $validatedData['type'],
@@ -54,17 +55,17 @@ class PurchaseOrderController extends Controller
             ]);
 
             $order->details()->createMany($this->prepareDetails($validatedData['details']));
-            
-            DB::commit(); 
-            
+
+            DB::commit();
+
             return response()->json([
-                'success' => true, 
-                'message' => 'Pesanan Pembelian berhasil dibuat.', 
+                'success' => true,
+                'message' => 'Pesanan Pembelian berhasil dibuat.',
                 'data' => $order->load('supplier', 'details.item')
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack(); 
+            DB::rollBack();
             return response()->json(['success' => false, 'message' => 'Terjadi kesalahan: ' . $e->getMessage()], 500);
         }
     }
@@ -72,16 +73,16 @@ class PurchaseOrderController extends Controller
     public function show(PurchaseOrder $purchaseOrder)
     {
         $purchaseOrder->load('supplier', 'details.item.unit');
-        
+
         // Parse specifications dari JSON string ke array
-        $purchaseOrder->details->each(function($detail) {
+        $purchaseOrder->details->each(function ($detail) {
             if ($detail->specifications) {
-                $detail->specifications = is_string($detail->specifications) 
-                    ? json_decode($detail->specifications, true) 
+                $detail->specifications = is_string($detail->specifications)
+                    ? json_decode($detail->specifications, true)
                     : $detail->specifications;
             }
         });
-        
+
         return response()->json(['success' => true, 'data' => $purchaseOrder]);
     }
 
@@ -90,7 +91,7 @@ class PurchaseOrderController extends Controller
         if ($purchaseOrder->status !== 'Open') {
             return response()->json(['success' => false, 'message' => 'Hanya PO dengan status Open yang bisa diupdate.'], 400);
         }
-        
+
         $validator = $this->validatePurchaseOrder($request);
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
@@ -102,10 +103,11 @@ class PurchaseOrderController extends Controller
 
             // ✅ FIX: Ganti apply_ppn jadi ppn_percentage
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
-            
+
             $purchaseOrder->update([
                 'supplier_id' => $validatedData['supplier_id'],
                 'order_date' => $validatedData['order_date'],
+                'delivery_date' => $validatedData['delivery_date'] ?? null,
                 'notes' => $validatedData['notes'] ?? null,
                 'type' => $validatedData['type'],
                 'subtotal' => $totals['subtotal'],
@@ -114,7 +116,7 @@ class PurchaseOrderController extends Controller
                 'grand_total' => $totals['grand_total'],
             ]);
 
-            $purchaseOrder->details()->delete(); 
+            $purchaseOrder->details()->delete();
             $purchaseOrder->details()->createMany($this->prepareDetails($validatedData['details']));
 
             DB::commit();
@@ -140,7 +142,7 @@ class PurchaseOrderController extends Controller
         DB::beginTransaction();
         try {
             $purchaseOrder->details()->delete();
-            $purchaseOrder->delete(); 
+            $purchaseOrder->delete();
 
             DB::commit();
 
@@ -157,6 +159,7 @@ class PurchaseOrderController extends Controller
         return Validator::make($request->all(), [
             'supplier_id' => 'required|exists:suppliers,id',
             'order_date' => 'required|date',
+            'delivery_date' => 'nullable|date',
             'notes' => 'nullable|string',
             'type' => 'required|string|in:operasional,karton,kayu',
             'ppn_percentage' => 'required|numeric|in:0,11,12',
@@ -173,7 +176,7 @@ class PurchaseOrderController extends Controller
     {
         $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price']);
 
-        $ppnAmount = $subtotal * ($ppnPercentage / 100); 
+        $ppnAmount = $subtotal * ($ppnPercentage / 100);
         $grandTotal = $subtotal + $ppnAmount;
 
         return [
@@ -199,12 +202,12 @@ class PurchaseOrderController extends Controller
 
     private function generatePoNumber()
     {
-        $prefix = 'PO-' . now()->format('Ym'); 
+        $prefix = 'PO-' . now()->format('Ym');
         $lastOrder = PurchaseOrder::where('po_number', 'like', $prefix . '%')->latest('id')->first();
         $number = 1;
         if ($lastOrder) {
             $number = (int) substr($lastOrder->po_number, -4) + 1;
         }
-        return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT); 
+        return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }
 }
