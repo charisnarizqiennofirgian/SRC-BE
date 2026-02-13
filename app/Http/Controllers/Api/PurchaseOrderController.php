@@ -37,7 +37,6 @@ class PurchaseOrderController extends Controller
         try {
             $validatedData = $validator->validated();
 
-            // ✅ FIX: Ganti apply_ppn jadi ppn_percentage
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
 
             $order = PurchaseOrder::create([
@@ -74,7 +73,6 @@ class PurchaseOrderController extends Controller
     {
         $purchaseOrder->load('supplier', 'details.item.unit');
 
-        // Parse specifications dari JSON string ke array
         $purchaseOrder->details->each(function ($detail) {
             if ($detail->specifications) {
                 $detail->specifications = is_string($detail->specifications)
@@ -101,7 +99,6 @@ class PurchaseOrderController extends Controller
         try {
             $validatedData = $validator->validated();
 
-            // ✅ FIX: Ganti apply_ppn jadi ppn_percentage
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
 
             $purchaseOrder->update([
@@ -153,7 +150,6 @@ class PurchaseOrderController extends Controller
         }
     }
 
-    // ✅ FIX: Ganti apply_ppn jadi ppn_percentage
     private function validatePurchaseOrder(Request $request)
     {
         return Validator::make($request->all(), [
@@ -171,7 +167,6 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
-    // ✅ FIX: Ganti parameter boolean jadi float
     private function calculateTotals(array $details, float $ppnPercentage): array
     {
         $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price']);
@@ -200,14 +195,38 @@ class PurchaseOrderController extends Controller
         })->all();
     }
 
+    // ✅ UPDATED: FORMAT BARU PO/001/PO-SBC/II/2026
     private function generatePoNumber()
     {
-        $prefix = 'PO-' . now()->format('Ym');
-        $lastOrder = PurchaseOrder::where('po_number', 'like', $prefix . '%')->latest('id')->first();
-        $number = 1;
-        if ($lastOrder) {
-            $number = (int) substr($lastOrder->po_number, -4) + 1;
+        $year = date('Y');
+        $month = date('n'); // 1-12
+        $romanMonth = $this->toRoman($month);
+
+        // Get counter untuk bulan & tahun ini
+        $lastOrder = PurchaseOrder::whereYear('created_at', $year)
+            ->whereMonth('created_at', $month)
+            ->orderBy('id', 'desc')
+            ->first();
+
+        $counter = 1;
+        if ($lastOrder && preg_match('/PO\/(\d{3})\/PO-SBC\//', $lastOrder->po_number, $matches)) {
+            $counter = intval($matches[1]) + 1;
         }
-        return $prefix . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+
+        $counterPadded = str_pad($counter, 3, '0', STR_PAD_LEFT);
+
+        return "PO/{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
+    }
+
+    // ✅ HELPER: Convert bulan ke Romawi
+    private function toRoman(int $month): string
+    {
+        $romanNumerals = [
+            1 => 'I',    2 => 'II',   3 => 'III',  4 => 'IV',
+            5 => 'V',    6 => 'VI',   7 => 'VII',  8 => 'VIII',
+            9 => 'IX',   10 => 'X',   11 => 'XI',  12 => 'XII',
+        ];
+
+        return $romanNumerals[$month] ?? 'I';
     }
 }
