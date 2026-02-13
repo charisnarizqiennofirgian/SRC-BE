@@ -215,7 +215,7 @@ class PurchaseOrderController extends Controller
 
         $counterPadded = str_pad($counter, 3, '0', STR_PAD_LEFT);
 
-        return "PO/{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
+        return "No.{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
     }
 
     // ✅ HELPER: Convert bulan ke Romawi
