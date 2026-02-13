@@ -158,7 +158,7 @@ class PurchaseOrderController extends Controller
             'delivery_date' => 'nullable|date',
             'notes' => 'nullable|string',
             'type' => 'required|string|in:operasional,karton,kayu',
-            'ppn_percentage' => 'required|numeric|in:0,11,12',
+            'ppn_percentage' => 'required|numeric|in:0,11,11.12,12',  // ✅ TAMBAH 11.12
             'details' => 'required|array|min:1',
             'details.*.item_id' => 'required|exists:items,id',
             'details.*.quantity' => 'required|numeric|min:0.01',
@@ -167,17 +167,21 @@ class PurchaseOrderController extends Controller
         ]);
     }
 
+    // ✅ UPDATED: DETEKSI 11.12 → HITUNG PAKAI 11%
     private function calculateTotals(array $details, float $ppnPercentage): array
     {
         $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price']);
 
-        $ppnAmount = $subtotal * ($ppnPercentage / 100);
+        // Special case: 11.12 → hitung pakai 11%
+        $actualPpnRate = ($ppnPercentage == 11.12) ? 11 : $ppnPercentage;
+
+        $ppnAmount = $subtotal * ($actualPpnRate / 100);
         $grandTotal = $subtotal + $ppnAmount;
 
         return [
             'subtotal' => $subtotal,
-            'ppn_percentage' => $ppnPercentage,
-            'ppn_amount' => $ppnAmount,
+            'ppn_percentage' => $ppnPercentage,  // Simpan 11.12 untuk display
+            'ppn_amount' => $ppnAmount,           // Tapi hitung pakai 11%
             'grand_total' => $grandTotal,
         ];
     }
@@ -195,21 +199,19 @@ class PurchaseOrderController extends Controller
         })->all();
     }
 
-    // ✅ UPDATED: FORMAT BARU PO/001/PO-SBC/II/2026
     private function generatePoNumber()
     {
         $year = date('Y');
-        $month = date('n'); // 1-12
+        $month = date('n');
         $romanMonth = $this->toRoman($month);
 
-        // Get counter untuk bulan & tahun ini
         $lastOrder = PurchaseOrder::whereYear('created_at', $year)
             ->whereMonth('created_at', $month)
             ->orderBy('id', 'desc')
             ->first();
 
         $counter = 1;
-        if ($lastOrder && preg_match('/PO\/(\d{3})\/PO-SBC\//', $lastOrder->po_number, $matches)) {
+        if ($lastOrder && preg_match('/No\.(\d{3})\/PO-SBC\//', $lastOrder->po_number, $matches)) {
             $counter = intval($matches[1]) + 1;
         }
 
@@ -218,7 +220,6 @@ class PurchaseOrderController extends Controller
         return "No.{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
     }
 
-    // ✅ HELPER: Convert bulan ke Romawi
     private function toRoman(int $month): string
     {
         $romanNumerals = [
