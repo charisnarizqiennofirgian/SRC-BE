@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 class JournalEntry extends Model
 {
@@ -51,20 +52,25 @@ class JournalEntry extends Model
         $prefix = 'JRN';
         $year = date('Y');
         $month = date('m');
+        $pattern = $prefix . $year . $month;
 
-        $lastJournal = self::whereYear('created_at', $year)
-            ->whereMonth('created_at', $month)
-            ->orderBy('id', 'desc')
-            ->first();
+        return DB::transaction(function () use ($pattern) {
 
-        if ($lastJournal) {
-            $lastNumber = (int) substr($lastJournal->journal_number, -4);
-            $newNumber = $lastNumber + 1;
-        } else {
-            $newNumber = 1;
-        }
+            // Query based on journal_number pattern dengan lock
+            $lastJournal = self::where('journal_number', 'LIKE', $pattern . '%')
+                ->lockForUpdate()
+                ->orderBy('journal_number', 'desc')
+                ->first();
 
-        return $prefix . $year . $month . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+            if ($lastJournal) {
+                $lastNumber = (int) substr($lastJournal->journal_number, -4);
+                $newNumber = $lastNumber + 1;
+            } else {
+                $newNumber = 1;
+            }
+
+            return $pattern . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+        });
     }
 
     public function isBalanced(): bool

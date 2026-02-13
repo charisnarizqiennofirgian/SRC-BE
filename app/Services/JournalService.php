@@ -21,6 +21,17 @@ class JournalService
     ): JournalEntry {
         return DB::transaction(function () use ($date, $description, $entries, $referenceType, $referenceId) {
 
+            // ✅ CRITICAL FIX: Cleanup orphan lines before creating new journal
+            $orphanDeleted = DB::delete("
+                DELETE jl FROM journal_entry_lines jl
+                LEFT JOIN journal_entries je ON jl.journal_entry_id = je.id
+                WHERE je.id IS NULL
+            ");
+
+            if ($orphanDeleted > 0) {
+                Log::warning("⚠️ Cleaned up {$orphanDeleted} orphan journal lines");
+            }
+
             $journal = JournalEntry::create([
                 'journal_number' => JournalEntry::generateJournalNumber(),
                 'date' => $date,
@@ -77,6 +88,17 @@ class JournalService
     public function createFromPurchaseBill(PurchaseBill $bill): JournalEntry
     {
         return DB::transaction(function () use ($bill) {
+
+            // ✅ CRITICAL FIX: Cleanup orphan lines before creating new journal
+            $orphanDeleted = DB::delete("
+                DELETE jl FROM journal_entry_lines jl
+                LEFT JOIN journal_entries je ON jl.journal_entry_id = je.id
+                WHERE je.id IS NULL
+            ");
+
+            if ($orphanDeleted > 0) {
+                Log::warning("⚠️ Cleaned up {$orphanDeleted} orphan journal lines");
+            }
 
             Log::info('=== MULAI BUAT JURNAL PEMBELIAN ===');
             Log::info('Purchase Bill:', [
@@ -220,11 +242,11 @@ class JournalService
      */
     private function getPPNMasukanAccount(): ?ChartOfAccount
     {
-        $ppnAccount = ChartOfAccount::where(function($query) {
-                $query->where('code', '1107')
-                      ->orWhere('name', 'LIKE', '%PPN Masukan%')
-                      ->orWhere('name', 'LIKE', '%Pajak Masukan%');
-            })
+        $ppnAccount = ChartOfAccount::where(function ($query) {
+            $query->where('code', '1107')
+                ->orWhere('name', 'LIKE', '%PPN Masukan%')
+                ->orWhere('name', 'LIKE', '%Pajak Masukan%');
+        })
             ->where('is_active', true)
             ->first();
 
@@ -263,9 +285,9 @@ class JournalService
         // Fallback: cari akun Hutang Usaha
         if (!$hutangAccountId) {
             $hutangAccount = ChartOfAccount::where('type', 'KEWAJIBAN')
-                ->where(function($query) {
+                ->where(function ($query) {
                     $query->where('name', 'LIKE', '%Hutang Usaha%')
-                          ->orWhere('code', 'LIKE', '2-2%');
+                        ->orWhere('code', 'LIKE', '2-2%');
                 })
                 ->where('is_active', true)
                 ->first();
