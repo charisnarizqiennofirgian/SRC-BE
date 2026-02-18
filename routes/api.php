@@ -87,8 +87,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         $user = $request->user();
         return [
-            'id'    => $user->id,
-            'name'  => $user->name,
+            'id' => $user->id,
+            'name' => $user->name,
             'email' => $user->email,
             'roles' => $user->roles->pluck('name')
         ];
@@ -359,6 +359,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [JournalEntryController::class, 'index']);
         Route::post('/manual', [JournalEntryController::class, 'storeManual']);
         Route::get('/{id}', [JournalEntryController::class, 'show']);
+
+        // ✅ TAMBAH ROUTES BARU
+        Route::post('/{id}/unpost', [JournalEntryController::class, 'unpost']);
+        Route::post('/{id}/repost', [JournalEntryController::class, 'repost']);
+        Route::post('/{id}/void', [JournalEntryController::class, 'void']);
+        Route::put('/{id}/update-manual', [JournalEntryController::class, 'updateManual']);
+        Route::get('/{id}/history', [JournalEntryController::class, 'history']);
     });
 
     // --- BUKU BESAR (GENERAL LEDGER) ---

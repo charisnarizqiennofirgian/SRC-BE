@@ -78,6 +78,13 @@ class JournalService
                 'credit' => $totalCredit,
             ]);
 
+            // ✅ Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_CREATED,
+                'System created journal'
+            );
+
             return $journal->fresh(['lines.account']);
         });
     }
@@ -231,6 +238,13 @@ class JournalService
 
             $bill->update(['journal_entry_id' => $journal->id]);
 
+            // ✅ Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_CREATED,
+                "Created from Purchase Bill: {$bill->bill_number}"
+            );
+
             Log::info('=== JURNAL SELESAI ===');
 
             return $journal->fresh(['lines.account']);
@@ -309,8 +323,253 @@ class JournalService
         }
     }
 
-    public function voidJournal(JournalEntry $journal): void
+    /**
+     * ✅ LOG HISTORY: Simpan audit trail
+     */
+    public function logHistory(
+        int $journalEntryId,
+        string $action,
+        ?string $reason = null,
+        ?array $oldData = null,
+        ?array $newData = null
+    ): void {
+        \App\Models\JournalHistory::log($journalEntryId, $action, $reason, $oldData, $newData);
+    }
+
+    /**
+     * ✅ UNPOST JURNAL: POSTED → DRAFT
+     */
+    public function unpostJournal(JournalEntry $journal, string $reason): JournalEntry
     {
-        $journal->update(['status' => JournalEntry::STATUS_VOID]);
+        DB::beginTransaction();
+        try {
+            // Validasi
+            if (!$journal->canUnpost()) {
+                throw new \Exception('Jurnal ini tidak bisa di-unpost.');
+            }
+
+            // Simpan data lama untuk history
+            $oldData = [
+                'status' => $journal->status,
+            ];
+
+            // Update jurnal
+            $journal->update([
+                'status' => JournalEntry::STATUS_DRAFT,
+                'unposted_by' => auth()->id(),
+                'unposted_at' => now(),
+                'unpost_reason' => $reason,
+            ]);
+
+            // Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_UNPOSTED,
+                $reason,
+                $oldData,
+                ['status' => JournalEntry::STATUS_DRAFT]
+            );
+
+            DB::commit();
+
+            Log::info('✅ Jurnal berhasil di-unpost', [
+                'journal_number' => $journal->journal_number,
+                'reason' => $reason,
+            ]);
+
+            return $journal->fresh();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('❌ Error unpost jurnal: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * ✅ REPOST JURNAL: DRAFT → POSTED
+     */
+    public function repostJournal(JournalEntry $journal): JournalEntry
+    {
+        DB::beginTransaction();
+        try {
+            // Validasi
+            if (!$journal->isDraft()) {
+                throw new \Exception('Hanya jurnal DRAFT yang bisa di-post.');
+            }
+
+            if (!$journal->isBalanced()) {
+                throw new \Exception('Jurnal tidak balance! Tidak bisa di-post.');
+            }
+
+            // Update status
+            $journal->update([
+                'status' => JournalEntry::STATUS_POSTED,
+            ]);
+
+            // Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_POSTED,
+                'Reposted after edit'
+            );
+
+            DB::commit();
+
+            Log::info('✅ Jurnal berhasil di-post ulang', [
+                'journal_number' => $journal->journal_number,
+            ]);
+
+            return $journal->fresh();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('❌ Error repost jurnal: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * ✅ VOID JURNAL
+     */
+    public function voidJournal(JournalEntry $journal, string $reason): void
+    {
+        DB::beginTransaction();
+        try {
+            if (!$journal->canVoid()) {
+                throw new \Exception('Jurnal ini tidak bisa di-void.');
+            }
+
+            $journal->update(['status' => JournalEntry::STATUS_VOID]);
+
+            // Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_VOIDED,
+                $reason
+            );
+
+            DB::commit();
+
+            Log::info('✅ Jurnal berhasil di-void', [
+                'journal_number' => $journal->journal_number,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * ✅ UPDATE JURNAL MANUAL (untuk yang DRAFT)
+     */
+    public function updateManualJournal(
+        JournalEntry $journal,
+        string $date,
+        string $description,
+        array $entries
+    ): JournalEntry {
+        DB::beginTransaction();
+        try {
+            // Validasi
+            if (!$journal->canEdit()) {
+                throw new \Exception('Hanya jurnal DRAFT yang bisa di-edit.');
+            }
+
+            // Simpan data lama untuk history
+            $oldData = [
+                'date' => $journal->date,
+                'description' => $journal->description,
+                'entries_count' => $journal->lines->count(),
+            ];
+
+            // Hapus lines lama
+            $journal->lines()->delete();
+
+            // Buat lines baru & hitung total
+            $totalDebit = 0;
+            $totalCredit = 0;
+
+            foreach ($entries as $entry) {
+                \App\Models\JournalEntryLine::create([
+                    'journal_entry_id' => $journal->id,
+                    'account_id' => $entry['account_id'],
+                    'description' => $entry['description'] ?? '',
+                    'debit' => $entry['debit'] ?? 0,
+                    'credit' => $entry['credit'] ?? 0,
+                ]);
+
+                $totalDebit += $entry['debit'] ?? 0;
+                $totalCredit += $entry['credit'] ?? 0;
+            }
+
+            // Update jurnal
+            $journal->update([
+                'date' => $date,
+                'description' => $description,
+                'total_debit' => $totalDebit,
+                'total_credit' => $totalCredit,
+                'last_edited_by' => auth()->id(),
+                'last_edited_at' => now(),
+            ]);
+
+            // Validasi balance
+            if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+                throw new \Exception(
+                    "Jurnal tidak balance! Debit: Rp " . number_format($totalDebit, 2, ',', '.') .
+                    ", Kredit: Rp " . number_format($totalCredit, 2, ',', '.')
+                );
+            }
+
+            // Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_EDITED,
+                null,
+                $oldData,
+                [
+                    'date' => $date,
+                    'description' => $description,
+                    'entries_count' => count($entries),
+                ]
+            );
+
+            DB::commit();
+
+            Log::info('✅ Jurnal manual berhasil di-update', [
+                'journal_number' => $journal->journal_number,
+            ]);
+
+            return $journal->fresh(['lines.account']);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('❌ Error update jurnal manual: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * ✅ REVERSE JURNAL: Buat jurnal balik
+     */
+    public function reverseJournal(JournalEntry $journal): void
+    {
+        DB::beginTransaction();
+        try {
+            $journal->update(['status' => JournalEntry::STATUS_VOID]);
+
+            // Log history
+            $this->logHistory(
+                $journal->id,
+                \App\Models\JournalHistory::ACTION_VOIDED,
+                'Journal reversed'
+            );
+
+            DB::commit();
+
+            Log::info('✅ Jurnal berhasil di-reverse (VOID)', [
+                'journal_number' => $journal->journal_number,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
     }
 }
