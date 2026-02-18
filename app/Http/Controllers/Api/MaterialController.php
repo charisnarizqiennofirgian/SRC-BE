@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\MaterialsImport;
 
@@ -59,27 +60,34 @@ class MaterialController extends Controller
             }
 
             if ($request->query('all')) {
-                $items = Item::with(['category:id,name', 'unit:id,name'])
-                    ->when($request->filled('category_name'), function ($q) use ($request) {
-                        $q->whereHas('category', function ($qq) use ($request) {
-                            $qq->where('name', 'like', '%' . $request->category_name . '%');
-                        });
-                    })
-                    ->orderBy('name')
-                    ->get();
+                // Buat cache key unik berdasarkan category_name filter
+                $cacheKey = 'materials_all';
+                if ($request->filled('category_name')) {
+                    $cacheKey = 'materials_all_cat_' . Str::slug($request->category_name);
+                }
 
+                $items = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($request) {
+                    return Item::with(['category:id,name', 'unit:id,name'])
+                        ->when($request->filled('category_name'), function ($q) use ($request) {
+                            $q->whereHas('category', function ($qq) use ($request) {
+                                $qq->where('name', 'like', '%' . $request->category_name . '%');
+                            });
+                        })
+                        ->orderBy('name')
+                        ->get();
+                });
+
+                // Transformasi untuk produk jadi (tidak perlu jika category bukan produk jadi)
                 $packingWarehouseId = 11;
-
-                $items->transform(function ($item) use ($packingWarehouseId, $request) {
-                    if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
+                if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
+                    $items->transform(function ($item) use ($packingWarehouseId) {
                         $inventory = Inventory::where('item_id', $item->id)
                             ->where('warehouse_id', $packingWarehouseId)
                             ->first();
                         $item->stock = $inventory ? (float) $inventory->qty : 0;
-                    }
-
-                    return $item;
-                });
+                        return $item;
+                    });
+                }
 
                 return response()->json(['success' => true, 'data' => $items]);
             }
@@ -301,6 +309,9 @@ class MaterialController extends Controller
             DB::commit();
 
             Cache::forget('materials_all');
+            Cache::forget('materials_all_cat_kayu-rst');
+            Cache::forget('materials_all_cat_produk-jadi');
+            Cache::forget('materials_all_cat_karton-box');
 
             return response()->json([
                 'success' => true,
@@ -490,6 +501,9 @@ class MaterialController extends Controller
             DB::commit();
 
             Cache::forget('materials_all');
+            Cache::forget('materials_all_cat_kayu-rst');
+            Cache::forget('materials_all_cat_produk-jadi');
+            Cache::forget('materials_all_cat_karton-box');
 
             return response()->json([
                 'success' => true,
@@ -511,6 +525,9 @@ class MaterialController extends Controller
         try {
             $material->delete();
             Cache::forget('materials_all');
+            Cache::forget('materials_all_cat_kayu-rst');
+            Cache::forget('materials_all_cat_produk-jadi');
+            Cache::forget('materials_all_cat_karton-box');
 
             return response()->json([
                 'success' => true,
@@ -700,6 +717,9 @@ class MaterialController extends Controller
             Excel::import(new MaterialsImport(), $file, null, $readerType);
 
             Cache::forget('materials_all');
+            Cache::forget('materials_all_cat_kayu-rst');
+            Cache::forget('materials_all_cat_produk-jadi');
+            Cache::forget('materials_all_cat_karton-box');
 
             return response()->json([
                 'success' => true,
