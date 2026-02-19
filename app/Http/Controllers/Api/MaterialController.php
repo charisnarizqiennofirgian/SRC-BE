@@ -60,6 +60,26 @@ class MaterialController extends Controller
             }
 
             if ($request->query('all')) {
+
+                // ✅ TAMBAHAN: Support filter category_ids (untuk optimasi FormOperasional)
+                if ($request->filled('category_ids')) {
+                    $categoryIds = array_filter(
+                        array_map('intval', explode(',', $request->category_ids))
+                    );
+                    sort($categoryIds);
+                    $cacheKey = 'materials_all_cat_ids_' . implode('_', $categoryIds);
+
+                    $items = Cache::remember($cacheKey, now()->addMinutes(15), function () use ($categoryIds) {
+                        return Item::with(['category:id,name', 'unit:id,name'])
+                            ->whereIn('category_id', $categoryIds)
+                            ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock')
+                            ->orderBy('name')
+                            ->get();
+                    });
+
+                    return response()->json(['success' => true, 'data' => $items]);
+                }
+
                 // Buat cache key unik berdasarkan category_name filter
                 $cacheKey = 'materials_all';
                 if ($request->filled('category_name')) {
