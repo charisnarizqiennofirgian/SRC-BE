@@ -82,6 +82,9 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             $t = (float) $row['tebal_mm'];
             $l = (float) ($row['lebar_mm'] ?? 0);
             $p = (float) ($row['panjang_mm'] ?? 0);
+            $cutting_t = isset($row['cutting_tebal_mm']) ? (float) $row['cutting_tebal_mm'] : null;
+            $cutting_l = isset($row['cutting_lebar_mm']) ? (float) $row['cutting_lebar_mm'] : null;
+            $cutting_p = isset($row['cutting_panjang_mm']) ? (float) $row['cutting_panjang_mm'] : null;
             $stokAwal = (float) $row['stok_awal'];
 
             $uniqueName = "{$namaDasar} ({$t}x{$l}x{$p})";
@@ -112,6 +115,9 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                         'kualitas' => $kualitas,
                         'bentuk' => $bentuk,
                         'volume_m3' => $kubikasiPerPcs,
+                        'cutting_t' => $cutting_t,
+                        'cutting_l' => $cutting_l,
+                        'cutting_p' => $cutting_p,
                     ]
                 );
 

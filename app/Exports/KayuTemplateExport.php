@@ -20,6 +20,9 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 50,               // tebal_mm
                 80,               // lebar_mm
                 1000,             // panjang_mm
+                48,               // cutting_tebal_mm
+                78,               // cutting_lebar_mm
+                998,              // cutting_panjang_mm
                 20,               // stok_awal
                 'Pieces',         // satuan (harus sama dengan master Unit)
                 'SANWIL',         // gudang (kode gudang contoh)
@@ -33,6 +36,9 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 40,
                 60,
                 2000,
+                38,               // cutting_tebal_mm
+                58,               // cutting_lebar_mm
+                1998,             // cutting_panjang_mm
                 15,
                 'Pieces',
                 'SANWIL',
@@ -51,9 +57,12 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
             'tebal_mm',
             'lebar_mm',
             'panjang_mm',
+            'cutting_tebal_mm',
+            'cutting_lebar_mm',
+            'cutting_panjang_mm',
             'stok_awal',
-            'satuan',   // diambil ke master Unit
-            'gudang',   // wajib diisi kode gudang (case bebas)
+            'satuan',
+            'gudang',
         ];
     }
 }
