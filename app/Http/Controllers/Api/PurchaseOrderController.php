@@ -150,6 +150,85 @@ class PurchaseOrderController extends Controller
         }
     }
 
+    public function laporanHarga(Request $request)
+    {
+        $query = DB::table('purchase_order_details as pod')
+            ->join('purchase_orders as po', 'pod.purchase_order_id', '=', 'po.id')
+            ->join('items as i', 'pod.item_id', '=', 'i.id')
+            ->join('suppliers as s', 'po.supplier_id', '=', 's.id')
+            ->select(
+                'pod.id',
+                'i.id as item_id',
+                'i.name as item_name',
+                'i.code as item_code',
+                's.id as supplier_id',
+                's.name as supplier_name',
+                'po.po_number',
+                'po.order_date',
+                'pod.price',
+                'pod.quantity_ordered',
+            )
+            ->where('po.status', '!=', 'Cancelled');
+
+        // Filter item
+        if ($request->filled('item_id')) {
+            $query->where('pod.item_id', $request->item_id);
+        }
+
+        // Filter supplier
+        if ($request->filled('supplier_id')) {
+            $query->where('po.supplier_id', $request->supplier_id);
+        }
+
+        // Filter tanggal
+        if ($request->filled('date_from')) {
+            $query->where('po.order_date', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->where('po.order_date', '<=', $request->date_to);
+        }
+
+        $data = $query->orderBy('i.name')->orderBy('po.order_date')->get();
+
+        // Hitung perubahan harga per item
+        $grouped = $data->groupBy('item_id')->map(function ($rows) {
+            $rows = $rows->values();
+            return $rows->map(function ($row, $index) use ($rows) {
+                $prevPrice = $index > 0 ? $rows[$index - 1]->price : null;
+                $row->price_change = null;
+                $row->price_change_percent = null;
+                $row->price_trend = null;
+
+                if ($prevPrice !== null && $prevPrice > 0) {
+                    $change = $row->price - $prevPrice;
+                    $row->price_change = $change;
+                    $row->price_change_percent = round(($change / $prevPrice) * 100, 2);
+                    $row->price_trend = $change > 0 ? 'naik' : ($change < 0 ? 'turun' : 'tetap');
+                }
+
+                return $row;
+            });
+        })->values()->flatten(1);
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+            'chart_data' => $this->prepareChartData($data),
+        ]);
+    }
+
+    private function prepareChartData($data)
+    {
+        return $data->groupBy('item_id')->map(function ($rows, $itemId) {
+            return [
+                'item_id' => $itemId,
+                'item_name' => $rows->first()->item_name,
+                'labels' => $rows->pluck('order_date'),
+                'prices' => $rows->pluck('price'),
+            ];
+        })->values();
+    }
+
     private function validatePurchaseOrder(Request $request)
     {
         return Validator::make($request->all(), [

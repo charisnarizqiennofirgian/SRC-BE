@@ -173,6 +173,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- PEMBELIAN ---
+    Route::get('purchase-orders/laporan-harga', [PurchaseOrderController::class, 'laporanHarga']);
     Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show']);
     Route::apiResource('purchase-orders', PurchaseOrderController::class)->except(['show']);
 
