@@ -237,7 +237,7 @@ class PurchaseOrderController extends Controller
             'delivery_date' => 'nullable|date',
             'notes' => 'nullable|string',
             'type' => 'required|string|in:operasional,karton,kayu',
-            'ppn_percentage' => 'required|numeric|in:0,11,11.12,12',  // ✅ TAMBAH 11.12
+            'ppn_percentage' => 'required|numeric|in:0,11,11.12,12',  
             'details' => 'required|array|min:1',
             'details.*.item_id' => 'required|exists:items,id',
             'details.*.quantity' => 'required|numeric|min:0.01',

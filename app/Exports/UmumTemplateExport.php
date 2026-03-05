@@ -16,12 +16,13 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
     {
         return [
             [
-                'U-001',              // kode
-                'Paku 5cm',           // nama
-                'Bahan Baku',         // kategori
-                'Kg',                 // satuan
-                50,                   // stok_awal (angka)
-                             // gudang (kode warehouse)
+                'U-001',
+                'Paku 5cm',
+                'Bahan Baku',
+                'Kg',
+                50,
+                'UMUM',  // gudang_awal
+                0,       // harga
             ],
             [
                 'U-002',
@@ -29,7 +30,8 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'Bahan Kimia',
                 'Liter',
                 20,
-                'SANWIL',
+                'UMUM',  // gudang_awal
+                0,       // harga
             ],
             [
                 'U-003',
@@ -37,7 +39,8 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'Bahan Finishing',
                 'Lembar',
                 100,
-                
+                'UMUM',  // gudang_awal
+                0,       // harga
             ],
         ];
     }
@@ -54,7 +57,8 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
             'kategori',
             'satuan',
             'stok_awal',
-            
+            'gudang_awal',
+            'harga',
         ];
     }
 }

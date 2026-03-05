@@ -55,6 +55,7 @@ class Item extends Model
         'no_skshhk',
         'no_kapling',
         'mutu',
+        'price',
     ];
 
     protected $casts = [
@@ -70,6 +71,7 @@ class Item extends Model
         'diameter' => 'decimal:2',
         'panjang' => 'decimal:2',
         'kubikasi' => 'decimal:4',
+        'price' => 'decimal:2',
     ];
 
     public static function getTypes(): array

@@ -24,7 +24,7 @@ class StockReportController extends Controller
 
             $categories = Category::where(function ($query) use ($categoryNames) {
                 foreach ($categoryNames as $name) {
-                    $query->orWhereRaw('LOWER(name) = ?', [strtolower(trim($name))]);
+                    $query->orWhereRaw('LOWER(name) LIKE ?', ['%' . strtolower(trim($name)) . '%']);
                 }
             })->get();
 
@@ -53,7 +53,8 @@ class StockReportController extends Controller
                 'items.tanggal_terima',
                 'items.no_skshhk',
                 'items.no_kapling',
-                'items.mutu'
+                'items.mutu',
+                'items.price'
             )
                 ->with([
                     'unit:id,name',
@@ -97,6 +98,7 @@ class StockReportController extends Controller
             $sumQuery = clone $query;
             $warehouseId = $request->input('warehouse_id');
             $totalKubikasi = 0;
+            $totalValuasi = 0;
 
             // Hitung total kubikasi dari SEMUA data yang ter-filter
             $allItemsForSum = $sumQuery->with([
@@ -136,6 +138,9 @@ class StockReportController extends Controller
                 }
 
                 $totalKubikasi += $volumeM3;
+                if ((float) ($item->stock ?? 0) > 0) {
+                    $totalValuasi += (float) ($item->price ?? 0);
+                }
             }
 
             // Baru paginate untuk display
@@ -194,7 +199,8 @@ class StockReportController extends Controller
                 'success' => true,
                 'data' => $items,
                 'summary' => [
-                    'total_kubikasi' => round($totalKubikasi, 4)
+                    'total_kubikasi' => round($totalKubikasi, 4),
+                    'total_valuasi' => round($totalValuasi, 2),
                 ]
             ]);
         } catch (\Exception $e) {

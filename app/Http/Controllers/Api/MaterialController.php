@@ -143,7 +143,8 @@ class MaterialController extends Controller
                     'tanggal_terima',
                     'no_skshhk',
                     'no_kapling',
-                    'mutu'
+                    'mutu',
+                    'price'
                 );
 
             if ($search) {
@@ -217,6 +218,7 @@ class MaterialController extends Controller
                 'no_skshhk' => 'nullable|string|max:255',
                 'no_kapling' => 'nullable|string|max:255',
                 'mutu' => 'nullable|string|max:255',
+                'price' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -399,6 +401,7 @@ class MaterialController extends Controller
                 'no_skshhk' => 'nullable|string|max:255',
                 'no_kapling' => 'nullable|string|max:255',
                 'mutu' => 'nullable|string|max:255',
+                'price' => 'nullable|numeric|min:0',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -589,7 +592,8 @@ class MaterialController extends Controller
                 'tanggal_terima',
                 'no_skshhk',
                 'no_kapling',
-                'mutu'
+                'mutu',
+                'harga'
             ];
 
             $example1 = [
@@ -616,7 +620,8 @@ class MaterialController extends Controller
                 '',
                 '',
                 '',
-                ''
+                '',
+                '0' // harga
             ];
 
             $example2 = [
@@ -643,7 +648,8 @@ class MaterialController extends Controller
                 '',
                 '',
                 '',
-                ''
+                '',
+                '0' // harga
             ];
 
             $example3 = [
@@ -670,7 +676,8 @@ class MaterialController extends Controller
                 '2026-02-01',
                 '3358693',
                 '2412502005843',
-                'A'
+                'A',
+                '0' // harga
             ];
 
             $content = implode(';', $headers) . "\n";

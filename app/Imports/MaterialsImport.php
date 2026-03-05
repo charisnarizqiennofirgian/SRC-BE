@@ -26,6 +26,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
         'kayu rst' => 'RSTK',
         'kayu log' => 'LOG',
         'komponen' => 'MESIN',
+        'bahan' => 'UMUM',
     ];
 
     public function collection(Collection $rows)
@@ -174,6 +175,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         $item->kubikasi = null;
                     }
 
+                    $item->price = isset($row['harga']) ? (float) $row['harga'] : 0;
                     $item->save();
 
                     if ((float) $stokBaru !== (float) $stokLama) {

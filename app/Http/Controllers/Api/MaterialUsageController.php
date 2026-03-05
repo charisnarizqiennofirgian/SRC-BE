@@ -13,20 +13,23 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
 
 class MaterialUsageController extends Controller
 {
     const CONSUMABLE_CATEGORY_IDS = [
-        7,  // Bahan Operasional
-        8,  // Bahan Penolong
-        9,  // Karton Box
+    
+        3,  // Bahan Operasional
+        4,  // Karton Box
+        
+    
     ];
 
     public function getConsumableItems(Request $request): JsonResponse
     {
         try {
             $query = Item::with(['unit:id,name', 'category:id,name'])
-                ->select('id', 'code', 'name', 'type', 'unit_id', 'category_id', 'stock')
+                ->select('id', 'code', 'name', 'type', 'unit_id', 'category_id', 'stock', 'price')
                 ->orderBy('category_id')
                 ->orderBy('name');
 
@@ -166,7 +169,7 @@ class MaterialUsageController extends Controller
                 'transaction_type' => InventoryLog::TYPE_USAGE,
                 'division' => $request->division,
                 'notes' => $request->notes ?? "Dipakai divisi {$request->division}",
-                'user_id' => auth()->id(),
+                'user_id' => Auth::id(),
             ]);
 
             DB::commit();
@@ -194,11 +197,11 @@ class MaterialUsageController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = InventoryLog::with([
-                    'item:id,name,code',
-                    'warehouse:id,name',
-                    'user:id,name'
-                ])
+           $query = InventoryLog::with([
+    'item:id,name,code,price',
+    'warehouse:id,name',
+    'user:id,name'
+])
                 ->where('transaction_type', InventoryLog::TYPE_USAGE)
                 ->orderBy('date', 'desc')
                 ->orderBy('time', 'desc');
@@ -241,6 +244,7 @@ class MaterialUsageController extends Controller
 
         $remaining = $qty;
 
+        /** @var Inventory $inventory */
         foreach ($inventories as $inventory) {
             if ($remaining <= 0) break;
 
