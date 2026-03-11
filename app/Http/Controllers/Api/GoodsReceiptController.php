@@ -12,6 +12,8 @@ use App\Models\InventoryLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
+use App\Models\Item;
 
 class GoodsReceiptController extends Controller
 {
@@ -76,10 +78,10 @@ class GoodsReceiptController extends Controller
                         'reference_id' => $goodsReceipt->id,
                         'reference_number' => $goodsReceipt->receipt_number,
                         'notes' => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
-                        'user_id' => auth()->id(),
+                        'user_id' => Auth::id(),
                     ]);
 
-                    $item = \App\Models\Item::find($detail['item_id']);
+                    $item = Item::find($detail['item_id']);
                     if ($item) {
                         $item->increment('stock', $detail['quantity_received']);
                     }
@@ -126,7 +128,7 @@ class GoodsReceiptController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $receipts = \App\Models\GoodsReceipt::whereIn('status', ['Open', 'Partial'])
+        $receipts = GoodsReceipt::whereIn('status', ['Open', 'Partial'])
             ->whereHas('purchaseOrder', function ($query) use ($request) {
                 $query->where('supplier_id', $request->supplier_id);
             })

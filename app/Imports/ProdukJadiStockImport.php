@@ -64,11 +64,11 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
             $gudangRaw = trim($normalized['gudang'] ?? '');
             $hsCodeRaw = $normalized['hs_code'] ?? $normalized['hs code'] ?? null;
 
-            if (empty($namaProduk) || $stokAwal <= 0 || empty($gudangRaw)) {
-                Log::warning("ROW #{$index} DITOLAK (kolom wajib kosong / stok <= 0)");
+            if (empty($namaProduk) || empty($gudangRaw)) {
+                Log::warning("ROW #{$index} DITOLAK (kolom wajib kosong)");
                 $skippedRows[] = [
                     'row_number' => $index + 2,
-                    'reason' => 'Kolom nama_produk, stok_awal, atau gudang kosong / stok <= 0',
+                    'reason' => 'Kolom nama_produk atau gudang kosong',
                     'data' => $normalized,
                 ];
                 continue;

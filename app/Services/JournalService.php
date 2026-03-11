@@ -9,6 +9,7 @@ use App\Models\ChartOfAccount;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use App\Models\JournalHistory;
 
 class JournalService
 {
@@ -81,7 +82,7 @@ class JournalService
             // ✅ Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_CREATED,
+                JournalHistory::ACTION_CREATED,
                 'System created journal'
             );
 
@@ -167,7 +168,7 @@ class JournalService
             switch ($bill->payment_type) {
                 case PurchaseBill::PAYMENT_TEMPO:
                     // Credit: Hutang Usaha (full)
-                    $this->createHutangLine($journal, $bill, $bill->total_amount);
+                    $this->createHutangLine($journal, $bill, (float) $bill->total_amount);
                     $totalCredit += $bill->total_amount;
                     Log::info('Credit Hutang Usaha (TEMPO):', ['amount' => $bill->total_amount]);
                     break;
@@ -201,7 +202,7 @@ class JournalService
 
                     // Credit 2: Hutang Usaha (sisa)
                     if ($bill->remaining_amount > 0) {
-                        $this->createHutangLine($journal, $bill, $bill->remaining_amount);
+                        $this->createHutangLine($journal, $bill, (float) $bill->remaining_amount);
                         $totalCredit += $bill->remaining_amount;
                         Log::info('Credit Hutang Usaha (Sisa):', ['amount' => $bill->remaining_amount]);
                     }
@@ -241,7 +242,7 @@ class JournalService
             // ✅ Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_CREATED,
+                JournalHistory::ACTION_CREATED,
                 "Created from Purchase Bill: {$bill->bill_number}"
             );
 
@@ -333,7 +334,7 @@ class JournalService
         ?array $oldData = null,
         ?array $newData = null
     ): void {
-        \App\Models\JournalHistory::log($journalEntryId, $action, $reason, $oldData, $newData);
+        JournalHistory::log($journalEntryId, $action, $reason, $oldData, $newData);
     }
 
     /**
@@ -356,7 +357,7 @@ class JournalService
             // Update jurnal
             $journal->update([
                 'status' => JournalEntry::STATUS_DRAFT,
-                'unposted_by' => auth()->id(),
+                'unposted_by' => Auth::id(),
                 'unposted_at' => now(),
                 'unpost_reason' => $reason,
             ]);
@@ -364,7 +365,7 @@ class JournalService
             // Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_UNPOSTED,
+                JournalHistory::ACTION_UNPOSTED,
                 $reason,
                 $oldData,
                 ['status' => JournalEntry::STATUS_DRAFT]
@@ -409,7 +410,7 @@ class JournalService
             // Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_POSTED,
+                JournalHistory::ACTION_POSTED,
                 'Reposted after edit'
             );
 
@@ -443,7 +444,7 @@ class JournalService
             // Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_VOIDED,
+                JournalHistory::ACTION_VOIDED,
                 $reason
             );
 
@@ -489,7 +490,7 @@ class JournalService
             $totalCredit = 0;
 
             foreach ($entries as $entry) {
-                \App\Models\JournalEntryLine::create([
+                JournalEntryLine::create([
                     'journal_entry_id' => $journal->id,
                     'account_id' => $entry['account_id'],
                     'description' => $entry['description'] ?? '',
@@ -507,7 +508,7 @@ class JournalService
                 'description' => $description,
                 'total_debit' => $totalDebit,
                 'total_credit' => $totalCredit,
-                'last_edited_by' => auth()->id(),
+                'last_edited_by' => Auth::id(),
                 'last_edited_at' => now(),
             ]);
 
@@ -558,7 +559,7 @@ class JournalService
             // Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_VOIDED,
+                JournalHistory::ACTION_VOIDED,
                 'Journal reversed'
             );
 
