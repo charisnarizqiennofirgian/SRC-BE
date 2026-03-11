@@ -80,7 +80,7 @@ class ProductionRoutingService
     {
         $currentStock = Inventory::where('item_id', $itemId)
             ->where('warehouse_id', self::PEMBAHANAN_WAREHOUSE_ID)
-            ->sum('qty');
+            ->sum('qty_pcs');
 
         return [
             'available' => $currentStock >= $qtyNeeded,
