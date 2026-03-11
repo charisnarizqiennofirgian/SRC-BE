@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InvoicePayment;
 use App\Models\SalesInvoice;
 use App\Models\DownPayment;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class InvoicePaymentService
@@ -54,7 +55,7 @@ class InvoicePaymentService
                 'account_id' => $accountId,
                 'payment_type' => 'CASH',
                 'notes' => $notes,
-                'created_by' => $userId ?? auth()->id(),
+                'created_by' => $userId ?? Auth::id(),
             ]);
 
             $this->createCashPaymentJournal($payment);
@@ -111,7 +112,7 @@ class InvoicePaymentService
                 'payment_type' => 'DP',
                 'down_payment_id' => $downPaymentId,
                 'notes' => $notes,
-                'created_by' => $userId ?? auth()->id(),
+                'created_by' => $userId ?? Auth::id(),
             ]);
 
             $this->createDpDeductionJournal($payment, $downPayment);
@@ -179,11 +180,8 @@ class InvoicePaymentService
             throw new \Exception('Buyer belum memiliki akun piutang');
         }
 
-        $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1%')
-            ->where(function($q) {
-                $q->where('name', 'like', '%Uang Muka Penjualan%')
-                  ->orWhere('name', 'like', '%Customer Deposit%');
-            })
+        $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '314.01%')
+            ->where('name', 'like', '%UANG MUKA PENJUALAN%')
             ->first();
 
         if (!$depositAccount) {

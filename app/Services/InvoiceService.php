@@ -7,6 +7,7 @@ use App\Models\SalesInvoiceDetail;
 use App\Models\DeliveryOrder;
 use App\Models\DownPayment;
 use App\Models\JournalEntry;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -132,7 +133,7 @@ class InvoiceService
             'sales_order_id' => $deliveryOrder->sales_order_id,
             'delivery_order_id' => $deliveryOrder->id,
             'buyer_id' => $deliveryOrder->buyer_id,
-            'user_id' => $userId ?? auth()->id(),
+            'user_id' => $userId ?? Auth::id(),
             'invoice_date' => $invoiceDate,
             'due_date' => $dueDate,
             'currency' => $currency,
@@ -226,10 +227,7 @@ class InvoiceService
             throw new \Exception("Akun Piutang (ID: {$buyer->receivable_account_id}) tidak ditemukan atau tidak aktif.");
         }
 
-        $salesAccount = \App\Models\ChartOfAccount::where(function($query) {
-                $query->where('code', 'like', '4%')
-                      ->orWhere('type', 'PENDAPATAN');
-            })
+        $salesAccount = \App\Models\ChartOfAccount::where('code', '500.01.001')
             ->where('is_active', 1)
             ->first();
 
@@ -237,8 +235,7 @@ class InvoiceService
             throw new \Exception('Akun Penjualan tidak ditemukan. Pastikan ada akun Pendapatan yang aktif');
         }
 
-        $ppnAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-%')
-            ->where('name', 'like', '%PPN%')
+        $ppnAccount = \App\Models\ChartOfAccount::where('code', '312.01.001')
             ->where('is_active', 1)
             ->first();
 
@@ -269,11 +266,8 @@ class InvoiceService
 
         // ✅ JURNAL UNTUK DP YANG DIPAKAI
         if ($invoice->paid_amount > 0) {
-            $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1%')
-                ->where(function($q) {
-                    $q->where('name', 'like', '%Uang Muka Penjualan%')
-                      ->orWhere('name', 'like', '%Customer Deposit%');
-                })
+            $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '314.01%')
+                ->where('name', 'like', '%UANG MUKA PENJUALAN%')
                 ->first();
 
             if ($depositAccount) {

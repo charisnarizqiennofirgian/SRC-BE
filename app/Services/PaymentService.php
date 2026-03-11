@@ -119,8 +119,7 @@ class PaymentService
 
         if (!$hutangAccountId) {
             // Cari akun hutang default
-            $hutangAccount = ChartOfAccount::where('type', 'KEWAJIBAN')
-                                          ->where('name', 'LIKE', '%Hutang%')
+            $hutangAccount = ChartOfAccount::where('code', '310.01.001')
                                           ->where('is_active', true)
                                           ->first();
             $hutangAccountId = $hutangAccount?->id;

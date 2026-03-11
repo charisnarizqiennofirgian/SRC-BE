@@ -257,33 +257,13 @@ class JournalService
      */
     private function getPPNMasukanAccount(): ?ChartOfAccount
     {
-        $ppnAccount = ChartOfAccount::where(function ($query) {
-            $query->where('code', '1107')
-                ->orWhere('name', 'LIKE', '%PPN Masukan%')
-                ->orWhere('name', 'LIKE', '%Pajak Masukan%');
-        })
+        $ppnAccount = ChartOfAccount::where('code', '170.01.001')
             ->where('is_active', true)
             ->first();
 
         if (!$ppnAccount) {
-            Log::warning('⚠️ Akun PPN Masukan tidak ditemukan, membuat otomatis...');
-
-            try {
-                $ppnAccount = ChartOfAccount::create([
-                    'code' => '1107',
-                    'name' => 'PPN Masukan',
-                    'type' => 'ASET',
-                    'normal_position' => 'debit',
-                    'is_active' => true,
-                ]);
-
-                Log::info('✅ Akun PPN Masukan berhasil dibuat', [
-                    'account_id' => $ppnAccount->id,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('❌ Gagal membuat akun PPN Masukan: ' . $e->getMessage());
-                return null;
-            }
+            Log::warning('⚠️ Akun PPN Masukan tidak ditemukan');
+            return null;
         }
 
         return $ppnAccount;
@@ -299,11 +279,7 @@ class JournalService
 
         // Fallback: cari akun Hutang Usaha
         if (!$hutangAccountId) {
-            $hutangAccount = ChartOfAccount::where('type', 'KEWAJIBAN')
-                ->where(function ($query) {
-                    $query->where('name', 'LIKE', '%Hutang Usaha%')
-                        ->orWhere('code', 'LIKE', '2-2%');
-                })
+            $hutangAccount = ChartOfAccount::where('code', '310.01.001')
                 ->where('is_active', true)
                 ->first();
 
@@ -523,7 +499,7 @@ class JournalService
             // Log history
             $this->logHistory(
                 $journal->id,
-                \App\Models\JournalHistory::ACTION_EDITED,
+                JournalHistory::ACTION_EDITED,
                 null,
                 $oldData,
                 [

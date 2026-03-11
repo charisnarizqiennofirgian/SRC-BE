@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DownPayment;
 use App\Services\DownPaymentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -82,7 +83,7 @@ class DownPaymentController extends Controller
                 accountId: $request->account_id,
                 exchangeRate: $request->exchange_rate ?? 1,
                 notes: $request->notes,
-                userId: auth()->id()
+                userId: Auth::id()
             );
 
             DB::commit();

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\DownPayment;
 use App\Models\SalesOrder;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class DownPaymentService
@@ -45,9 +46,10 @@ class DownPaymentService
             'used_amount' => 0,
             'remaining_amount' => $amountIdr,
             'notes' => $notes,
-            'created_by' => $userId ?? auth()->id(),
+            'created_by' => $userId ?? Auth::id(),
         ]);
 
+        $downPayment->load(['account', 'salesOrder.buyer']);
         $this->createDownPaymentJournal($downPayment);
 
         return $downPayment->fresh();
@@ -60,35 +62,34 @@ class DownPaymentService
             throw new \Exception('Akun kas/bank tidak ditemukan');
         }
 
-        $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '2-1%')
-            ->where(function($q) {
-                $q->where('name', 'like', '%Uang Muka Penjualan%')
-                  ->orWhere('name', 'like', '%Customer Deposit%');
-            })
+        $depositAccount = \App\Models\ChartOfAccount::where('code', 'like', '314.01%')
+            ->where('name', 'like', '%UANG MUKA PENJUALAN%')
             ->first();
 
         if (!$depositAccount) {
             throw new \Exception('Akun Uang Muka Penjualan tidak ditemukan');
         }
 
+        $buyerName = $downPayment->salesOrder->buyer->name ?? 'Unknown';
+
         $entries = [
             [
                 'account_id' => $cashAccount->id,
                 'debit' => $downPayment->amount_idr,
                 'credit' => 0,
-                'description' => "Terima DP - {$downPayment->dp_number}",
+                'description' => "{$cashAccount->name} - {$buyerName}",
             ],
             [
                 'account_id' => $depositAccount->id,
                 'debit' => 0,
                 'credit' => $downPayment->amount_idr,
-                'description' => "Uang Muka - {$downPayment->dp_number}",
+                'description' => "{$depositAccount->name} - {$buyerName}",
             ],
         ];
 
         $journalEntry = $this->journalService->createJournal(
             date: $downPayment->payment_date,
-            description: "Terima Uang Muka - {$downPayment->dp_number}",
+            description: "{$cashAccount->name} - {$buyerName}",
             entries: $entries,
             referenceType: 'down_payment',
             referenceId: $downPayment->id
@@ -112,11 +113,11 @@ class DownPaymentService
             throw new \Exception('Down Payment tidak tersedia');
         }
 
-        if ($amount > $downPayment->remaining_amount) {
+        if ($amount > (float) $downPayment->remaining_amount) {
             throw new \Exception('Jumlah melebihi sisa DP');
         }
 
-        $downPayment->used_amount += $amount;
+        $downPayment->used_amount = (float)$downPayment->used_amount + (float)$amount;
         $downPayment->updateRemaining();
     }
 }
