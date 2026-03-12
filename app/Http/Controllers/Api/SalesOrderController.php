@@ -18,16 +18,16 @@ class SalesOrderController extends Controller
     {
         try {
             $query = SalesOrder::with([
-                    'buyer:id,name,address,eu_factory_number',
-                    'user:id,name',
-                    'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
-                    'details.item:id,name'
-                ])
+                'buyer:id,name,address,eu_factory_number',
+                'user:id,name',
+                'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
+                'details.item:id,name'
+            ])
                 ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
 
             $salesOrders = $query->orderBy('so_date', 'desc')
-                                ->orderBy('id', 'desc')
-                                ->paginate($request->input('per_page', 25));
+                ->orderBy('id', 'desc')
+                ->paginate($request->input('per_page', 25));
 
             return response()->json([
                 'success' => true,
@@ -83,8 +83,17 @@ class SalesOrderController extends Controller
         DB::beginTransaction();
         try {
             $soData = $request->only([
-                'buyer_id', 'so_date', 'delivery_date', 'customer_po_number',
-                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'tax_rate', 'grand_total',  // ← TAMBAH tax_rate
+                'buyer_id',
+                'so_date',
+                'delivery_date',
+                'customer_po_number',
+                'notes',
+                'status',
+                'subtotal',
+                'discount',
+                'tax_ppn',
+                'tax_rate',
+                'grand_total',  // ← TAMBAH tax_rate
                 'currency'
             ]);
 
@@ -140,17 +149,23 @@ class SalesOrderController extends Controller
     public function getOpenSalesOrders(Request $request)
     {
         try {
-            $query = SalesOrder::with(['buyer:id,name,address,eu_factory_number', 'user:id,name', 'details' => function($q){
-                $q->whereColumn('quantity', '>', 'quantity_shipped');
-            }, 'details.item:id,name,code,stock,unit_id', 'details.item.unit:id,name'])
-            ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
-            ->where('status', '!=', 'Completed')
-            ->where('status', '!=', 'Cancelled')
-            ->whereHas('details', function($q){
-                $q->whereColumn('quantity', '>', 'quantity_shipped');
-            })
-            ->orderBy('so_date', 'desc')
-            ->orderBy('id', 'desc');
+            $query = SalesOrder::with([
+                'buyer:id,name,address,eu_factory_number',
+                'user:id,name',
+                'details' => function ($q) {
+                    $q->whereColumn('quantity', '>', 'quantity_shipped');
+                },
+                'details.item:id,name,code,stock,unit_id',
+                'details.item.unit:id,name'
+            ])
+                ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
+                ->where('status', '!=', 'Completed')
+                ->where('status', '!=', 'Cancelled')
+                ->whereHas('details', function ($q) {
+                    $q->whereColumn('quantity', '>', 'quantity_shipped');
+                })
+                ->orderBy('so_date', 'desc')
+                ->orderBy('id', 'desc');
 
             $salesOrders = $query->paginate($request->input('per_page', 25));
 
@@ -158,11 +173,9 @@ class SalesOrderController extends Controller
 
             $salesOrders->getCollection()->transform(function ($so) use ($packingWarehouseId) {
                 $so->details->transform(function ($detail) use ($packingWarehouseId) {
-                    $inventory = Inventory::where('item_id', $detail->item_id)
+                    $detail->current_stock = (float) Inventory::where('item_id', $detail->item_id)
                         ->where('warehouse_id', $packingWarehouseId)
-                        ->first();
-
-                    $detail->current_stock = $inventory ? (float) $inventory->qty_pcs : 0;
+                        ->sum('qty_pcs');
 
                     return $detail;
                 });
@@ -189,7 +202,7 @@ class SalesOrderController extends Controller
             $salesOrder = SalesOrder::with([
                 'buyer',
                 'user',
-                'details' => function($query) {
+                'details' => function ($query) {
                     $query->select(
                         'id',
                         'sales_order_id',
@@ -263,8 +276,17 @@ class SalesOrderController extends Controller
             $salesOrder = SalesOrder::findOrFail($id);
 
             $soData = $request->only([
-                'buyer_id', 'so_date', 'delivery_date', 'customer_po_number',
-                'notes', 'status', 'subtotal', 'discount', 'tax_ppn', 'tax_rate', 'grand_total',  // ← TAMBAH tax_rate
+                'buyer_id',
+                'so_date',
+                'delivery_date',
+                'customer_po_number',
+                'notes',
+                'status',
+                'subtotal',
+                'discount',
+                'tax_ppn',
+                'tax_rate',
+                'grand_total',  // ← TAMBAH tax_rate
                 'currency'
             ]);
 
@@ -344,15 +366,15 @@ class SalesOrderController extends Controller
         $month = date('m');
 
         $lastSo = SalesOrder::whereYear('created_at', $year)
-                            ->whereMonth('created_at', $month)
-                            ->orderBy('id', 'desc')
-                            ->first();
+            ->whereMonth('created_at', $month)
+            ->orderBy('id', 'desc')
+            ->first();
 
         $newNumber = 1;
         if ($lastSo) {
             $lastNumberStr = substr($lastSo->so_number, -4);
             if (is_numeric($lastNumberStr)) {
-                $newNumber = (int)$lastNumberStr + 1;
+                $newNumber = (int) $lastNumberStr + 1;
             }
         }
 
