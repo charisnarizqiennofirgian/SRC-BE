@@ -22,12 +22,12 @@ class InventoryController extends Controller
             ->select([
                 'item_id',
                 'warehouse_id',
-                DB::raw('SUM(qty) as total_qty'),
+                DB::raw('SUM(qty_pcs) as total_qty'),
                 DB::raw('GROUP_CONCAT(DISTINCT ref_po_id) as ref_po_ids'), // Gabung semua PO
                 DB::raw('MAX(id) as latest_id'), // Ambil ID terbaru untuk reference
             ])
             ->with(['item.category', 'item.unit', 'warehouse'])
-            ->where('qty', '>', 0)
+            ->where('qty_pcs', '>', 0)
             ->groupBy('item_id', 'warehouse_id');
 
         // Filter by warehouse

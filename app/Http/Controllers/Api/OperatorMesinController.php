@@ -89,7 +89,7 @@ class OperatorMesinController extends Controller
 
                 $inventories = Inventory::where('warehouse_id', $warehouseMouldingId)
                     ->where('item_id', $itemId)
-                    ->where('qty', '>', 0)
+                    ->where('qty_pcs', '>', 0)
                     ->lockForUpdate()
                     ->get();
 
@@ -104,7 +104,7 @@ class OperatorMesinController extends Controller
                     ], 422);
                 }
 
-                $totalAvailable = $inventories->sum('qty');
+                $totalAvailable = $inventories->sum('qty_pcs');
                 Log::info("Total stok tersedia: {$totalAvailable}");
 
                 if ($totalAvailable < $qtyUsed) {
@@ -122,12 +122,12 @@ class OperatorMesinController extends Controller
                 foreach ($inventories as $inventory) {
                     if ($remaining <= 0) break;
 
-                    $currentQty = $inventory->qty;
+                    $currentQty = $inventory->qty_pcs;
                     $qtyToTake = min($remaining, $currentQty);
 
-                    if ($inventory->qty >= $remaining) {
+                    if ($inventory->qty_pcs >= $remaining) {
                         Log::info("Taking {$remaining} pcs from Inventory ID {$inventory->id} (current qty: {$currentQty})");
-                        $inventory->decrement('qty', $remaining);
+                        $inventory->decrement('qty_pcs', $remaining);
                         Log::info("Inventory ID {$inventory->id} updated to " . ($currentQty - $remaining) . " pcs");
 
                         // Catat ke inventory_logs (OUT dari Gudang Moulding)
@@ -136,7 +136,7 @@ class OperatorMesinController extends Controller
                             'time' => now()->toTimeString(),
                             'item_id' => $itemId,
                             'warehouse_id' => $warehouseMouldingId,
-                            'qty' => $remaining,
+                            'qty_pcs' => $remaining,
                             'direction' => 'OUT',
                             'transaction_type' => 'PRODUCTION',
                             'reference_type' => 'ProductionOrder',
@@ -148,7 +148,7 @@ class OperatorMesinController extends Controller
 
                         $remaining = 0;
                     } else {
-                        Log::info("Taking {$inventory->qty} pcs from Inventory ID {$inventory->id} (current qty: {$currentQty})");
+                        Log::info("Taking {$inventory->qty_pcs} pcs from Inventory ID {$inventory->id} (current qty: {$currentQty})");
 
                         // Catat ke inventory_logs (OUT dari Gudang Moulding)
                         InventoryLog::create([
@@ -156,7 +156,7 @@ class OperatorMesinController extends Controller
                             'time' => now()->toTimeString(),
                             'item_id' => $itemId,
                             'warehouse_id' => $warehouseMouldingId,
-                            'qty' => $inventory->qty,
+                            'qty' => $inventory->qty_pcs,
                             'direction' => 'OUT',
                             'transaction_type' => 'PRODUCTION',
                             'reference_type' => 'ProductionOrder',
@@ -166,8 +166,8 @@ class OperatorMesinController extends Controller
                             'user_id' => Auth::id(),
                         ]);
 
-                        $remaining -= $inventory->qty;
-                        $inventory->update(['qty' => 0]);
+                        $remaining -= $inventory->qty_pcs;
+                        $inventory->update(['qty_pcs' => 0]);
                         Log::info("Inventory ID {$inventory->id} updated to 0 pcs");
                     }
                 }
@@ -188,14 +188,14 @@ class OperatorMesinController extends Controller
                     ->first();
 
                 if ($inventory) {
-                    $oldQty = $inventory->qty;
-                    $inventory->increment('qty', $qtyProduced);
+                    $oldQty = $inventory->qty_pcs;
+                    $inventory->increment('qty_pcs', $qtyProduced);
                     Log::info("Inventory ID {$inventory->id} incremented from {$oldQty} to " . ($oldQty + $qtyProduced));
                 } else {
                     $newInventory = Inventory::create([
                         'warehouse_id' => $warehouseKomponenId,
                         'item_id' => $itemId,
-                        'qty' => $qtyProduced,
+                        'qty_pcs' => $qtyProduced,
                         'ref_po_id' => $data['production_order_id'],
                     ]);
                     Log::info("New Inventory ID {$newInventory->id} created with qty {$qtyProduced}");

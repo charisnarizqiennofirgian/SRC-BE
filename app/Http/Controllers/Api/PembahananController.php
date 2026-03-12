@@ -22,8 +22,7 @@ class PembahananController extends Controller
     {
         // Hanya ambil PO yang TIDAK skip sawmill
         $pos = ProductionOrder::where('status', 'released')
-            ->where('current_stage', 'sawmill')  // Sudah selesai sawmill
-            ->where('skip_sawmill', false)       // Tidak skip sawmill
+            ->where('current_stage', 'pembahanan')
             ->with(['salesOrder'])
             ->get()
             ->map(function ($po) {
@@ -95,15 +94,15 @@ class PembahananController extends Controller
                         ->first();
 
                     if ($targetInv) {
-                        $oldQty = $targetInv->qty;
-                        $targetInv->qty += $outputQty;
+                        $oldQty = $targetInv->qty_pcs;
+                        $targetInv->qty_pcs += $outputQty;
                         $targetInv->save();
                         Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty}");
                     } else {
                         $targetInv = Inventory::create([
                             'warehouse_id'   => $targetWarehouseId,
                             'item_id'        => $outputItemId,
-                            'qty'            => $outputQty,
+                            'qty_pcs'        => $outputQty,
                             'ref_po_id'      => $poId,
                             'ref_product_id' => null,
                         ]);
@@ -141,7 +140,7 @@ class PembahananController extends Controller
                 // ✅ PROSES NORMAL (ada sumber inventory)
                 $sourceInventories = Inventory::where('warehouse_id', $sourceWarehouseId)
                     ->where('item_id', $sourceItemId)
-                    ->where('qty', '>', 0)
+                    ->where('qty_pcs', '>', 0)
                     ->orderBy('id', 'asc')
                     ->lockForUpdate()
                     ->get();
@@ -154,7 +153,7 @@ class PembahananController extends Controller
                     ]);
                 }
 
-                $totalAvailable = $sourceInventories->sum('qty');
+                $totalAvailable = $sourceInventories->sum('qty_pcs');
                 Log::info("Total stok tersedia: {$totalAvailable} pcs");
 
                 if ($inputQty > $totalAvailable) {
@@ -171,15 +170,15 @@ class PembahananController extends Controller
                 foreach ($sourceInventories as $sourceInv) {
                     if ($qtyRemaining <= 0) break;
 
-                    $qtyToTake = min($qtyRemaining, $sourceInv->qty);
+                    $qtyToTake = min($qtyRemaining, $sourceInv->qty_pcs);
 
                     Log::info("Taking {$qtyToTake} pcs from Inventory ID {$sourceInv->id} (current qty: {$sourceInv->qty})");
 
                     // Kurangi INVENTORY sumber
-                    $sourceInv->qty -= $qtyToTake;
+                    $sourceInv->qty_pcs -= $qtyToTake;
                     $sourceInv->save();
 
-                    Log::info("Inventory ID {$sourceInv->id} updated to {$sourceInv->qty} pcs");
+                    Log::info("Inventory ID {$sourceInv->id} updated to {$sourceInv->qty_pcs} pcs");
 
                     // Catat ke inventory_logs (OUT dari gudang sumber)
                     InventoryLog::create([
@@ -208,15 +207,15 @@ class PembahananController extends Controller
                         ->first();
 
                     if ($targetInv) {
-                        $oldQty = $targetInv->qty;
-                        $targetInv->qty += $qtyToTake;
+                        $oldQty = $targetInv->qty_pcs;
+                        $targetInv->qty_pcs += $qtyToTake;
                         $targetInv->save();
                         Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty}");
                     } else {
                         $targetInv = Inventory::create([
                             'warehouse_id'   => $targetWarehouseId,
                             'item_id'        => $outputItemId,
-                            'qty'            => $qtyToTake,
+                            'qty_pcs'        => $qtyToTake,
                             'ref_po_id'      => $poId,
                             'ref_product_id' => $sourceInv->ref_product_id,
                         ]);
@@ -290,10 +289,10 @@ class PembahananController extends Controller
         Log::info("Source Inventories for PO #{$poId} from Gudang KD");
 
         $inventories = Inventory::where('warehouse_id', $sourceWarehouseId)
-            ->where('qty', '>', 0)
+            ->where('qty_pcs', '>', 0)
             ->with(['item', 'warehouse'])
             ->orderBy('id', 'asc')
-            ->get(['id', 'warehouse_id', 'item_id', 'qty', 'ref_po_id', 'ref_product_id']);
+            ->get(['id', 'warehouse_id', 'item_id', 'qty_pcs', 'ref_po_id', 'ref_product_id']);
 
         Log::info("Found {$inventories->count()} inventories from Gudang KD");
 

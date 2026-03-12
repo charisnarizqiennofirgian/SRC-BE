@@ -85,14 +85,14 @@ class ProductionMonitoringController extends Controller
                                 ->whereIn('reference_id', $poIds)
                                 ->where('warehouse_id', $warehouseId)
                                 ->where('direction', 'IN')
-                                ->sum('qty');
+                                ->sum('qty_pcs');
 
                             // Hitung total OUT dari gudang ini
                             $qtyOut = InventoryLog::whereIn('reference_type', $validReferenceTypes)
                                 ->whereIn('reference_id', $poIds)
                                 ->where('warehouse_id', $warehouseId)
                                 ->where('direction', 'OUT')
-                                ->sum('qty');
+                                ->sum('qty_pcs');
 
                             // Tentukan status
                             if ($qtyIn == 0) {
@@ -120,7 +120,7 @@ class ProductionMonitoringController extends Controller
                                 ->where('item_id', $detail->item_id)
                                 ->where('warehouse_id', $warehouseId)
                                 ->where('direction', 'IN')
-                                ->sum('qty');
+                                ->sum('qty_pcs');
                         }
 
                         $qtyHilir[$key] = (float) $qtyIn;

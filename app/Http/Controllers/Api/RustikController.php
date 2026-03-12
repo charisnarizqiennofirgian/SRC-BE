@@ -62,7 +62,7 @@ class RustikController extends Controller
 
                 $available = Inventory::where('warehouse_id', $warehouse->id)
                     ->where('item_id', $detail->item_id)
-                    ->sum('qty');
+                    ->sum('qty_pcs');
 
                 $sourceDetails[] = [
                     'warehouse_id' => $warehouse->id,
@@ -136,19 +136,19 @@ class RustikController extends Controller
 
                 $inventories = Inventory::where('warehouse_id', $warehouse->id)
                     ->where('item_id', $detail->item_id)
-                    ->where('qty', '>', 0)
+                    ->where('qty_pcs', '>', 0)
                     ->orderBy('id', 'asc')
                     ->lockForUpdate()
                     ->get();
 
                 foreach ($inventories as $inventory) {
-                    if ($inventory->qty > 0) {
+                    if ($inventory->qty_pcs > 0) {
                         $stockSources[] = [
                             'warehouse' => $warehouse,
                             'inventory' => $inventory,
-                            'available' => $inventory->qty,
+                            'available' => $inventory->qty_pcs,
                         ];
-                        $totalAvailable += $inventory->qty;
+                        $totalAvailable += $inventory->qty_pcs;
                     }
                 }
             }
@@ -165,7 +165,7 @@ class RustikController extends Controller
 
                 $toTake = min($remaining, $source['available']);
 
-                $source['inventory']->decrement('qty', $toTake);
+                $source['inventory']->decrement('qty_pcs', $toTake);
 
                 InventoryLog::create([
                     'date' => now()->toDateString(),
@@ -186,10 +186,10 @@ class RustikController extends Controller
                     $usedSources[$source['warehouse']->id] = [
                         'warehouse_id' => $source['warehouse']->id,
                         'warehouse_name' => $source['warehouse']->name,
-                        'qty' => 0,
+                        'qty_pcs' => 0,
                     ];
                 }
-                $usedSources[$source['warehouse']->id]['qty'] += $toTake;
+                $usedSources[$source['warehouse']->id]['qty_pcs'] += $toTake;
 
                 $remaining -= $toTake;
             }
@@ -200,12 +200,12 @@ class RustikController extends Controller
                 ->first();
 
             if ($inventoryRustik) {
-                $inventoryRustik->increment('qty', $qtyRustik);
+                $inventoryRustik->increment('qty_pcs', $qtyRustik);
             } else {
                 Inventory::create([
                     'warehouse_id' => $warehouseRustik->id,
                     'item_id' => $detail->item_id,
-                    'qty' => $qtyRustik,
+                    'qty_pcs' => $qtyRustik,
                     'qty_m3' => 0,
                     'ref_po_id' => $productionOrder->id,
                     'ref_product_id' => $detail->item_id,
@@ -229,7 +229,7 @@ class RustikController extends Controller
 
             $usedSourcesArray = array_values($usedSources);
             $sourcesText = collect($usedSourcesArray)->map(function($s) {
-                return "{$s['qty']} dari {$s['warehouse_name']}";
+                return "{$s['qty_pcs']} dari {$s['warehouse_name']}";
             })->implode(', ');
 
             ProductionLog::create([

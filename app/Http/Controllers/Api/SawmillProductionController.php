@@ -73,7 +73,7 @@ class SawmillProductionController extends Controller
                     ->lockForUpdate()
                     ->first();
 
-                $currentQty = $inventory?->qty ?? 0;
+                $currentQty = $inventory?->qty_pcs ?? 0;
 
                 if ($currentQty < $log['qty_log_pcs']) {
                     throw ValidationException::withMessages([
@@ -82,7 +82,7 @@ class SawmillProductionController extends Controller
                 }
 
                 if ($inventory) {
-                    $inventory->decrement('qty', $log['qty_log_pcs']);
+                    $inventory->decrement('qty_pcs', $log['qty_log_pcs']);
                 }
 
                 // Catat ke inventory_logs (OUT dari gudang asal)
@@ -121,12 +121,12 @@ class SawmillProductionController extends Controller
                     ->first();
 
                 if ($inventory) {
-                    $inventory->increment('qty', $rst['qty_rst_pcs']);
+                    $inventory->increment('qty_pcs', $rst['qty_rst_pcs']);
                 } else {
                     Inventory::create([
                         'item_id'      => $rst['item_rst_id'],
                         'warehouse_id' => $data['warehouse_to_id'],
-                        'qty'          => $rst['qty_rst_pcs'],
+                        'qty_pcs'      => $rst['qty_rst_pcs'],
                     ]);
                 }
 

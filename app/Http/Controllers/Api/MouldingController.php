@@ -56,21 +56,21 @@ class MouldingController extends Controller
                     ]);
                 }
 
-                Log::info("Source Inventory ID {$sourceInv->id}: Current qty = {$sourceInv->qty}");
+                Log::info("Source Inventory ID {$sourceInv->id}: Current qty = {$sourceInv->qty_pcs}");
 
-                if ($inputQty > $sourceInv->qty) {
+                if ($inputQty > $sourceInv->qty_pcs) {
                     throw ValidationException::withMessages([
                         "items.{$index}.input_qty" => [
-                            "Item #" . ($index + 1) . ": Qty input ({$inputQty} pcs) melebihi stok tersedia ({$sourceInv->qty} pcs)."
+                            "Item #" . ($index + 1) . ": Qty input ({$inputQty} pcs) melebihi stok tersedia ({$sourceInv->qty_pcs} pcs)."
                         ],
                     ]);
                 }
 
                 // 2. Kurangi INVENTORY Pembahanan
-                $sourceInv->qty -= $inputQty;
+                $sourceInv->qty_pcs -= $inputQty;
                 $sourceInv->save();
 
-                Log::info("Source Inventory ID {$sourceInv->id} updated to {$sourceInv->qty} pcs");
+                Log::info("Source Inventory ID {$sourceInv->id} updated to {$sourceInv->qty_pcs} pcs");
 
                 // Catat ke inventory_logs (OUT dari Gudang Pembahanan)
                 InventoryLog::create([
@@ -99,15 +99,15 @@ class MouldingController extends Controller
                     ->first();
 
                 if ($targetInv) {
-                    $oldQty = $targetInv->qty;
-                    $targetInv->qty += $outputQty;
+                    $oldQty = $targetInv->qty_pcs_pcs;
+                    $targetInv->qty_pcs += $outputQty;
                     $targetInv->save();
-                    Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty}");
+                    Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty_pcs}");
                 } else {
                     $targetInv = Inventory::create([
                         'warehouse_id'   => $targetWarehouseId,
                         'item_id'        => $outputItemId,
-                        'qty'            => $outputQty,
+                        'qty_pcs'        => $outputQty,
                         'ref_po_id'      => $poId,
                         'ref_product_id' => $sourceInv->ref_product_id,
                     ]);
@@ -158,14 +158,14 @@ class MouldingController extends Controller
         $pembahananWarehouseId = 4; // Gudang Pembahanan
 
         $query = Inventory::where('warehouse_id', $pembahananWarehouseId)
-            ->where('qty', '>', 0)
+            ->where('qty_pcs', '>', 0)
             ->with(['item', 'warehouse']);
 
         if ($request->filled('po_id')) {
             $query->where('ref_po_id', $request->po_id);
         }
 
-        $inventories = $query->get(['id', 'warehouse_id', 'item_id', 'qty', 'ref_po_id', 'ref_product_id']);
+        $inventories = $query->get(['id', 'warehouse_id', 'item_id', 'qty_pcs', 'ref_po_id', 'ref_product_id']);
 
         $mapped = $inventories->map(function ($inv) {
             return [
@@ -174,7 +174,7 @@ class MouldingController extends Controller
                 'item_id'       => $inv->item_id,
                 'item_name'     => $inv->item->name ?? '',
                 'warehouse'     => $inv->warehouse->name ?? '',
-                'available_qty' => (int) $inv->qty,
+                'available_qty' => (int) $inv->qty_pcs,
                 'ref_po_id'     => $inv->ref_po_id,
             ];
         });

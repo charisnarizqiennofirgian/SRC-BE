@@ -80,7 +80,7 @@ class AssemblingController extends Controller
         foreach ($detail->item->bomComponents as $bom) {
             $stockAvailable = Inventory::where('warehouse_id', $warehouseKomponen->id)
                 ->where('item_id', $bom->child_item_id)
-                ->sum('qty');
+                ->sum('qty_pcs');
 
             $qtyNeeded = $bom->qty;
 
@@ -134,7 +134,7 @@ class AssemblingController extends Controller
             foreach ($request->used_components as $comp) {
                 $stockAvailable = Inventory::where('warehouse_id', $warehouseKomponen->id)
                     ->where('item_id', $comp['item_id'])
-                    ->sum('qty');
+                    ->sum('qty_pcs');
 
                 if ($stockAvailable < $comp['qty']) {
                     $item = \App\Models\Item::find($comp['item_id']);
@@ -147,7 +147,7 @@ class AssemblingController extends Controller
 
                 $inventories = Inventory::where('warehouse_id', $warehouseKomponen->id)
                     ->where('item_id', $comp['item_id'])
-                    ->where('qty', '>', 0)
+                    ->where('qty_pcs', '>', 0)
                     ->orderBy('id', 'asc')
                     ->lockForUpdate()
                     ->get();
@@ -155,8 +155,8 @@ class AssemblingController extends Controller
                 foreach ($inventories as $inventory) {
                     if ($qtyToDeduct <= 0) break;
 
-                    $qtyTaken = min($qtyToDeduct, $inventory->qty);
-                    $inventory->decrement('qty', $qtyTaken);
+                    $qtyTaken = min($qtyToDeduct, $inventory->qty_pcs);
+                    $inventory->decrement('qty_pcs', $qtyTaken);
                     $qtyToDeduct -= $qtyTaken;
                 }
 
@@ -182,7 +182,7 @@ class AssemblingController extends Controller
 
                     $inventories = Inventory::where('warehouse_id', $warehouseKomponen->id)
                         ->where('item_id', $reject['item_id'])
-                        ->where('qty', '>', 0)
+                        ->where('qty_pcs', '>', 0)
                         ->orderBy('id', 'asc')
                         ->lockForUpdate()
                         ->get();
@@ -190,8 +190,8 @@ class AssemblingController extends Controller
                     foreach ($inventories as $inventory) {
                         if ($qtyToDeduct <= 0) break;
 
-                        $qtyTaken = min($qtyToDeduct, $inventory->qty);
-                        $inventory->decrement('qty', $qtyTaken);
+                        $qtyTaken = min($qtyToDeduct, $inventory->qty_pcs);
+                        $inventory->decrement('qty_pcs', $qtyTaken);
                         $qtyToDeduct -= $qtyTaken;
                     }
 
@@ -222,12 +222,12 @@ class AssemblingController extends Controller
                     ->first();
 
                 if ($inventoryWhiteBody) {
-                    $inventoryWhiteBody->increment('qty', $qtyGood);
+                    $inventoryWhiteBody->increment('qty_pcs', $qtyGood);
                 } else {
                     Inventory::create([
                         'warehouse_id' => $warehouseAssembling->id,
                         'item_id' => $detail->item_id,
-                        'qty' => $qtyGood,
+                        'qty_pcs' => $qtyGood,
                         'qty_m3' => 0,
                         'ref_po_id' => $productionOrder->id,
                         'ref_product_id' => $detail->item_id,

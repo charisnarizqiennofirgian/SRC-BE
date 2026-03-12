@@ -68,7 +68,7 @@ class CandyProductionController extends Controller
 
                 $sourceInventories = Inventory::where('warehouse_id', $fromWarehouseId)
                     ->where('item_id', $sourceItemId)
-                    ->where('qty', '>', 0)
+                    ->where('qty_pcs', '>', 0)
                     ->orderBy('id', 'asc')
                     ->lockForUpdate()
                     ->get();
@@ -81,7 +81,7 @@ class CandyProductionController extends Controller
                     ]);
                 }
 
-                $totalAvailable = $sourceInventories->sum('qty');
+                $totalAvailable = $sourceInventories->sum('qty_pcs');
                 Log::info("Total inventory available: {$totalAvailable} pcs");
 
                 if ($qtyNeeded > $totalAvailable) {
@@ -98,14 +98,14 @@ class CandyProductionController extends Controller
                 foreach ($sourceInventories as $sourceInv) {
                     if ($qtyRemaining <= 0) break;
 
-                    $qtyToTake = min($qtyRemaining, $sourceInv->qty);
+                    $qtyToTake = min($qtyRemaining, $sourceInv->qty_pcs);
 
-                    Log::info("Taking {$qtyToTake} pcs from Inventory ID {$sourceInv->id} (current qty: {$sourceInv->qty})");
+                    Log::info("Taking {$qtyToTake} pcs from Inventory ID {$sourceInv->id} (current qty: {$sourceInv->qty_pcs})");
 
-                    $sourceInv->qty -= $qtyToTake;
+                    $sourceInv->qty_pcs -= $qtyToTake;
                     $sourceInv->save();
 
-                    Log::info("Inventory ID {$sourceInv->id} updated to {$sourceInv->qty} pcs");
+                    Log::info("Inventory ID {$sourceInv->id} updated to {$sourceInv->qty_pcs} pcs");
 
                     InventoryLog::create([
                         'date' => $data['date'],
@@ -129,15 +129,15 @@ class CandyProductionController extends Controller
                         ->first();
 
                     if ($targetInv) {
-                        $oldQty = $targetInv->qty;
-                        $targetInv->qty += $qtyToTake;
+                        $oldQty = $targetInv->qty_pcs;
+                        $targetInv->qty_pcs += $qtyToTake;
                         $targetInv->save();
-                        Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty}");
+                        Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty_pcs}");
                     } else {
                         $targetInv = Inventory::create([
                             'warehouse_id'   => $kdWarehouse->id,
                             'item_id'        => $targetItemId,
-                            'qty'            => $qtyToTake,
+                            'qty_pcs'        => $qtyToTake,
                             'ref_po_id'      => $data['ref_po_id'],
                             'ref_product_id' => $productionOrder?->product_id ?? null,
                         ]);
