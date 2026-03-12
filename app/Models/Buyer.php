@@ -16,6 +16,7 @@ class Buyer extends Model
         'address',
         'phone',
         'receivable_account_id',
+        'eu_factory_number',
     ];
 
     public function receivableAccount()

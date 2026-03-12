@@ -18,7 +18,7 @@ class SalesOrderController extends Controller
     {
         try {
             $query = SalesOrder::with([
-                    'buyer:id,name,address',
+                    'buyer:id,name,address,eu_factory_number',
                     'user:id,name',
                     'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
                     'details.item:id,name'
@@ -116,7 +116,7 @@ class SalesOrderController extends Controller
 
             DB::commit();
 
-            $salesOrder->load(['buyer:id,name,address', 'user:id,name', 'details.item']);
+            $salesOrder->load(['buyer:id,name,address,eu_factory_number', 'user:id,name', 'details.item']);
 
             return response()->json([
                 'success' => true,
@@ -140,7 +140,7 @@ class SalesOrderController extends Controller
     public function getOpenSalesOrders(Request $request)
     {
         try {
-            $query = SalesOrder::with(['buyer:id,name,address', 'user:id,name', 'details' => function($q){
+            $query = SalesOrder::with(['buyer:id,name,address,eu_factory_number', 'user:id,name', 'details' => function($q){
                 $q->whereColumn('quantity', '>', 'quantity_shipped');
             }, 'details.item:id,name,code,stock,unit_id', 'details.item.unit:id,name'])
             ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
@@ -296,7 +296,7 @@ class SalesOrderController extends Controller
 
             DB::commit();
 
-            $salesOrder->load(['buyer:id,name,address', 'user:id,name', 'details.item']);
+            $salesOrder->load(['buyer:id,name,address,eu_factory_number', 'user:id,name', 'details.item']);
 
             return response()->json([
                 'success' => true,
