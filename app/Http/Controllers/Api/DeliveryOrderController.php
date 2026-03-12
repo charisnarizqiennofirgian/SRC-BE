@@ -133,10 +133,9 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
 
-                $inventory = Inventory::where('item_id', $detail['item_id'])
-                    ->where('warehouse_id', $packingWarehouseId)
-                    ->first();
-                $currentStock = $inventory ? (float) $inventory->qty_pcs : 0;
+               $currentStock = (float) Inventory::where('item_id', $detail['item_id'])
+    ->where('warehouse_id', $packingWarehouseId)
+    ->sum('qty_pcs');
 
                 if ($currentStock < $detail['quantity_shipped']) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
