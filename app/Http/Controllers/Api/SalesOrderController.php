@@ -162,7 +162,7 @@ class SalesOrderController extends Controller
                         ->where('warehouse_id', $packingWarehouseId)
                         ->first();
 
-                    $detail->current_stock = $inventory ? (float) $inventory->qty : 0;
+                    $detail->current_stock = $inventory ? (float) $inventory->qty_pcs : 0;
 
                     return $detail;
                 });
