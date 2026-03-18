@@ -89,14 +89,8 @@ class ProductionOrderController extends Controller
             $mainTarget = $po->details->first();
             $productName = $mainTarget?->item?->name ?? null;
 
-            // ✅ FORMAT PANJANG UNTUK SEMUA MENU
+            // ✅ FORMAT STANDAR (Produksi - Buyer - SO) ATAU SESUAI PO_NUMBER
             $label = $po->po_number;
-            if ($buyerName) {
-                $label .= ' - ' . $buyerName;
-            }
-            if ($soNumber) {
-                $label .= ' - ' . $soNumber;
-            }
 
             return [
                 'id'             => $po->id,
@@ -179,7 +173,8 @@ class ProductionOrderController extends Controller
     public function storeFromSalesOrder(Request $request, SalesOrder $salesOrder)
     {
         return DB::transaction(function () use ($request, $salesOrder) {
-            $poNumber = 'PO-' . $salesOrder->id . '-' . now()->format('YmdHis');
+            $salesOrder->load('buyer');
+            $poNumber = 'Produksi - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
 
             // Buat Production Order
             $productionOrder = ProductionOrder::create([

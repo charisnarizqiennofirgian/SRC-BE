@@ -21,7 +21,7 @@ class SalesOrderController extends Controller
                 'buyer:id,name,address,eu_factory_number',
                 'user:id,name',
                 'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
-                'details.item:id,name'
+                'details.item:id,name,hs_code,nw_per_box,gw_per_box,m3_per_carton,wood_consumed_per_pcs'
             ])
                 ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
 
@@ -155,7 +155,7 @@ class SalesOrderController extends Controller
                 'details' => function ($q) {
                     $q->whereColumn('quantity', '>', 'quantity_shipped');
                 },
-                'details.item:id,name,code,stock,unit_id',
+                'details.item:id,name,code,stock,unit_id,hs_code,nw_per_box,gw_per_box,m3_per_carton,wood_consumed_per_pcs',
                 'details.item.unit:id,name'
             ])
                 ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')

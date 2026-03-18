@@ -15,6 +15,8 @@ use App\Models\Inventory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class DeliveryOrderController extends Controller
 {
@@ -61,7 +63,7 @@ class DeliveryOrderController extends Controller
                 ->orderBy('id', 'desc')
                 ->first();
             $nextNumber = $lastDO ? (intval(substr($lastDO->do_number, -4)) + 1) : 1;
-            $doNumber = 'DO/' . date('Y') . '/' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+            $doNumber = 'DO-' . date('Y') . '-' . date('m') . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
 
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
@@ -88,7 +90,7 @@ class DeliveryOrderController extends Controller
                 'do_number' => $doNumber,
                 'sales_order_id' => $request->sales_order_id,
                 'buyer_id' => $request->buyer_id,
-                'user_id' => auth()->id(),
+                'user_id' => Auth::id(),
                 'delivery_date' => $request->delivery_date,
                 'driver_name' => $request->driver_name,
                 'vehicle_number' => $request->vehicle_number,
@@ -252,6 +254,7 @@ class DeliveryOrderController extends Controller
                 
                 $remaining = $detail->quantity_shipped;
                 foreach ($inventories as $inv) {
+                    /** @var Inventory $inv */
                     if ($remaining <= 0) break;
                     $toTake = min($remaining, $inv->qty_pcs);
                     $inv->decrement('qty_pcs', $toTake);
@@ -277,7 +280,7 @@ class DeliveryOrderController extends Controller
                     'reference_id' => $deliveryOrder->id,
                     'reference_number' => $deliveryOrder->do_number,
                     'notes' => "Pengiriman ke " . $deliveryOrder->buyer->name,
-                    'user_id' => auth()->id(),
+                    'user_id' => Auth::id(),
                 ]);
 
                 $soDetail = SalesOrderDetail::find($detail->sales_order_detail_id);
@@ -383,7 +386,7 @@ class DeliveryOrderController extends Controller
 
             return response()->json($deliveryOrders);
         } catch (\Exception $e) {
-            \Log::error('Error fetching available DOs: ' . $e->getMessage());
+            Log::error('Error fetching available DOs: ' . $e->getMessage());
             return response()->json(['message' => 'Error fetching delivery orders'], 500);
         }
     }

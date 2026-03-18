@@ -22,7 +22,7 @@ class PembahananController extends Controller
     {
         // Hanya ambil PO yang TIDAK skip sawmill
         $pos = ProductionOrder::where('status', 'released')
-            ->where('current_stage', 'pembahanan')
+            ->whereIn('current_stage', ['pembahanan', 'sawmill'])
             ->with(['salesOrder'])
             ->get()
             ->map(function ($po) {
@@ -32,7 +32,7 @@ class PembahananController extends Controller
                     'sales_order_id' => $po->sales_order_id,
                     'buyer_name' => $po->salesOrder->buyer_name ?? '-',
                     'so_number' => $po->salesOrder->so_number ?? '-',
-                    'label' => "{$po->po_number} - " . ($po->salesOrder->buyer_name ?? '-'),
+                    'label' => $po->po_number,
                 ];
             });
 

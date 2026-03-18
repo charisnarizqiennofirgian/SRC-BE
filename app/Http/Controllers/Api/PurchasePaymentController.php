@@ -125,7 +125,8 @@ class PurchasePaymentController extends Controller
             'purchase_bill_id' => 'required|exists:purchase_bills,id',
             'payment_date' => 'required|date',
             'amount' => 'required|numeric|min:1',
-            'payment_method_id' => 'required|exists:payment_methods,id',
+            'payment_method_id' => 'nullable|exists:payment_methods,id',
+            'account_id' => 'required|exists:chart_of_accounts,id',
             'notes' => 'nullable|string|max:500',
         ]);
 

@@ -49,7 +49,6 @@ class SalesOrderDetail extends Model
     
     public function item()
     {
-        
-        return $this->belongsTo(Item::class)->select('id', 'name', 'code', 'stock');
+        return $this->belongsTo(Item::class)->select('id', 'name', 'code', 'unit_id', 'hs_code', 'nw_per_box', 'gw_per_box', 'm3_per_carton', 'wood_consumed_per_pcs');
     }
 }

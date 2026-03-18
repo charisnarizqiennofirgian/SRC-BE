@@ -23,7 +23,7 @@ class PaymentService
             Log::info('=== MULAI PROSES PEMBAYARAN ===');
 
             // 1. Load Purchase Bill
-            $bill = PurchaseBill::with(['supplier', 'paymentMethod'])
+            $bill = PurchaseBill::with(['supplier'])
                                 ->findOrFail($data['purchase_bill_id']);
 
             Log::info('Purchase Bill:', [
@@ -47,7 +47,7 @@ class PaymentService
                 'payment_number' => PurchasePayment::generatePaymentNumber(),
                 'payment_date' => $data['payment_date'],
                 'amount' => $data['amount'],
-                'payment_method_id' => $data['payment_method_id'],
+                'payment_method_id' => $data['payment_method_id'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'created_by' => Auth::id(),
             ]);
@@ -83,7 +83,7 @@ class PaymentService
             ]);
 
             // 5. Buat Jurnal Otomatis
-            $journal = $this->createPaymentJournal($payment, $bill);
+            $journal = $this->createPaymentJournal($payment, $bill, $data);
 
             // 6. Link jurnal ke payment
             $payment->update(['journal_entry_id' => $journal->id]);
@@ -97,7 +97,7 @@ class PaymentService
     /**
      * Buat jurnal pembayaran hutang
      */
-    private function createPaymentJournal(PurchasePayment $payment, PurchaseBill $bill): JournalEntry
+    private function createPaymentJournal(PurchasePayment $payment, PurchaseBill $bill, array $data): JournalEntry
     {
         Log::info('=== MULAI BUAT JURNAL PEMBAYARAN ===');
 
@@ -143,22 +143,24 @@ class PaymentService
         ]);
 
         // 3. KREDIT: Bank/Kas (Uang Keluar)
-        $kasAccountId = $payment->paymentMethod->account_id;
+        $kasAccountId = $data['account_id'] ?? null;
 
         if (!$kasAccountId) {
-            throw new \Exception('Payment Method tidak memiliki akun COA!');
+            throw new \Exception('Akun COA tidak dipilih!');
         }
+
+        $kasAccount = \App\Models\ChartOfAccount::find($kasAccountId);
 
         JournalEntryLine::create([
             'journal_entry_id' => $journal->id,
             'account_id' => $kasAccountId,
-            'description' => "Pembayaran via {$payment->paymentMethod->name}",
+            'description' => "Pembayaran via " . ($kasAccount->name ?? '-'),
             'debit' => 0,
             'credit' => $payment->amount,
         ]);
 
         Log::info('Credit Line Created:', [
-            'account' => $payment->paymentMethod->name,
+            'account' => $kasAccount->name ?? '-',
             'credit' => $payment->amount,
         ]);
 

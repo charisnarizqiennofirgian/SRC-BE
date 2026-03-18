@@ -175,7 +175,7 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                     $oldInventory = Inventory::where('item_id', $item->id)
                         ->where('warehouse_id', $warehouse->id)
                         ->first();
-                    $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
+                    $oldQty = $oldInventory ? (float) (float) $oldInventory->qty_pcs : 0;
 
                     // Update inventory
                     Inventory::updateOrCreate(

@@ -162,7 +162,7 @@ class InvoicePaymentService
 
         $journalEntry = $this->journalService->createJournal(
             date: $payment->payment_date,
-            description: "Pembayaran Invoice - {$invoice->invoice_number}",
+            description: "{$cashAccount->code} - {$buyer->name}",
             entries: $entries,
             referenceType: 'invoice_payment',
             referenceId: $payment->id
@@ -205,7 +205,7 @@ class InvoicePaymentService
 
         $journalEntry = $this->journalService->createJournal(
             date: $payment->payment_date,
-            description: "Pemotongan DP ke Invoice - {$invoice->invoice_number}",
+            description: "{$depositAccount->code} - {$buyer->name}",
             entries: $entries,
             referenceType: 'invoice_payment',
             referenceId: $payment->id
