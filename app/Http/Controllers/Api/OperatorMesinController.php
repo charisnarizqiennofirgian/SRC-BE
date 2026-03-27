@@ -4,238 +4,358 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Inventory;
-use App\Models\Warehouse;
 use App\Models\InventoryLog;
+use App\Models\Item;
+use App\Models\Machine;
+use App\Models\MesinProduction;
+use App\Models\MesinProductionInput;
+use App\Models\MesinProductionOutput;
+use App\Models\MesinProductionReject;
 use App\Models\ProductionOrder;
+use App\Models\Warehouse;
+use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class OperatorMesinController extends Controller
 {
-    public function produce(Request $request)
-    {
-        Log::info('=== MESIN START ===');
-        Log::info('Payload: ' . json_encode($request->all()));
+    protected ProductionOrderProgressService $poProgress;
 
-        $validator = Validator::make($request->all(), [
-            'production_order_id' => ['required', 'integer', 'exists:production_orders,id'],
-            'materials' => ['required', 'array', 'min:1'],
-            'materials.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'materials.*.qty' => ['required', 'numeric', 'min:0.001'],
-            'components' => ['required', 'array', 'min:1'],
-            'components.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'components.*.qty' => ['required', 'numeric', 'min:0.001'],
+    public function __construct(ProductionOrderProgressService $poProgress)
+    {
+        $this->poProgress = $poProgress;
+    }
+
+    // =============================================
+    // GET: Daftar semua mesin aktif
+    // =============================================
+    public function getMachines()
+    {
+        $machines = Machine::where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code', 'description']);
+
+        return response()->json(['success' => true, 'data' => $machines]);
+    }
+
+    // =============================================
+    // GET: Available POs untuk dropdown
+    // =============================================
+    public function getAvailablePos()
+    {
+        $pos = ProductionOrder::whereIn('current_stage', [
+                'moulding', 'mesin', 'pembahanan', 'sawmill', 'pending'
+            ])
+            ->where('status', '!=', 'completed')
+            ->with(['salesOrder.buyer'])
+            ->get()
+            ->map(function ($po) {
+                return [
+                    'id'         => $po->id,
+                    'po_number'  => $po->po_number,
+                    'label'      => $po->po_number,
+                    'buyer_name' => $po->salesOrder?->buyer?->name ?? '-',
+                    'so_number'  => $po->salesOrder?->so_number ?? '-',
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $pos]);
+    }
+
+    // =============================================
+    // GET: Stok komponen di Gudang S4S
+    // =============================================
+    public function getS4sItems(Request $request)
+    {
+        $warehouseS4S = Warehouse::where('code', 'S4S')->first();
+
+        if (!$warehouseS4S) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $inventories = Inventory::where('warehouse_id', $warehouseS4S->id)
+            ->where('qty_pcs', '>', 0)
+            ->with('item')
+            ->get()
+            ->map(function ($inv) {
+                return [
+                    'id'            => $inv->id,
+                    'item_id'       => $inv->item_id,
+                    'item_code'     => $inv->item?->code ?? '-',
+                    'item_name'     => $inv->item?->name ?? '-',
+                    'qty_available' => (float) $inv->qty_pcs,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $inventories]);
+    }
+
+    // =============================================
+    // POST: Simpan proses mesin
+    // =============================================
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'date'       => ['required', 'date'],
+            'ref_po_id'  => ['required', 'integer', 'exists:production_orders,id'],
+            'machine_id' => ['required', 'integer', 'exists:machines,id'],
+            'notes'      => ['nullable', 'string'],
+
+            // Input: komponen dari Gudang S4S
+            'inputs'           => ['required', 'array', 'min:1'],
+            'inputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'inputs.*.qty'     => ['required', 'numeric', 'min:0.01'],
+
+            // Output: komponen hasil → Gudang Mesin
+            'outputs'           => ['required', 'array', 'min:1'],
+            'outputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'outputs.*.qty'     => ['required', 'numeric', 'min:1'],
+
+            // Reject: opsional
+            'rejects'                => ['nullable', 'array'],
+            'rejects.*.item_id'      => ['required_with:rejects', 'integer', 'exists:items,id'],
+            'rejects.*.qty'          => ['required_with:rejects', 'numeric', 'min:0.01'],
+            'rejects.*.keterangan'   => ['nullable', 'string'],
         ]);
 
-        if ($validator->fails()) {
-            Log::error('Validasi gagal: ' . json_encode($validator->errors()));
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal.',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
+        return DB::transaction(function () use ($data) {
+            Log::info('=== MESIN PRODUCTION START ===', [
+                'po_id'      => $data['ref_po_id'],
+                'machine_id' => $data['machine_id'],
+            ]);
 
-        $data = $validator->validated();
+            // === GUDANG ===
+            $warehouseS4S    = Warehouse::where('code', 'S4S')->first();
+            $warehouseMesin  = Warehouse::where('code', 'MESIN')->first();
+            $warehouseReject = Warehouse::where('code', 'REJECT')->first();
 
-        // Ambil data PO untuk reference
-        $productionOrder = ProductionOrder::find($data['production_order_id']);
-        $poNumber = $productionOrder?->po_number;
-
-        // Ambil warehouse
-        $warehouseMoulding = Warehouse::where('name', 'LIKE', '%Moulding%')->first();
-        $warehouseKomponen = Warehouse::where(function($q) {
-            $q->where('name', 'LIKE', '%Komponen%')
-              ->orWhere('name', 'LIKE', '%Mesin%')
-              ->orWhere('name', 'LIKE', '%Komponen Mesin%');
-        })->first();
-
-        Log::info('Warehouse Moulding: ' . ($warehouseMoulding ? $warehouseMoulding->id . ' - ' . $warehouseMoulding->name : 'NOT FOUND'));
-        Log::info('Warehouse Komponen: ' . ($warehouseKomponen ? $warehouseKomponen->id . ' - ' . $warehouseKomponen->name : 'NOT FOUND'));
-
-        if (!$warehouseMoulding) {
-            Log::error('Gudang Moulding tidak ditemukan!');
-            return response()->json([
-                'success' => false,
-                'message' => 'Gudang Moulding tidak ditemukan di master warehouse!',
-            ], 422);
-        }
-
-        if (!$warehouseKomponen) {
-            Log::error('Gudang Komponen tidak ditemukan!');
-            return response()->json([
-                'success' => false,
-                'message' => 'Gudang Komponen/Mesin tidak ditemukan di master warehouse!',
-            ], 422);
-        }
-
-        $warehouseMouldingId = $warehouseMoulding->id;
-        $warehouseKomponenId = $warehouseKomponen->id;
-
-        DB::beginTransaction();
-
-        try {
-            // STEP 1: Kurangi stok bahan baku (kayu RST)
-            Log::info('--- STEP 1: KURANGI STOK KAYU RST ---');
-
-            foreach ($data['materials'] as $index => $material) {
-                $itemId = $material['item_id'];
-                $qtyUsed = $material['qty'];
-
-                Log::info("Material #{$index}: Item ID {$itemId}, Qty {$qtyUsed}");
-
-                $inventories = Inventory::where('warehouse_id', $warehouseMouldingId)
-                    ->where('item_id', $itemId)
-                    ->where('qty_pcs', '>', 0)
-                    ->lockForUpdate()
-                    ->get();
-
-                Log::info("Found " . $inventories->count() . " inventory rows for item {$itemId}");
-
-                if ($inventories->isEmpty()) {
-                    DB::rollBack();
-                    Log::error("Stok kayu ID {$itemId} tidak ditemukan!");
-                    return response()->json([
-                        'success' => false,
-                        'message' => "Stok kayu ID {$itemId} tidak ditemukan di Gudang Moulding!",
-                    ], 422);
-                }
-
-                $totalAvailable = $inventories->sum('qty_pcs');
-                Log::info("Total stok tersedia: {$totalAvailable}");
-
-                if ($totalAvailable < $qtyUsed) {
-                    DB::rollBack();
-                    $itemName = $inventories->first()->item->name ?? "Item ID {$itemId}";
-                    Log::error("Stok tidak cukup! Tersedia: {$totalAvailable}, Dibutuhkan: {$qtyUsed}");
-                    return response()->json([
-                        'success' => false,
-                        'message' => "Stok {$itemName} tidak cukup! (Tersedia: {$totalAvailable}, Dibutuhkan: {$qtyUsed})",
-                    ], 422);
-                }
-
-                // Kurangi stok
-                $remaining = $qtyUsed;
-                foreach ($inventories as $inventory) {
-                    if ($remaining <= 0) break;
-
-                    $currentQty = $inventory->qty_pcs;
-                    $qtyToTake = min($remaining, $currentQty);
-
-                    if ($inventory->qty_pcs >= $remaining) {
-                        Log::info("Taking {$remaining} pcs from Inventory ID {$inventory->id} (current qty: {$currentQty})");
-                        $inventory->decrement('qty_pcs', $remaining);
-                        Log::info("Inventory ID {$inventory->id} updated to " . ($currentQty - $remaining) . " pcs");
-
-                        // Catat ke inventory_logs (OUT dari Gudang Moulding)
-                        InventoryLog::create([
-                            'date' => now()->toDateString(),
-                            'time' => now()->toTimeString(),
-                            'item_id' => $itemId,
-                            'warehouse_id' => $warehouseMouldingId,
-                            'qty_pcs' => $remaining,
-                            'direction' => 'OUT',
-                            'transaction_type' => 'PRODUCTION',
-                            'reference_type' => 'ProductionOrder',
-                            'reference_id' => $data['production_order_id'],
-                            'reference_number' => $poNumber,
-                            'notes' => "Bahan kayu untuk proses Mesin/Komponen",
-                            'user_id' => Auth::id(),
-                        ]);
-
-                        $remaining = 0;
-                    } else {
-                        Log::info("Taking {$inventory->qty_pcs} pcs from Inventory ID {$inventory->id} (current qty: {$currentQty})");
-
-                        // Catat ke inventory_logs (OUT dari Gudang Moulding)
-                        InventoryLog::create([
-                            'date' => now()->toDateString(),
-                            'time' => now()->toTimeString(),
-                            'item_id' => $itemId,
-                            'warehouse_id' => $warehouseMouldingId,
-                            'qty_pcs' => $inventory->qty_pcs,
-                            'direction' => 'OUT',
-                            'transaction_type' => 'PRODUCTION',
-                            'reference_type' => 'ProductionOrder',
-                            'reference_id' => $data['production_order_id'],
-                            'reference_number' => $poNumber,
-                            'notes' => "Bahan kayu untuk proses Mesin/Komponen",
-                            'user_id' => Auth::id(),
-                        ]);
-
-                        $remaining -= $inventory->qty_pcs;
-                        $inventory->update(['qty_pcs' => 0]);
-                        Log::info("Inventory ID {$inventory->id} updated to 0 pcs");
-                    }
-                }
+            if (!$warehouseS4S) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang S4S tidak ditemukan di master.'],
+                ]);
             }
-
-            // STEP 2: Tambah stok komponen
-            Log::info('--- STEP 2: TAMBAH STOK KOMPONEN ---');
-
-            foreach ($data['components'] as $index => $component) {
-                $itemId = $component['item_id'];
-                $qtyProduced = $component['qty'];
-
-                Log::info("Component #{$index}: Item ID {$itemId}, Qty {$qtyProduced}");
-
-                $inventory = Inventory::where('warehouse_id', $warehouseKomponenId)
-                    ->where('item_id', $itemId)
-                    ->where('ref_po_id', $data['production_order_id'])
-                    ->first();
-
-                if ($inventory) {
-                    $oldQty = $inventory->qty_pcs;
-                    $inventory->increment('qty_pcs', $qtyProduced);
-                    Log::info("Inventory ID {$inventory->id} incremented from {$oldQty} to " . ($oldQty + $qtyProduced));
-                } else {
-                    $newInventory = Inventory::create([
-                        'warehouse_id' => $warehouseKomponenId,
-                        'item_id' => $itemId,
-                        'qty_pcs' => $qtyProduced,
-                        'ref_po_id' => $data['production_order_id'],
-                    ]);
-                    Log::info("New Inventory ID {$newInventory->id} created with qty {$qtyProduced}");
-                }
-
-                // Catat ke inventory_logs (IN ke Gudang Komponen/Mesin)
-                InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $itemId,
-                    'warehouse_id' => $warehouseKomponenId,
-                    'qty_pcs' => $qtyProduced,
-                    'direction' => 'IN',
-                    'transaction_type' => 'PRODUCTION',
-                    'reference_type' => 'ProductionOrder',
-                    'reference_id' => $data['production_order_id'],
-                    'reference_number' => $poNumber,
-                    'notes' => "Hasil produksi komponen Mesin",
-                    'user_id' => Auth::id(),
+            if (!$warehouseMesin) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Mesin tidak ditemukan di master.'],
+                ]);
+            }
+            if (!$warehouseReject) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Reject tidak ditemukan di master.'],
                 ]);
             }
 
-            DB::commit();
-            Log::info('=== MESIN END (SUCCESS) ===');
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+            $poNumber        = $productionOrder?->po_number ?? '-';
+            $machine         = Machine::find($data['machine_id']);
+            $machineName     = $machine?->name ?? '-';
+
+            // === NOMOR DOKUMEN ===
+            $runningNumber  = MesinProduction::whereYear('date', now()->year)
+                ->whereMonth('date', now()->month)
+                ->count() + 1;
+            $documentNumber = 'MSN-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+
+            // === SIMPAN HEADER ===
+            $mesinProduction = MesinProduction::create([
+                'document_number' => $documentNumber,
+                'date'            => $data['date'],
+                'ref_po_id'       => $data['ref_po_id'],
+                'machine_id'      => $data['machine_id'],
+                'notes'           => $data['notes'] ?? null,
+                'created_by'      => Auth::id(),
+            ]);
+
+            // === PROSES INPUT (Komponen dari Gudang S4S) ===
+            foreach ($data['inputs'] as $index => $input) {
+                $itemId   = $input['item_id'];
+                $qty      = $input['qty'];
+                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+
+                // Cek & kurangi stok di Gudang S4S
+                $sourceInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $warehouseS4S->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                $availableQty = $sourceInv?->qty_pcs ?? 0;
+
+                if ($availableQty < $qty) {
+                    throw ValidationException::withMessages([
+                        "inputs.{$index}.qty" => [
+                            "'{$itemName}' stok di Gudang S4S tidak cukup. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."
+                        ],
+                    ]);
+                }
+
+                $sourceInv->decrement('qty_pcs', $qty);
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $itemId,
+                    'warehouse_id'     => $warehouseS4S->id,
+                    'qty'              => $qty,
+                    'qty_m3'           => 0,
+                    'direction'        => 'OUT',
+                    'transaction_type' => 'MESIN',
+                    'reference_type'   => 'MesinProduction',
+                    'reference_id'     => $mesinProduction->id,
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Masuk mesin {$machineName} ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                MesinProductionInput::create([
+                    'mesin_production_id' => $mesinProduction->id,
+                    'item_id'             => $itemId,
+                    'qty'                 => $qty,
+                ]);
+
+                Log::info("Input: {$itemName} - {$qty} pcs dari S4S");
+            }
+
+            // === PROSES OUTPUT (Komponen → Gudang Mesin) ===
+            foreach ($data['outputs'] as $output) {
+                $itemId   = $output['item_id'];
+                $qty      = $output['qty'];
+                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+
+                $targetInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $warehouseMesin->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($targetInv) {
+                    $targetInv->increment('qty_pcs', $qty);
+                } else {
+                    Inventory::create([
+                        'item_id'      => $itemId,
+                        'warehouse_id' => $warehouseMesin->id,
+                        'qty_pcs'      => $qty,
+                        'ref_po_id'    => $data['ref_po_id'],
+                    ]);
+                }
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $itemId,
+                    'warehouse_id'     => $warehouseMesin->id,
+                    'qty'              => $qty,
+                    'qty_m3'           => 0,
+                    'direction'        => 'IN',
+                    'transaction_type' => 'MESIN',
+                    'reference_type'   => 'MesinProduction',
+                    'reference_id'     => $mesinProduction->id,
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Hasil mesin {$machineName} masuk Gudang Mesin ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                MesinProductionOutput::create([
+                    'mesin_production_id' => $mesinProduction->id,
+                    'item_id'             => $itemId,
+                    'qty'                 => $qty,
+                ]);
+
+                Log::info("Output: {$itemName} - {$qty} pcs ke Gudang Mesin");
+            }
+
+            // === PROSES REJECT → Gudang Reject ===
+            if (!empty($data['rejects'])) {
+                foreach ($data['rejects'] as $reject) {
+                    if (empty($reject['item_id']) || empty($reject['qty'])) continue;
+
+                    $itemId   = $reject['item_id'];
+                    $qty      = $reject['qty'];
+                    $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+
+                    $rejectInv = Inventory::where('item_id', $itemId)
+                        ->where('warehouse_id', $warehouseReject->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($rejectInv) {
+                        $rejectInv->increment('qty_pcs', $qty);
+                    } else {
+                        Inventory::create([
+                            'item_id'      => $itemId,
+                            'warehouse_id' => $warehouseReject->id,
+                            'qty_pcs'      => $qty,
+                        ]);
+                    }
+
+                    InventoryLog::create([
+                        'date'             => $data['date'],
+                        'time'             => now()->toTimeString(),
+                        'item_id'          => $itemId,
+                        'warehouse_id'     => $warehouseReject->id,
+                        'qty'              => $qty,
+                        'qty_m3'           => 0,
+                        'direction'        => 'IN',
+                        'transaction_type' => 'REJECT',
+                        'reference_type'   => 'MesinProduction',
+                        'reference_id'     => $mesinProduction->id,
+                        'reference_number' => $documentNumber,
+                        'notes'            => "Reject di mesin {$machineName} - {$reject['keterangan']} ({$documentNumber})",
+                        'user_id'          => Auth::id(),
+                    ]);
+
+                    MesinProductionReject::create([
+                        'mesin_production_id' => $mesinProduction->id,
+                        'item_id'             => $itemId,
+                        'qty'                 => $qty,
+                        'machine_id'          => $data['machine_id'],
+                        'keterangan'          => $reject['keterangan'] ?? null,
+                    ]);
+
+                    Log::info("Reject: {$itemName} - {$qty} pcs di mesin {$machineName}");
+                }
+            }
+
+            // === UPDATE STAGE PO ===
+            if ($productionOrder) {
+                $productionOrder->current_stage = 'mesin';
+                $productionOrder->status        = 'in_progress';
+                $productionOrder->save();
+            }
+
+            Log::info('=== MESIN PRODUCTION END ===', ['doc' => $documentNumber]);
 
             return response()->json([
                 'success' => true,
-                'message' => '✅ Hasil produksi berhasil disimpan! Stok RST berkurang, Komponen bertambah.',
-            ]);
+                'message' => "Proses Mesin ({$machineName}) berhasil dicatat ({$documentNumber})",
+                'data'    => [
+                    'id'              => $mesinProduction->id,
+                    'document_number' => $documentNumber,
+                    'machine'         => $machineName,
+                    'total_inputs'    => count($data['inputs']),
+                    'total_outputs'   => count($data['outputs']),
+                    'total_rejects'   => count($data['rejects'] ?? []),
+                ],
+            ], 201);
+        });
+    }
 
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('=== MESIN ERROR ===');
-            Log::error('Error: ' . $e->getMessage());
-            Log::error('Trace: ' . $e->getTraceAsString());
+    // =============================================
+    // POST: Tandai PO selesai proses mesin
+    // =============================================
+    public function tandaiSelesai(Request $request, $poId)
+    {
+        $productionOrder = ProductionOrder::findOrFail($poId);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Error: ' . $e->getMessage(),
-            ], 500);
-        }
+        $productionOrder->update([
+            'current_stage' => 'assembly',
+            'status'        => 'in_progress',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "PO {$productionOrder->po_number} selesai proses Mesin, lanjut ke Assembling.",
+        ]);
     }
 }

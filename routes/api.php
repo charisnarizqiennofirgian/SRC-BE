@@ -261,13 +261,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
 
     // --- PROSES MOULDING ---
-    Route::get('produksi/moulding/source-inventories', [MouldingController::class, 'sourceInventories']);
+    Route::get('produksi/moulding/rst-items', [MouldingController::class, 'getRstItems']);
+    Route::get('produksi/moulding/komponen-items', [MouldingController::class, 'getKomponenItems']);
+    Route::get('produksi/moulding/available-pos', [MouldingController::class, 'getAvailablePos']);
     Route::post('produksi/moulding', [MouldingController::class, 'store']);
+    Route::post('produksi/moulding/{id}/selesai', [MouldingController::class, 'tandaiSelesai']);
 
     // --- OPERATOR MESIN ---
-    Route::post('/operator-mesin/produce', [OperatorMesinController::class, 'produce']);
-    Route::post('/operator-mesin/recipe', [OperatorMesinController::class, 'storeRecipe']);
-    Route::get('/operator-mesin/po/{id}', [OperatorMesinController::class, 'showByPo']);
+    Route::get('/operator-mesin/machines', [OperatorMesinController::class, 'getMachines']);
+    Route::get('/operator-mesin/available-pos', [OperatorMesinController::class, 'getAvailablePos']);
+    Route::get('/operator-mesin/s4s-items', [OperatorMesinController::class, 'getS4sItems']);
+    Route::post('/operator-mesin/store', [OperatorMesinController::class, 'store']);
+    Route::post('/operator-mesin/selesai/{poId}', [OperatorMesinController::class, 'tandaiSelesai']);
 
     // --- GUDANG ---
     Route::get('/warehouses', [WarehouseController::class, 'index']);

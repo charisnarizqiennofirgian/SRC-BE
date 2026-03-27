@@ -3,187 +3,345 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\InventoryLog;
+use App\Models\Item;
+use App\Models\MouldingProduction;
+use App\Models\MouldingProductionInput;
+use App\Models\MouldingProductionOutput;
+use App\Models\MouldingProductionReject;
 use App\Models\ProductionOrder;
+use App\Models\Warehouse;
+use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class MouldingController extends Controller
 {
+    protected ProductionOrderProgressService $poProgress;
+
+    public function __construct(ProductionOrderProgressService $poProgress)
+    {
+        $this->poProgress = $poProgress;
+    }
+
+    // =============================================
+    // GET: Semua item Kayu RST dari master
+    // =============================================
+    public function getRstItems(Request $request)
+    {
+        $category = Category::where('name', 'Kayu RST')->first();
+
+        if (!$category) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $items = Item::where('category_id', $category->id)
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id'             => $item->id,
+                    'code'           => $item->code,
+                    'name'           => $item->name,
+                    'specifications' => $item->specifications,
+                    'volume_m3'      => $item->volume_m3,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $items]);
+    }
+
+    // =============================================
+    // GET: Semua item Komponen dari master
+    // =============================================
+    public function getKomponenItems(Request $request)
+    {
+        // Ambil semua kategori yang bukan Kayu RST, Kayu Log, Produk Jadi
+        $excludeCategories = ['Kayu RST', 'Kayu Log', 'Produk Jadi'];
+
+        $items = Item::whereHas('category', function ($q) use ($excludeCategories) {
+                $q->whereNotIn('name', $excludeCategories);
+            })
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id'       => $item->id,
+                    'code'     => $item->code,
+                    'name'     => $item->name,
+                    'category' => $item->category?->name,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $items]);
+    }
+
+    // =============================================
+    // GET: Available POs untuk dropdown
+    // =============================================
+    public function getAvailablePos(Request $request)
+    {
+        $pos = ProductionOrder::whereIn('current_stage', [
+                'pembahanan', 'moulding', 'sawmill', 'pending'
+            ])
+            ->where('status', '!=', 'completed')
+            ->with(['salesOrder.buyer'])
+            ->get()
+            ->map(function ($po) {
+                return [
+                    'id'         => $po->id,
+                    'po_number'  => $po->po_number,
+                    'label'      => $po->po_number,
+                    'buyer_name' => $po->salesOrder?->buyer?->name ?? '-',
+                    'so_number'  => $po->salesOrder?->so_number ?? '-',
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $pos]);
+    }
+
+    // =============================================
+    // POST: Simpan proses moulding
+    // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
-            'po_id' => ['required', 'integer', 'exists:production_orders,id'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.source_inventory_id' => ['required', 'integer', 'exists:inventories,id'],
-            'items.*.input_qty'           => ['required', 'integer', 'min:1'],
-            'items.*.output_item_id'      => ['required', 'integer', 'exists:items,id'],
-            'items.*.output_qty'          => ['required', 'integer', 'min:1'],
+            'date'       => ['required', 'date'],
+            'ref_po_id'  => ['required', 'integer', 'exists:production_orders,id'],
+            'notes'      => ['nullable', 'string'],
+
+            // Input: RST yang dipakai
+            'inputs'            => ['required', 'array', 'min:1'],
+            'inputs.*.item_id'  => ['required', 'integer', 'exists:items,id'],
+            'inputs.*.qty'      => ['required', 'numeric', 'min:0.01'],
+
+            // Output: Komponen yang dihasilkan
+            'outputs'           => ['required', 'array', 'min:1'],
+            'outputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'outputs.*.qty'     => ['required', 'numeric', 'min:1'],
+
+            // Reject: opsional
+            'rejects'                => ['nullable', 'array'],
+            'rejects.*.item_id'      => ['required_with:rejects', 'integer', 'exists:items,id'],
+            'rejects.*.qty'          => ['required_with:rejects', 'numeric', 'min:0.01'],
+            'rejects.*.reject_type'  => ['required_with:rejects', 'in:moulding,pembahanan'],
+            'rejects.*.keterangan'   => ['nullable', 'string'],
         ]);
 
-        Log::info('=== MOULDING START ===');
-        Log::info('Payload:', $data);
-
         return DB::transaction(function () use ($data) {
-            $poId = $data['po_id'];
-            $results = [];
+            Log::info('=== MOULDING START ===', ['po_id' => $data['ref_po_id']]);
 
-            // Ambil data PO untuk reference
-            $productionOrder = ProductionOrder::find($poId);
-            $poNumber = $productionOrder?->po_number;
+            // === GUDANG ===
+            $warehouseS4S = Warehouse::where('code', 'S4S')->first();
+            $warehouseReject = Warehouse::where('code', 'REJECT')->first();
 
-            foreach ($data['items'] as $index => $itemData) {
-                $sourceInventoryId = $itemData['source_inventory_id'];
-                $inputQty          = $itemData['input_qty'];
-                $outputItemId      = $itemData['output_item_id'];
-                $outputQty         = $itemData['output_qty'];
+            if (!$warehouseS4S) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Moulding S4S tidak ditemukan di master.'],
+                ]);
+            }
+            if (!$warehouseReject) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Reject (REJECT) tidak ditemukan di master.'],
+                ]);
+            }
 
-                Log::info("--- PROCESSING ITEM #{$index} ---");
-                Log::info("Source Inventory ID: {$sourceInventoryId}, Input Qty: {$inputQty}");
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+            $poNumber        = $productionOrder?->po_number ?? '-';
 
-                // 1. Ambil source inventory (Gudang Pembahanan)
-                $sourceInv = Inventory::lockForUpdate()->find($sourceInventoryId);
+            // === NOMOR DOKUMEN ===
+            $runningNumber  = MouldingProduction::whereYear('date', now()->year)
+                ->whereMonth('date', now()->month)
+                ->count() + 1;
+            $documentNumber = 'MLD-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-                if (!$sourceInv) {
-                    throw ValidationException::withMessages([
-                        "items.{$index}.source_inventory_id" => [
-                            "Item #" . ($index + 1) . ": Inventory sumber tidak ditemukan."
-                        ],
-                    ]);
-                }
+            // === SIMPAN HEADER ===
+            $moulding = MouldingProduction::create([
+                'document_number' => $documentNumber,
+                'date'            => $data['date'],
+                'ref_po_id'       => $data['ref_po_id'],
+                'notes'           => $data['notes'] ?? null,
+                'created_by'      => Auth::id(),
+            ]);
 
-                Log::info("Source Inventory ID {$sourceInv->id}: Current qty = {$sourceInv->qty_pcs}");
-
-                if ($inputQty > $sourceInv->qty_pcs) {
-                    throw ValidationException::withMessages([
-                        "items.{$index}.input_qty" => [
-                            "Item #" . ($index + 1) . ": Qty input ({$inputQty} pcs) melebihi stok tersedia ({$sourceInv->qty_pcs} pcs)."
-                        ],
-                    ]);
-                }
-
-                // 2. Kurangi INVENTORY Pembahanan
-                $sourceInv->qty_pcs -= $inputQty;
-                $sourceInv->save();
-
-                Log::info("Source Inventory ID {$sourceInv->id} updated to {$sourceInv->qty_pcs} pcs");
-
-                // Catat ke inventory_logs (OUT dari Gudang Pembahanan)
-                InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $sourceInv->item_id,
-                    'warehouse_id' => $sourceInv->warehouse_id,
-                    'qty_pcs' => $inputQty,
-                    'direction' => 'OUT',
-                    'transaction_type' => 'PRODUCTION',
-                    'reference_type' => 'ProductionOrder',
-                    'reference_id' => $poId,
-                    'reference_number' => $poNumber,
-                    'notes' => "Bahan untuk proses Moulding",
-                    'user_id' => Auth::id(),
+            // === PROSES INPUT (RST yang dipakai) ===
+            // Catatan: RST tidak dikurangi dari gudang tertentu
+            // karena input diambil dari master Kayu RST
+            // yang penting tercatat untuk laporan
+            foreach ($data['inputs'] as $input) {
+                MouldingProductionInput::create([
+                    'moulding_production_id' => $moulding->id,
+                    'item_id'                => $input['item_id'],
+                    'qty'                    => $input['qty'],
                 ]);
 
-                // 3. Tambah / buat INVENTORY Moulding
-                $targetWarehouseId = 5; // Gudang Moulding
+                // Catat inventory log OUT dari Gudang Pembahanan
+                $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
+                if ($bufferWarehouse) {
+                    $inv = Inventory::where('item_id', $input['item_id'])
+                        ->where('warehouse_id', $bufferWarehouse->id)
+                        ->lockForUpdate()
+                        ->first();
 
-                $targetInv = Inventory::where('warehouse_id', $targetWarehouseId)
-                    ->where('item_id', $outputItemId)
-                    ->where('ref_po_id', $poId)
-                    ->where('ref_product_id', $sourceInv->ref_product_id)
+                    if ($inv && $inv->qty_pcs >= $input['qty']) {
+                        $inv->decrement('qty_pcs', $input['qty']);
+                    }
+
+                    InventoryLog::create([
+                        'date'             => $data['date'],
+                        'time'             => now()->toTimeString(),
+                        'item_id'          => $input['item_id'],
+                        'warehouse_id'     => $bufferWarehouse->id,
+                        'qty'              => $input['qty'],
+                        'qty_m3'           => 0,
+                        'direction'        => 'OUT',
+                        'transaction_type' => 'MOULDING',
+                        'reference_type'   => 'MouldingProduction',
+                        'reference_id'     => $moulding->id,
+                        'reference_number' => $documentNumber,
+                        'notes'            => "RST dipakai proses moulding ({$documentNumber})",
+                        'user_id'          => Auth::id(),
+                    ]);
+                }
+
+                Log::info("Input RST: item_id={$input['item_id']}, qty={$input['qty']}");
+            }
+
+            // === PROSES OUTPUT (Komponen) → Gudang S4S ===
+            foreach ($data['outputs'] as $output) {
+                MouldingProductionOutput::create([
+                    'moulding_production_id' => $moulding->id,
+                    'item_id'                => $output['item_id'],
+                    'qty'                    => $output['qty'],
+                ]);
+
+                // Tambah stok di Gudang S4S
+                $inv = Inventory::where('item_id', $output['item_id'])
+                    ->where('warehouse_id', $warehouseS4S->id)
                     ->lockForUpdate()
                     ->first();
 
-                if ($targetInv) {
-                    $oldQty = $targetInv->qty_pcs_pcs;
-                    $targetInv->qty_pcs += $outputQty;
-                    $targetInv->save();
-                    Log::info("Target Inventory ID {$targetInv->id} incremented from {$oldQty} to {$targetInv->qty_pcs}");
+                if ($inv) {
+                    $inv->increment('qty_pcs', $output['qty']);
                 } else {
-                    $targetInv = Inventory::create([
-                        'warehouse_id'   => $targetWarehouseId,
-                        'item_id'        => $outputItemId,
-                        'qty_pcs'        => $outputQty,
-                        'ref_po_id'      => $poId,
-                        'ref_product_id' => $sourceInv->ref_product_id,
+                    Inventory::create([
+                        'item_id'      => $output['item_id'],
+                        'warehouse_id' => $warehouseS4S->id,
+                        'qty_pcs'      => $output['qty'],
+                        'ref_po_id'    => $data['ref_po_id'],
                     ]);
-                    Log::info("New Target Inventory ID {$targetInv->id} created with qty {$outputQty}");
                 }
 
-                // Catat ke inventory_logs (IN ke Gudang Moulding)
                 InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $outputItemId,
-                    'warehouse_id' => $targetWarehouseId,
-                    'qty_pcs' => $outputQty,
-                    'direction' => 'IN',
-                    'transaction_type' => 'PRODUCTION',
-                    'reference_type' => 'ProductionOrder',
-                    'reference_id' => $poId,
-                    'reference_number' => $poNumber,
-                    'notes' => "Hasil proses Moulding (S4S)",
-                    'user_id' => Auth::id(),
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $output['item_id'],
+                    'warehouse_id'     => $warehouseS4S->id,
+                    'qty'              => $output['qty'],
+                    'qty_m3'           => 0,
+                    'direction'        => 'IN',
+                    'transaction_type' => 'MOULDING',
+                    'reference_type'   => 'MouldingProduction',
+                    'reference_id'     => $moulding->id,
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Hasil moulding masuk Gudang S4S ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
                 ]);
 
-                $results[] = [
-                    'item_number'         => $index + 1,
-                    'source_inventory_id' => $sourceInventoryId,
-                    'output_item_id'      => $outputItemId,
-                    'input_qty_processed' => $inputQty,
-                    'output_qty_planned'  => $outputQty,
-                ];
+                Log::info("Output Komponen: item_id={$output['item_id']}, qty={$output['qty']}");
             }
 
-            Log::info('=== MOULDING END ===');
+            // === PROSES REJECT → Gudang Reject ===
+            if (!empty($data['rejects'])) {
+                foreach ($data['rejects'] as $reject) {
+                    if (empty($reject['item_id']) || empty($reject['qty'])) continue;
+
+                    MouldingProductionReject::create([
+                        'moulding_production_id' => $moulding->id,
+                        'item_id'                => $reject['item_id'],
+                        'qty'                    => $reject['qty'],
+                        'reject_type'            => $reject['reject_type'] ?? 'moulding',
+                        'keterangan'             => $reject['keterangan'] ?? null,
+                    ]);
+
+                    // Tambah stok di Gudang Reject
+                    $inv = Inventory::where('item_id', $reject['item_id'])
+                        ->where('warehouse_id', $warehouseReject->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($inv) {
+                        $inv->increment('qty_pcs', $reject['qty']);
+                    } else {
+                        Inventory::create([
+                            'item_id'      => $reject['item_id'],
+                            'warehouse_id' => $warehouseReject->id,
+                            'qty_pcs'      => $reject['qty'],
+                        ]);
+                    }
+
+                    InventoryLog::create([
+                        'date'             => $data['date'],
+                        'time'             => now()->toTimeString(),
+                        'item_id'          => $reject['item_id'],
+                        'warehouse_id'     => $warehouseReject->id,
+                        'qty'              => $reject['qty'],
+                        'qty_m3'           => 0,
+                        'direction'        => 'IN',
+                        'transaction_type' => 'REJECT',
+                        'reference_type'   => 'MouldingProduction',
+                        'reference_id'     => $moulding->id,
+                        'reference_number' => $documentNumber,
+                        'notes'            => "Reject {$reject['reject_type']} - {$reject['keterangan']} ({$documentNumber})",
+                        'user_id'          => Auth::id(),
+                    ]);
+
+                    Log::info("Reject: item_id={$reject['item_id']}, qty={$reject['qty']}, type={$reject['reject_type']}");
+                }
+            }
+
+            // === UPDATE STAGE PO ===
+            if ($productionOrder) {
+                $productionOrder->current_stage = 'moulding';
+                $productionOrder->status        = 'in_progress';
+                $productionOrder->save();
+            }
+
+            Log::info('=== MOULDING END ===', ['doc' => $documentNumber]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Proses Moulding berhasil disimpan untuk ' . count($results) . ' item.',
+                'message' => "Proses Moulding berhasil ({$documentNumber})",
                 'data'    => [
-                    'po_id'           => $poId,
-                    'total_items'     => count($results),
-                    'processed_items' => $results,
+                    'id'              => $moulding->id,
+                    'document_number' => $documentNumber,
+                    'total_inputs'    => count($data['inputs']),
+                    'total_outputs'   => count($data['outputs']),
+                    'total_rejects'   => count($data['rejects'] ?? []),
                 ],
             ], 201);
         });
     }
 
-    public function sourceInventories(Request $request)
+    public function tandaiSelesai(Request $request, $id)
     {
-        $pembahananWarehouseId = 4; // Gudang Pembahanan
+        $productionOrder = ProductionOrder::findOrFail($id);
 
-        $query = Inventory::where('warehouse_id', $pembahananWarehouseId)
-            ->where('qty_pcs', '>', 0)
-            ->with(['item', 'warehouse']);
-
-        if ($request->filled('po_id')) {
-            $query->where('ref_po_id', $request->po_id);
-        }
-
-        $inventories = $query->get(['id', 'warehouse_id', 'item_id', 'qty_pcs', 'ref_po_id', 'ref_product_id']);
-
-        $mapped = $inventories->map(function ($inv) {
-            return [
-                'id'            => $inv->id,
-                'warehouse_id'  => $inv->warehouse_id,
-                'item_id'       => $inv->item_id,
-                'item_name'     => $inv->item->name ?? '',
-                'warehouse'     => $inv->warehouse->name ?? '',
-                'available_qty' => (int) $inv->qty_pcs,
-                'ref_po_id'     => $inv->ref_po_id,
-            ];
-        });
-
-        Log::info('Source Inventories (Gudang Pembahanan):', $mapped->toArray());
+        $productionOrder->update([
+            'current_stage' => 'mesin',
+            'status'        => 'in_progress',
+        ]);
 
         return response()->json([
             'success' => true,
-            'data'    => $mapped,
+            'message' => "PO {$productionOrder->po_number} selesai moulding, lanjut ke proses Mesin.",
         ]);
     }
 }
