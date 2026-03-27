@@ -140,6 +140,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('products', ProductController::class);
 
     Route::post('/materials/import', [MaterialController::class, 'import']);
+    Route::post('/materials/quick-store-rst', [MaterialController::class, 'quickStoreRst']);
     Route::get('/materials/template', [MaterialController::class, 'downloadTemplate']);
     Route::apiResource('materials', MaterialController::class);
 

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use App\Rules\FlexiblePassword;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\Auth;
 
 class UserController extends Controller
 {
@@ -142,7 +143,7 @@ class UserController extends Controller
         $user = User::findOrFail($id);
 
         // Prevent deleting yourself
-        if ($user->id === auth()->id()) {
+        if ($user->id === Auth::id()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Tidak bisa menghapus user sendiri.',

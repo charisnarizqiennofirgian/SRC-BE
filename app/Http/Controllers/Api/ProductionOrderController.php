@@ -49,6 +49,14 @@ class ProductionOrderController extends Controller
             $query->where('status', '!=', $request->status_not);
         }
 
+        // ✅ KHUSUS SAWMILL: filter stage pending atau sawmill saja
+        if ($request->filled('for_sawmill')) {
+            $query->whereIn('current_stage', [
+                ProductionOrder::STAGE_PENDING,
+                ProductionOrder::STAGE_SAWMILL,
+            ]);
+        }
+
         // ✅ FILTER BY CURRENT STAGE (UNTUK MENU MOULDING, ASSEMBLY, DST)
         if ($request->filled('current_stage')) {
             $query->where('current_stage', $request->current_stage);

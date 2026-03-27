@@ -115,137 +115,23 @@ class FinishingController extends Controller
         try {
             $detail = ProductionOrderDetail::with('item', 'productionOrder')->findOrFail($data['production_order_detail_id']);
             $productionOrder = $detail->productionOrder;
-
-            $sourcePriority = ['ASSEMBLING', 'SANDING', 'RUSTIK'];
-
-            if (!empty($data['source_warehouse_id'])) {
-                $specificWarehouse = Warehouse::find($data['source_warehouse_id']);
-                if ($specificWarehouse) {
-                    $sourcePriority = [$specificWarehouse->code];
-                }
-            }
-
             $warehouseFinishing = Warehouse::where('code', 'FINISHING')->firstOrFail();
 
-            $totalAvailable = 0;
-            $stockSources = [];
+            // 1. Get stock sources
+            $stockSources = $this->getStockSources($detail, $data['source_warehouse_id'] ?? null);
 
-            foreach ($sourcePriority as $warehouseCode) {
-                $warehouse = Warehouse::where('code', $warehouseCode)->first();
-                if (!$warehouse) continue;
-
-                $inventories = Inventory::where('warehouse_id', $warehouse->id)
-                    ->where('item_id', $detail->item_id)
-                    ->where('qty_pcs', '>', 0)
-                    ->orderBy('id', 'asc')
-                    ->lockForUpdate()
-                    ->get();
-
-                foreach ($inventories as $inventory) {
-                    if ($inventory->qty_pcs > 0) {
-                        $stockSources[] = [
-                            'warehouse' => $warehouse,
-                            'inventory' => $inventory,
-                            'available' => $inventory->qty_pcs,
-                        ];
-                        $totalAvailable += $inventory->qty_pcs;
-                    }
-                }
+            if ($stockSources['total_available'] < $qtyFinished) {
+                throw new \Exception("Stok {$detail->item->name} tidak cukup! Butuh {$qtyFinished} pcs, tersedia {$stockSources['total_available']} pcs.");
             }
 
-            if ($totalAvailable < $qtyFinished) {
-                throw new \Exception("Stok {$detail->item->name} tidak cukup! Butuh {$qtyFinished} pcs, tersedia {$totalAvailable} pcs.");
-            }
+            // 2. Deduct stock and log movements
+            $usedSources = $this->deductStockAndLog($detail, $productionOrder, $qtyFinished, $stockSources['sources']);
 
-            $remaining = $qtyFinished;
-            $usedSources = [];
+            // 3. Update destination inventory (Finishing)
+            $this->updateFinishingInventory($detail, $productionOrder, $qtyFinished, $warehouseFinishing);
 
-            foreach ($stockSources as $source) {
-                if ($remaining <= 0) break;
-
-                $toTake = min($remaining, $source['available']);
-
-                $source['inventory']->decrement('qty_pcs', $toTake);
-
-                InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $detail->item_id,
-                    'warehouse_id' => $source['warehouse']->id,
-                    'qty' => $toTake,
-                    'direction' => 'OUT',
-                    'transaction_type' => 'TRANSFER_OUT',
-                    'reference_type' => 'ProductionOrder',
-                    'reference_id' => $productionOrder->id,
-                    'reference_number' => $productionOrder->po_number,
-                    'notes' => "Transfer ke Finishing dari {$source['warehouse']->name}",
-                    'user_id' => Auth::id(),
-                ]);
-
-                if (!isset($usedSources[$source['warehouse']->id])) {
-                    $usedSources[$source['warehouse']->id] = [
-                        'warehouse_id' => $source['warehouse']->id,
-                        'warehouse_name' => $source['warehouse']->name,
-                        'qty_pcs' => 0,
-                    ];
-                }
-                $usedSources[$source['warehouse']->id]['qty_pcs'] += $toTake;
-
-                $remaining -= $toTake;
-            }
-
-            $inventoryFinishing = Inventory::where('warehouse_id', $warehouseFinishing->id)
-                ->where('item_id', $detail->item_id)
-                ->where('ref_po_id', $productionOrder->id)
-                ->first();
-
-            if ($inventoryFinishing) {
-                $inventoryFinishing->increment('qty_pcs', $qtyFinished);
-            } else {
-                Inventory::create([
-                    'warehouse_id' => $warehouseFinishing->id,
-                    'item_id' => $detail->item_id,
-                    'qty_pcs' => $qtyFinished,
-                    'qty_m3' => 0,
-                    'ref_po_id' => $productionOrder->id,
-                    'ref_product_id' => $detail->item_id,
-                ]);
-            }
-
-            InventoryLog::create([
-                'date' => now()->toDateString(),
-                'time' => now()->toTimeString(),
-                'item_id' => $detail->item_id,
-                'warehouse_id' => $warehouseFinishing->id,
-                'qty' => $qtyFinished,
-                'direction' => 'IN',
-                'transaction_type' => 'TRANSFER_IN',
-                'reference_type' => 'ProductionOrder',
-                'reference_id' => $productionOrder->id,
-                'reference_number' => $productionOrder->po_number,
-                'notes' => "Hasil proses Finishing",
-                'user_id' => Auth::id(),
-            ]);
-
-            $usedSourcesArray = array_values($usedSources);
-            $sourcesText = collect($usedSourcesArray)->map(function($s) {
-                return "{$s['qty_pcs']} dari {$s['warehouse_name']}";
-            })->implode(', ');
-
-            ProductionLog::create([
-                'date' => now(),
-                'reference_number' => $productionOrder->po_number,
-                'process_type' => 'finishing',
-                'stage' => 'finishing',
-                'source_warehouse_id' => $usedSourcesArray[0]['warehouse_id'] ?? null,
-                'destination_warehouse_id' => $warehouseFinishing->id,
-                'input_item_id' => $detail->item_id,
-                'input_quantity' => $qtyFinished,
-                'output_item_id' => $detail->item_id,
-                'output_quantity' => $qtyFinished,
-                'notes' => "Finishing {$qtyFinished} pcs {$detail->item->name} ({$sourcesText})",
-                'user_id' => Auth::id(),
-            ]);
+            // 4. Create Production Log
+            $this->logProduction($detail, $productionOrder, $qtyFinished, $usedSources, $warehouseFinishing);
 
             DB::commit();
 
@@ -254,7 +140,7 @@ class FinishingController extends Controller
                 'message' => '✅ Proses Finishing berhasil!',
                 'data' => [
                     'qty_finished' => $qtyFinished,
-                    'sources_used' => $usedSourcesArray,
+                    'sources_used' => array_values($usedSources),
                     'destination' => $warehouseFinishing->name,
                 ],
             ]);
@@ -267,5 +153,149 @@ class FinishingController extends Controller
                 'message' => 'Error: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function getStockSources($detail, $sourceWarehouseId = null)
+    {
+        $sourcePriority = ['ASSEMBLING', 'SANDING', 'RUSTIK'];
+
+        if (!empty($sourceWarehouseId)) {
+            $specificWarehouse = Warehouse::find($sourceWarehouseId);
+            if ($specificWarehouse) {
+                $sourcePriority = [$specificWarehouse->code];
+            }
+        }
+
+        $totalAvailable = 0;
+        $sources = [];
+
+        foreach ($sourcePriority as $warehouseCode) {
+            $warehouse = Warehouse::where('code', $warehouseCode)->first();
+            if (!$warehouse) continue;
+
+            $inventories = Inventory::where('warehouse_id', $warehouse->id)
+                ->where('item_id', $detail->item_id)
+                ->where('qty_pcs', '>', 0)
+                ->orderBy('id', 'asc')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($inventories as $inventory) {
+                $sources[] = [
+                    'warehouse' => $warehouse,
+                    'inventory' => $inventory,
+                    'available' => $inventory->qty_pcs,
+                ];
+                $totalAvailable += $inventory->qty_pcs;
+            }
+        }
+
+        return [
+            'total_available' => $totalAvailable,
+            'sources' => $sources,
+        ];
+    }
+
+    private function deductStockAndLog($detail, $productionOrder, $qtyFinished, $sources)
+    {
+        $remaining = $qtyFinished;
+        $usedSources = [];
+
+        foreach ($sources as $source) {
+            if ($remaining <= 0) break;
+
+            $toTake = min($remaining, $source['available']);
+
+            /** @var \App\Models\Inventory $inventory */
+            $inventory = $source['inventory'];
+            $inventory->decrement('qty_pcs', $toTake);
+
+            InventoryLog::create([
+                'date' => now()->toDateString(),
+                'time' => now()->toTimeString(),
+                'item_id' => $detail->item_id,
+                'warehouse_id' => $source['warehouse']->id,
+                'qty' => $toTake,
+                'direction' => 'OUT',
+                'transaction_type' => 'TRANSFER_OUT',
+                'reference_type' => 'ProductionOrder',
+                'reference_id' => $productionOrder->id,
+                'reference_number' => $productionOrder->po_number,
+                'notes' => "Transfer ke Finishing dari {$source['warehouse']->name}",
+                'user_id' => Auth::id(),
+            ]);
+
+            if (!isset($usedSources[$source['warehouse']->id])) {
+                $usedSources[$source['warehouse']->id] = [
+                    'warehouse_id' => $source['warehouse']->id,
+                    'warehouse_name' => $source['warehouse']->name,
+                    'qty_pcs' => 0,
+                ];
+            }
+            $usedSources[$source['warehouse']->id]['qty_pcs'] += $toTake;
+
+            $remaining -= $toTake;
+        }
+
+        return $usedSources;
+    }
+
+    private function updateFinishingInventory($detail, $productionOrder, $qtyFinished, $warehouseFinishing)
+    {
+        $inventoryFinishing = Inventory::where('warehouse_id', $warehouseFinishing->id)
+            ->where('item_id', $detail->item_id)
+            ->where('ref_po_id', $productionOrder->id)
+            ->first();
+
+        if ($inventoryFinishing) {
+            $inventoryFinishing->increment('qty_pcs', $qtyFinished);
+        } else {
+            Inventory::create([
+                'warehouse_id' => $warehouseFinishing->id,
+                'item_id' => $detail->item_id,
+                'qty_pcs' => $qtyFinished,
+                'qty_m3' => 0,
+                'ref_po_id' => $productionOrder->id,
+                'ref_product_id' => $detail->item_id,
+            ]);
+        }
+
+        InventoryLog::create([
+            'date' => now()->toDateString(),
+            'time' => now()->toTimeString(),
+            'item_id' => $detail->item_id,
+            'warehouse_id' => $warehouseFinishing->id,
+            'qty' => $qtyFinished,
+            'direction' => 'IN',
+            'transaction_type' => 'TRANSFER_IN',
+            'reference_type' => 'ProductionOrder',
+            'reference_id' => $productionOrder->id,
+            'reference_number' => $productionOrder->po_number,
+            'notes' => "Hasil proses Finishing",
+            'user_id' => Auth::id(),
+        ]);
+    }
+
+    private function logProduction($detail, $productionOrder, $qtyFinished, $usedSources, $warehouseFinishing)
+    {
+        $usedSourcesArray = array_values($usedSources);
+        $sourcesText = collect($usedSourcesArray)->map(function($s) {
+            return "{$s['qty_pcs']} dari {$s['warehouse_name']}";
+        })->implode(', ');
+
+        ProductionLog::create([
+            'date' => now(),
+            'reference_number' => $productionOrder->po_number,
+            'process_type' => 'finishing',
+            'stage' => 'finishing',
+            'source_warehouse_id' => $usedSourcesArray[0]['warehouse_id'] ?? null,
+            'destination_warehouse_id' => $warehouseFinishing->id,
+            'input_item_id' => $detail->item_id,
+            'input_quantity' => $qtyFinished,
+            'output_item_id' => $detail->item_id,
+            'output_quantity' => $qtyFinished,
+            'notes' => "Finishing {$qtyFinished} pcs {$detail->item->name} ({$sourcesText})",
+            'user_id' => Auth::id(),
+        ]);
     }
 }

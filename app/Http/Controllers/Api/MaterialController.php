@@ -804,4 +804,73 @@ class MaterialController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Quick store item Kayu RST baru dari form Sawmill
+     */
+    public function quickStoreRst(Request $request)
+    {
+        $data = $request->validate([
+            'nama_dasar'  => ['required', 'string', 'max:255'],
+            'kode_barang' => ['nullable', 'string', 'max:100', 'unique:items,code'],
+            'tebal_mm'    => ['required', 'numeric', 'min:0'],
+            'lebar_mm'    => ['nullable', 'numeric', 'min:0'],
+            'panjang_mm'  => ['nullable', 'numeric', 'min:0'],
+            'jenis'       => ['nullable', 'string', 'max:100'],
+            'kualitas'    => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $categoryKayu = \App\Models\Category::firstOrCreate(
+            ['name' => 'Kayu RST'],
+            ['description' => 'Bahan Baku Kayu RST']
+        );
+
+        $defaultUnit = \App\Models\Unit::firstOrCreate(
+            ['name' => 'Pieces'],
+            ['short_name' => 'PCS']
+        );
+
+        // Auto-generate nama unik
+        $t = $data['tebal_mm'];
+        $l = $data['lebar_mm'] ?? 0;
+        $p = $data['panjang_mm'] ?? 0;
+        $uniqueName = trim($data['nama_dasar']) . " {$t}x{$l}x{$p}";
+
+        // Auto-generate kode jika tidak diisi
+        $kode = $data['kode_barang'] ?? 'RST-' . strtoupper(substr(md5($uniqueName . now()), 0, 8));
+
+        // Hitung volume m3 (dimensi dalam mm, dibagi 1 miliar)
+        $volumeM3 = ($t > 0 && $l > 0 && $p > 0)
+            ? round(($t * $l * $p) / 1_000_000_000, 6)
+            : 0;
+
+        $item = \App\Models\Item::create([
+            'name'           => $uniqueName,
+            'code'           => $kode,
+            'category_id'    => $categoryKayu->id,
+            'unit_id'        => $defaultUnit->id,
+            'volume_m3'      => $volumeM3,
+            'kubikasi'       => $volumeM3,
+            'jenis'          => $data['jenis'] ?? null,
+            'specifications' => [
+                't'          => $t,
+                'l'          => $l,
+                'p'          => $p,
+                'm3_per_pcs' => $volumeM3,
+            ],
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Item RST '{$uniqueName}' berhasil ditambahkan.",
+            'data' => [
+                'id'       => $item->id,
+                'code'     => $item->code,
+                'name'     => $item->name,
+                'label'    => "{$item->code} - {$item->name}",
+                'volume_m3'=> $item->volume_m3,
+                'specifications' => $item->specifications,
+            ],
+        ], 201);
+    }
 }
