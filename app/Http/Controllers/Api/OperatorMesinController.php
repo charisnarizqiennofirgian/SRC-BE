@@ -46,10 +46,7 @@ class OperatorMesinController extends Controller
     // =============================================
     public function getAvailablePos()
     {
-        $pos = ProductionOrder::whereIn('current_stage', [
-                'moulding', 'mesin', 'pembahanan', 'sawmill', 'pending'
-            ])
-            ->where('status', '!=', 'completed')
+        $pos = ProductionOrder::where('status', '!=', 'completed')
             ->with(['salesOrder.buyer'])
             ->get()
             ->map(function ($po) {

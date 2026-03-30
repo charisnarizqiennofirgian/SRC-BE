@@ -88,10 +88,7 @@ class MouldingController extends Controller
     // =============================================
     public function getAvailablePos(Request $request)
     {
-        $pos = ProductionOrder::whereIn('current_stage', [
-                'pembahanan', 'moulding', 'sawmill', 'pending'
-            ])
-            ->where('status', '!=', 'completed')
+        $pos = ProductionOrder::where('status', '!=', 'completed')
             ->with(['salesOrder.buyer'])
             ->get()
             ->map(function ($po) {

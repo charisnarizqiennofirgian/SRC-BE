@@ -31,9 +31,9 @@ class PembahananController extends Controller
     // =============================================
     public function getAvailableProductionOrders(Request $request)
     {
-        $pos = ProductionOrder::whereIn('current_stage', ['sawmill', 'pembahanan', 'pending'])
-            ->where('status', '!=', 'completed')
+        $pos = ProductionOrder::where('status', '!=', 'completed')
             ->with(['salesOrder.buyer'])
+            ->orderByDesc('created_at')
             ->get()
             ->map(function ($po) {
                 return [
