@@ -3,270 +3,144 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ProductionOrder;
-use App\Models\ProductionOrderDetail;
-use App\Models\ProductionLog;
 use App\Models\Inventory;
-use App\Models\Warehouse;
 use App\Models\InventoryLog;
+use App\Models\Item;
+use App\Models\ProductionOrder;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class SandingController extends Controller
 {
-    public function getAvailableStock(Request $request)
+    public function sourceItems(Request $request)
     {
-        $productionOrderId = $request->input('production_order_id');
-
-        if (!$productionOrderId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'production_order_id diperlukan',
-            ], 400);
-        }
-
-        $po = ProductionOrder::with('details.item')->findOrFail($productionOrderId);
-
-        $sourcePriority = ['ASSEMBLING'];
-
-        $stocks = [];
-
-        foreach ($po->details as $detail) {
-            $totalAvailable = 0;
-            $sourceDetails = [];
-
-            foreach ($sourcePriority as $warehouseCode) {
-                $warehouse = Warehouse::where('code', $warehouseCode)->first();
-                if (!$warehouse) continue;
-
-                $available = Inventory::where('warehouse_id', $warehouse->id)
-                    ->where('item_id', $detail->item_id)
-                    ->sum('qty_pcs');
-
-                $sourceDetails[] = [
-                    'warehouse_code' => $warehouse->code,
-                    'warehouse_name' => $warehouse->name,
-                    'stock_available' => $available,
-                ];
-
-                $totalAvailable += $available;
-            }
-
-            $stocks[] = [
-                'detail_id' => $detail->id,
-                'item_id' => $detail->item_id,
-                'item_name' => $detail->item->name,
-                'qty_planned' => $detail->qty_planned,
-                'qty_produced' => $detail->qty_produced,
-                'total_stock_available' => $totalAvailable,
-                'source_details' => $sourceDetails,
-            ];
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => $stocks,
+        $request->validate([
+            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
         ]);
+
+        $inventories = Inventory::where('warehouse_id', $request->warehouse_id)
+            ->where('qty_pcs', '>', 0)
+            ->with('item')
+            ->get()
+            ->map(function ($inv) {
+                return [
+                    'item_id'       => $inv->item_id,
+                    'item_code'     => $inv->item?->code ?? '-',
+                    'item_name'     => $inv->item?->name ?? '-',
+                    'qty_available' => (float) $inv->qty_pcs,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $inventories]);
     }
 
-    public function process(Request $request)
+    public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'production_order_detail_id' => ['required', 'integer', 'exists:production_order_details,id'],
-            'qty_sanded' => ['required', 'numeric', 'min:0.001'],
+        $data = $request->validate([
+            'date'                => ['required', 'date'],
+            'ref_po_id'           => ['required', 'integer', 'exists:production_orders,id'],
+            'source_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            'notes'               => ['nullable', 'string'],
+            'items'               => ['required', 'array', 'min:1'],
+            'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
+            'items.*.qty'         => ['required', 'numeric', 'min:1'],
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal.',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
+        return DB::transaction(function () use ($data) {
+            Log::info('=== SANDING START ===', ['po_id' => $data['ref_po_id']]);
 
-        $data = $validator->validated();
-        $qtySanded = $data['qty_sanded'];
+            $sourceWarehouse  = Warehouse::find($data['source_warehouse_id']);
+            $targetWarehouse  = Warehouse::where('code', 'SANDING')->first();
 
-        DB::beginTransaction();
-
-        try {
-            $detail = ProductionOrderDetail::with('item', 'productionOrder')->findOrFail($data['production_order_detail_id']);
-            $productionOrder = $detail->productionOrder;
-            $warehouseSanding = Warehouse::where('code', 'SANDING')->firstOrFail();
-
-            // 1. Get stock sources
-            $stockSources = $this->getStockSources($detail);
-
-            if ($stockSources['total_available'] < $qtySanded) {
-                throw new \Exception("Stok {$detail->item->name} tidak cukup! Butuh {$qtySanded} pcs, tersedia {$stockSources['total_available']} pcs.");
+            if (!$targetWarehouse) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Sanding tidak ditemukan.'],
+                ]);
             }
 
-            // 2. Deduct stock and log movements
-            $usedSources = $this->deductStockAndLog($detail, $productionOrder, $qtySanded, $stockSources['sources']);
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+            $poNumber        = $productionOrder?->po_number ?? '-';
+            $sourceName      = $sourceWarehouse?->name ?? '-';
 
-            // 3. Update destination inventory (Sanding)
-            $this->updateSandingInventory($detail, $productionOrder, $qtySanded, $warehouseSanding);
+            $runningNumber  = InventoryLog::where('transaction_type', 'SANDING')
+                ->whereYear('date', now()->year)
+                ->whereMonth('date', now()->month)
+                ->where('direction', 'OUT')
+                ->count() + 1;
+            $documentNumber = 'SND-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            // 4. Create Production Log
-            $this->logProduction($detail, $productionOrder, $qtySanded, $usedSources, $warehouseSanding);
+            foreach ($data['items'] as $index => $item) {
+                $itemId   = $item['item_id'];
+                $qty      = $item['qty'];
+                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-            DB::commit();
+                $sourceInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $data['source_warehouse_id'])
+                    ->lockForUpdate()->first();
+
+                $availableQty = $sourceInv?->qty_pcs ?? 0;
+
+                if ($availableQty < $qty) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.qty" => [
+                            "'{$itemName}' stok di {$sourceName} tidak cukup. Tersedia: {$availableQty} pcs."
+                        ],
+                    ]);
+                }
+
+                $sourceInv->decrement('qty_pcs', $qty);
+
+                InventoryLog::create([
+                    'date' => $data['date'], 'time' => now()->toTimeString(),
+                    'item_id' => $itemId, 'warehouse_id' => $data['source_warehouse_id'],
+                    'qty' => $qty, 'qty_m3' => 0, 'direction' => 'OUT',
+                    'transaction_type' => 'SANDING', 'reference_type' => 'Sanding',
+                    'reference_number' => $documentNumber,
+                    'notes' => "Masuk Sanding dari {$sourceName} ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id' => Auth::id(),
+                ]);
+
+                $targetInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $targetWarehouse->id)
+                    ->lockForUpdate()->first();
+
+                if ($targetInv) {
+                    $targetInv->increment('qty_pcs', $qty);
+                } else {
+                    Inventory::create([
+                        'item_id' => $itemId, 'warehouse_id' => $targetWarehouse->id,
+                        'qty_pcs' => $qty, 'ref_po_id' => $data['ref_po_id'],
+                    ]);
+                }
+
+                InventoryLog::create([
+                    'date' => $data['date'], 'time' => now()->toTimeString(),
+                    'item_id' => $itemId, 'warehouse_id' => $targetWarehouse->id,
+                    'qty' => $qty, 'qty_m3' => 0, 'direction' => 'IN',
+                    'transaction_type' => 'SANDING', 'reference_type' => 'Sanding',
+                    'reference_number' => $documentNumber,
+                    'notes' => "Hasil Sanding masuk Gudang Sanding ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id' => Auth::id(),
+                ]);
+            }
+
+            if ($productionOrder) {
+                $productionOrder->current_stage = 'sanding';
+                $productionOrder->status = 'in_progress';
+                $productionOrder->save();
+            }
+
+            Log::info('=== SANDING END ===', ['doc' => $documentNumber]);
 
             return response()->json([
                 'success' => true,
-                'message' => '✅ Proses Sanding berhasil!',
-                'data' => [
-                    'qty_sanded' => $qtySanded,
-                    'sources_used' => array_values($usedSources),
-                    'destination' => $warehouseSanding->name,
-                ],
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Error: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    private function getStockSources($detail)
-    {
-        $sourcePriority = ['ASSEMBLING'];
-        $totalAvailable = 0;
-        $sources = [];
-
-        foreach ($sourcePriority as $warehouseCode) {
-            $warehouse = Warehouse::where('code', $warehouseCode)->first();
-            if (!$warehouse) continue;
-
-            $inventories = Inventory::where('warehouse_id', $warehouse->id)
-                ->where('item_id', $detail->item_id)
-                ->where('qty_pcs', '>', 0)
-                ->orderBy('id', 'asc')
-                ->lockForUpdate()
-                ->get();
-
-            foreach ($inventories as $inventory) {
-                $sources[] = [
-                    'warehouse' => $warehouse,
-                    'inventory' => $inventory,
-                    'available' => $inventory->qty_pcs,
-                ];
-                $totalAvailable += $inventory->qty_pcs;
-            }
-        }
-
-        return [
-            'total_available' => $totalAvailable,
-            'sources' => $sources,
-        ];
-    }
-
-    private function deductStockAndLog($detail, $productionOrder, $qtySanded, $sources)
-    {
-        $remaining = $qtySanded;
-        $usedSources = [];
-
-        foreach ($sources as $source) {
-            if ($remaining <= 0) break;
-
-            $toTake = min($remaining, $source['available']);
-
-            /** @var \App\Models\Inventory $inventory */
-            $inventory = $source['inventory'];
-            $inventory->decrement('qty_pcs', $toTake);
-
-            InventoryLog::create([
-                'date' => now()->toDateString(),
-                'time' => now()->toTimeString(),
-                'item_id' => $detail->item_id,
-                'warehouse_id' => $source['warehouse']->id,
-                'qty' => $toTake,
-                'direction' => 'OUT',
-                'transaction_type' => 'TRANSFER_OUT',
-                'reference_type' => 'ProductionOrder',
-                'reference_id' => $productionOrder->id,
-                'reference_number' => $productionOrder->po_number,
-                'notes' => "Transfer ke Sanding",
-                'user_id' => Auth::id(),
-            ]);
-
-            if (!isset($usedSources[$source['warehouse']->id])) {
-                $usedSources[$source['warehouse']->id] = [
-                    'warehouse_id' => $source['warehouse']->id,
-                    'warehouse_name' => $source['warehouse']->name,
-                    'qty_pcs' => 0,
-                ];
-            }
-            $usedSources[$source['warehouse']->id]['qty_pcs'] += $toTake;
-
-            $remaining -= $toTake;
-        }
-
-        return $usedSources;
-    }
-
-    private function updateSandingInventory($detail, $productionOrder, $qtySanded, $warehouseSanding)
-    {
-        $inventorySanding = Inventory::where('warehouse_id', $warehouseSanding->id)
-            ->where('item_id', $detail->item_id)
-            ->where('ref_po_id', $productionOrder->id)
-            ->first();
-
-        if ($inventorySanding) {
-            $inventorySanding->increment('qty_pcs', $qtySanded);
-        } else {
-            Inventory::create([
-                'warehouse_id' => $warehouseSanding->id,
-                'item_id' => $detail->item_id,
-                'qty_pcs' => $qtySanded,
-                'qty_m3' => 0,
-                'ref_po_id' => $productionOrder->id,
-                'ref_product_id' => $detail->item_id,
-            ]);
-        }
-
-        InventoryLog::create([
-            'date' => now()->toDateString(),
-            'time' => now()->toTimeString(),
-            'item_id' => $detail->item_id,
-            'warehouse_id' => $warehouseSanding->id,
-            'qty' => $qtySanded,
-            'direction' => 'IN',
-            'transaction_type' => 'TRANSFER_IN',
-            'reference_type' => 'ProductionOrder',
-            'reference_id' => $productionOrder->id,
-            'reference_number' => $productionOrder->po_number,
-            'notes' => "Hasil proses Sanding",
-            'user_id' => Auth::id(),
-        ]);
-    }
-
-    private function logProduction($detail, $productionOrder, $qtySanded, $usedSources, $warehouseSanding)
-    {
-        $usedSourcesArray = array_values($usedSources);
-        $sourcesText = collect($usedSourcesArray)->map(function($s) {
-            return "{$s['qty_pcs']} dari {$s['warehouse_name']}";
-        })->implode(', ');
-
-        ProductionLog::create([
-            'date' => now(),
-            'reference_number' => $productionOrder->po_number,
-            'process_type' => 'sanding',
-            'stage' => 'sanding',
-            'source_warehouse_id' => $usedSourcesArray[0]['warehouse_id'] ?? null,
-            'destination_warehouse_id' => $warehouseSanding->id,
-            'input_item_id' => $detail->item_id,
-            'input_quantity' => $qtySanded,
-            'output_item_id' => $detail->item_id,
-            'output_quantity' => $qtySanded,
-            'notes' => "Sanding {$qtySanded} pcs {$detail->item->name} ({$sourcesText})",
-            'user_id' => Auth::id(),
-        ]);
+                'message' => "Proses Sanding berhasil ({$documentNumber})",
+                'data'    => ['document_number' => $documentNumber, 'total_items' => count($data['items'])],
+            ], 201);
+        });
     }
 }

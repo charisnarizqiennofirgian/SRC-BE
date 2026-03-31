@@ -4,20 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class KdProduction extends Model
+class RustikKomponenProduction extends Model
 {
     protected $fillable = [
         'document_number',
         'date',
-        'estimated_finish_date',
         'ref_po_id',
         'notes',
         'created_by',
     ];
 
     protected $casts = [
-        'date'                  => 'date',
-        'estimated_finish_date' => 'date',
+        'date' => 'date',
     ];
 
     public function productionOrder()
@@ -30,5 +28,18 @@ class KdProduction extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-   
+    public function inputs()
+    {
+        return $this->hasMany(RustikKomponenInput::class);
+    }
+
+    public function outputs()
+    {
+        return $this->hasMany(RustikKomponenOutput::class);
+    }
+
+    public function rejects()
+    {
+        return $this->hasMany(RustikKomponenReject::class);
+    }
 }

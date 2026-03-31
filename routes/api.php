@@ -29,7 +29,7 @@ use App\Http\Controllers\Api\PembahananController;
 use App\Http\Controllers\Api\MouldingController;
 use App\Http\Controllers\Api\ProductBomController;
 use App\Http\Controllers\Api\OperatorMesinController;
-use App\Http\Controllers\Api\AssemblingController;
+
 use App\Http\Controllers\Api\SandingController;
 use App\Http\Controllers\Api\RustikController;
 use App\Http\Controllers\Api\FinishingController;
@@ -48,6 +48,9 @@ use App\Http\Controllers\Api\GeneralLedgerController;
 use App\Http\Controllers\Api\IncomeStatementController;
 use App\Http\Controllers\Api\BalanceSheetController;
 use App\Http\Controllers\Api\PermissionController;
+use App\Http\Controllers\Api\RustikKomponenController;
+use App\Http\Controllers\Api\AssemblingProductionController;
+use App\Http\Controllers\Api\QcFinalController;
 
 
 /*
@@ -281,35 +284,44 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- PRODUKSI PENGGERGAJAN ---
     Route::post('/sawmill-productions', [SawmillProductionController::class, 'store']);
 
+    // --- PROSES RUSTIK KOMPONEN ---
+    Route::prefix('rustik-komponen')->group(function () {
+        Route::get('/available-pos', [RustikKomponenController::class, 'getAvailablePos']);
+        Route::get('/mesin-items', [RustikKomponenController::class, 'getMesinItems']);
+        Route::post('/store', [RustikKomponenController::class, 'store']);
+    });
+
     // --- PROSES ASSEMBLING ---
-    Route::prefix('assembling')->group(function () {
-        Route::get('/orders', [AssemblingController::class, 'getAvailableOrders']);
-        Route::post('/check-material', [AssemblingController::class, 'checkMaterialAvailability']);
-        Route::post('/store', [AssemblingController::class, 'store']);
+
+    Route::prefix('assembling-produksi')->group(function () {
+        Route::get('/available-pos', [AssemblingProductionController::class, 'getAvailablePos']);
+        Route::get('/source-items', [AssemblingProductionController::class, 'getSourceItems']);
+        Route::post('/store', [AssemblingProductionController::class, 'store']);
     });
 
     // --- PROSES SANDING ---
-    Route::prefix('sanding')->group(function () {
-        Route::get('/available-stock', [SandingController::class, 'getAvailableStock']);
-        Route::post('/process', [SandingController::class, 'process']);
-    });
+    Route::get('/produksi/transfer/source-items', [SandingController::class, 'sourceItems']);
+    Route::post('/produksi/sanding/store', [SandingController::class, 'store']);
 
     // --- PROSES RUSTIK ---
-    Route::prefix('rustik')->group(function () {
-        Route::get('/available-stock', [RustikController::class, 'getAvailableStock']);
-        Route::post('/process', [RustikController::class, 'process']);
-    });
+    Route::post('/produksi/rustik/store', [RustikController::class, 'store']);
 
     // --- PROSES FINISHING ---
-    Route::prefix('finishing')->group(function () {
-        Route::get('/available-stock', [FinishingController::class, 'getAvailableStock']);
-        Route::post('/process', [FinishingController::class, 'process']);
+    Route::post('/produksi/finishing/store', [FinishingController::class, 'store']);
+
+    // --- QC FINAL ---
+    Route::prefix('qc-final')->group(function () {
+        Route::get('/available-pos', [QcFinalController::class, 'getAvailablePos']);
+        Route::get('/source-items', [QcFinalController::class, 'getSourceItems']);
+        Route::post('/store', [QcFinalController::class, 'store']);
     });
 
     // --- PROSES PACKING ---
     Route::prefix('packing')->group(function () {
-        Route::get('/available-stock', [PackingController::class, 'getAvailableStock']);
-        Route::post('/process', [PackingController::class, 'process']);
+        Route::get('/available-pos', [PackingController::class, 'getAvailablePos']);
+        Route::get('/packing-items', [PackingController::class, 'getPackingItems']);
+        Route::post('/store', [PackingController::class, 'store']);
+        Route::post('/selesai/{poId}', [PackingController::class, 'selesaiPacking']);
     });
 
     // --- PENGGUNAAN MATERIAL (ASSEMBLING DLL) ---

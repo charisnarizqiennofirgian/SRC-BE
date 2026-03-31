@@ -3,255 +3,211 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ProductionOrder;
-use App\Models\ProductionOrderDetail;
-use App\Models\ProductionLog;
 use App\Models\Inventory;
-use App\Models\Warehouse;
 use App\Models\InventoryLog;
+use App\Models\Item;
+use App\Models\ProductionOrder;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class PackingController extends Controller
 {
-    public function getAvailableStock(Request $request)
+    // =============================================
+    // GET: Available POs
+    // =============================================
+    public function getAvailablePos()
     {
-        $productionOrderId = $request->input('production_order_id');
-
-        if (!$productionOrderId) {
-            return response()->json([
-                'success' => false,
-                'message' => 'production_order_id diperlukan',
-            ], 400);
-        }
-
-        $po = ProductionOrder::with('details.item')->findOrFail($productionOrderId);
-
-        $sourcePriority = ['FINISHING', 'RUSTIK', 'SANDING', 'ASSEMBLING'];
-
-        $stocks = [];
-
-        foreach ($po->details as $detail) {
-            $totalAvailable = 0;
-            $sourceDetails = [];
-
-            foreach ($sourcePriority as $warehouseCode) {
-                $warehouse = Warehouse::where('code', $warehouseCode)->first();
-                if (!$warehouse) continue;
-
-                $available = Inventory::where('warehouse_id', $warehouse->id)
-                    ->where('item_id', $detail->item_id)
-                    ->sum('qty_pcs');
-
-                $sourceDetails[] = [
-                    'warehouse_id' => $warehouse->id,
-                    'warehouse_code' => $warehouse->code,
-                    'warehouse_name' => $warehouse->name,
-                    'stock_available' => $available,
+        $pos = ProductionOrder::where('status', '!=', 'completed')
+            ->with(['salesOrder.buyer'])
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($po) {
+                return [
+                    'id'         => $po->id,
+                    'po_number'  => $po->po_number,
+                    'label'      => $po->po_number,
+                    'buyer_name' => $po->salesOrder?->buyer?->name ?? '-',
+                    'so_number'  => $po->salesOrder?->so_number ?? '-',
                 ];
-
-                $totalAvailable += $available;
-            }
-
-            $stocks[] = [
-                'detail_id' => $detail->id,
-                'item_id' => $detail->item_id,
-                'item_name' => $detail->item->name,
-                'qty_planned' => $detail->qty_planned,
-                'qty_produced' => $detail->qty_produced,
-                'total_stock_available' => $totalAvailable,
-                'source_details' => $sourceDetails,
-            ];
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => $stocks,
-        ]);
-    }
-
-    public function process(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'production_order_detail_id' => ['required', 'integer', 'exists:production_order_details,id'],
-            'qty_packed' => ['required', 'numeric', 'min:0.001'],
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validasi gagal.',
-                'errors'  => $validator->errors(),
-            ], 422);
-        }
-
-        $data = $validator->validated();
-        $qtyPacked = $data['qty_packed'];
-
-        DB::beginTransaction();
-
-        try {
-            $detail = ProductionOrderDetail::with('item', 'productionOrder')->findOrFail($data['production_order_detail_id']);
-            $productionOrder = $detail->productionOrder;
-
-            $sourcePriority = ['FINISHING', 'RUSTIK', 'SANDING', 'ASSEMBLING'];
-
-            $warehousePacking = Warehouse::where('code', 'PACKING')->firstOrFail();
-
-            $totalAvailable = 0;
-            $stockSources = [];
-
-            foreach ($sourcePriority as $warehouseCode) {
-                $warehouse = Warehouse::where('code', $warehouseCode)->first();
-                if (!$warehouse) continue;
-
-                $inventories = Inventory::where('warehouse_id', $warehouse->id)
-                    ->where('item_id', $detail->item_id)
-                    ->where('qty_pcs', '>', 0)
-                    ->orderBy('id', 'asc')
-                    ->lockForUpdate()
-                    ->get();
-
-                foreach ($inventories as $inventory) {
-                    if ($inventory->qty_pcs > 0) {
-                        $stockSources[] = [
-                            'warehouse' => $warehouse,
-                            'inventory' => $inventory,
-                            'available' => $inventory->qty_pcs,
-                        ];
-                        $totalAvailable += $inventory->qty_pcs;
-                    }
-                }
-            }
-
-            if ($totalAvailable < $qtyPacked) {
-                throw new \Exception("Stok {$detail->item->name} tidak cukup! Butuh {$qtyPacked} pcs, tersedia {$totalAvailable} pcs.");
-            }
-
-            $remaining = $qtyPacked;
-            $usedSources = [];
-
-            foreach ($stockSources as $source) {
-                if ($remaining <= 0) break;
-
-                $toTake = min($remaining, $source['available']);
-
-                $source['inventory']->decrement('qty_pcs', $toTake);
-
-                InventoryLog::create([
-                    'date' => now()->toDateString(),
-                    'time' => now()->toTimeString(),
-                    'item_id' => $detail->item_id,
-                    'warehouse_id' => $source['warehouse']->id,
-                    'qty' => $toTake,
-                    'direction' => 'OUT',
-                    'transaction_type' => 'TRANSFER_OUT',
-                    'reference_type' => 'ProductionOrder',
-                    'reference_id' => $productionOrder->id,
-                    'reference_number' => $productionOrder->po_number,
-                    'notes' => "Transfer ke Packing dari {$source['warehouse']->name}",
-                    'user_id' => Auth::id(),
-                ]);
-
-                if (!isset($usedSources[$source['warehouse']->id])) {
-                    $usedSources[$source['warehouse']->id] = [
-                        'warehouse_id' => $source['warehouse']->id,
-                        'warehouse_name' => $source['warehouse']->name,
-                        'qty_pcs' => 0,
-                    ];
-                }
-                $usedSources[$source['warehouse']->id]['qty_pcs'] += $toTake;
-
-                $remaining -= $toTake;
-            }
-
-            $inventoryPacking = Inventory::where('warehouse_id', $warehousePacking->id)
-                ->where('item_id', $detail->item_id)
-                ->where('ref_po_id', $productionOrder->id)
-                ->first();
-
-            if ($inventoryPacking) {
-                $inventoryPacking->increment('qty_pcs', $qtyPacked);
-            } else {
-                Inventory::create([
-                    'warehouse_id' => $warehousePacking->id,
-                    'item_id' => $detail->item_id,
-                    'qty_pcs' => $qtyPacked,
-                    'qty_m3' => 0,
-                    'ref_po_id' => $productionOrder->id,
-                    'ref_product_id' => $detail->item_id,
-                ]);
-            }
-
-            InventoryLog::create([
-                'date' => now()->toDateString(),
-                'time' => now()->toTimeString(),
-                'item_id' => $detail->item_id,
-                'warehouse_id' => $warehousePacking->id,
-                'qty' => $qtyPacked,
-                'direction' => 'IN',
-                'transaction_type' => 'TRANSFER_IN',
-                'reference_type' => 'ProductionOrder',
-                'reference_id' => $productionOrder->id,
-                'reference_number' => $productionOrder->po_number,
-                'notes' => "Hasil proses Packing (Barang Jadi)",
-                'user_id' => Auth::id(),
-            ]);
-
-            $usedSourcesArray = array_values($usedSources);
-            $sourcesText = collect($usedSourcesArray)->map(function($s) {
-                return "{$s['qty_pcs']} dari {$s['warehouse_name']}";
-            })->implode(', ');
-
-            ProductionLog::create([
-                'date' => now(),
-                'reference_number' => $productionOrder->po_number,
-                'process_type' => 'packing',
-                'stage' => 'packing',
-                'source_warehouse_id' => $usedSourcesArray[0]['warehouse_id'] ?? null,
-                'destination_warehouse_id' => $warehousePacking->id,
-                'input_item_id' => $detail->item_id,
-                'input_quantity' => $qtyPacked,
-                'output_item_id' => $detail->item_id,
-                'output_quantity' => $qtyPacked,
-                'notes' => "Packing {$qtyPacked} pcs {$detail->item->name} ({$sourcesText})",
-                'user_id' => Auth::id(),
-            ]);
-
-            $allCompleted = $productionOrder->details->every(function ($d) use ($warehousePacking) {
-                $stockPacking = Inventory::where('warehouse_id', $warehousePacking->id)
-                    ->where('item_id', $d->item_id)
-                    ->sum('qty_pcs');
-
-                return $stockPacking >= $d->qty_planned;
             });
 
-            if ($allCompleted) {
-                $productionOrder->update(['status' => 'completed']);
+        return response()->json(['success' => true, 'data' => $pos]);
+    }
+
+    // =============================================
+    // GET: Stok dari Gudang Packing
+    // =============================================
+    public function getPackingItems()
+    {
+        $warehousePacking = Warehouse::where('code', 'PACKING')->first();
+
+        if (!$warehousePacking) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $inventories = Inventory::where('warehouse_id', $warehousePacking->id)
+            ->where('qty_pcs', '>', 0)
+            ->with('item')
+            ->get()
+            ->map(function ($inv) {
+                return [
+                    'item_id'       => $inv->item_id,
+                    'item_code'     => $inv->item?->code ?? '-',
+                    'item_name'     => $inv->item?->name ?? '-',
+                    'qty_available' => (float) $inv->qty_pcs,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $inventories]);
+    }
+
+    // =============================================
+    // POST: Simpan proses packing
+    // =============================================
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'date'      => ['required', 'date'],
+            'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
+            'notes'     => ['nullable', 'string'],
+            'items'               => ['required', 'array', 'min:1'],
+            'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
+            'items.*.qty'         => ['required', 'numeric', 'min:1'],
+        ]);
+
+        return DB::transaction(function () use ($data) {
+            Log::info('=== PACKING START ===', ['po_id' => $data['ref_po_id']]);
+
+            $warehousePacking = Warehouse::where('code', 'PACKING')->first();
+
+            if (!$warehousePacking) {
+                throw ValidationException::withMessages([
+                    'warehouse' => ['Gudang Packing tidak ditemukan.'],
+                ]);
             }
 
-            DB::commit();
+            $productionOrder = ProductionOrder::find($data['ref_po_id']);
+            $poNumber        = $productionOrder?->po_number ?? '-';
+
+            // === NOMOR DOKUMEN ===
+            $runningNumber  = InventoryLog::where('transaction_type', 'PACKING')
+                ->whereYear('date', now()->year)
+                ->whereMonth('date', now()->month)
+                ->where('direction', 'OUT')
+                ->count() + 1;
+            $documentNumber = 'PKG-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+
+            foreach ($data['items'] as $index => $item) {
+                $itemId   = $item['item_id'];
+                $qty      = $item['qty'];
+                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+
+                // Cek stok di Gudang Packing
+                $packingInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $warehousePacking->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                $availableQty = $packingInv?->qty_pcs ?? 0;
+
+                if ($availableQty < $qty) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.qty" => [
+                            "'{$itemName}' stok di Gudang Packing tidak cukup. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."
+                        ],
+                    ]);
+                }
+
+                // Catat OUT dari Gudang Packing (dikemas)
+                $packingInv->decrement('qty_pcs', $qty);
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $itemId,
+                    'warehouse_id'     => $warehousePacking->id,
+                    'qty'              => $qty,
+                    'qty_m3'           => 0,
+                    'direction'        => 'OUT',
+                    'transaction_type' => 'PACKING',
+                    'reference_type'   => 'Packing',
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Dikemas ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                // Catat IN kembali ke Gudang Packing (sebagai produk jadi)
+                $packingInv->increment('qty_pcs', $qty);
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $itemId,
+                    'warehouse_id'     => $warehousePacking->id,
+                    'qty'              => $qty,
+                    'qty_m3'           => 0,
+                    'direction'        => 'IN',
+                    'transaction_type' => 'PACKING',
+                    'reference_type'   => 'Packing',
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Produk jadi selesai dikemas ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                Log::info("Packing: {$itemName} - {$qty} pcs");
+            }
+
+            // Update stage PO
+            if ($productionOrder) {
+                $productionOrder->current_stage = 'packing';
+                $productionOrder->status        = 'in_progress';
+                $productionOrder->save();
+            }
+
+            Log::info('=== PACKING END ===', ['doc' => $documentNumber]);
 
             return response()->json([
                 'success' => true,
-                'message' => '✅ Proses Packing berhasil!',
-                'data' => [
-                    'qty_packed' => $qtyPacked,
-                    'sources_used' => $usedSourcesArray,
-                    'destination' => $warehousePacking->name,
-                    'po_completed' => $allCompleted,
+                'message' => "Packing berhasil dicatat ({$documentNumber})",
+                'data'    => [
+                    'document_number' => $documentNumber,
+                    'total_items'     => count($data['items']),
                 ],
-            ]);
+            ], 201);
+        });
+    }
 
-        } catch (\Exception $e) {
-            DB::rollBack();
+    // =============================================
+    // POST: Selesai Packing → PO completed
+    // =============================================
+    public function selesaiPacking(Request $request, $poId)
+    {
+        $productionOrder = ProductionOrder::findOrFail($poId);
 
+        if ($productionOrder->status === 'completed') {
             return response()->json([
                 'success' => false,
-                'message' => 'Error: ' . $e->getMessage(),
-            ], 500);
+                'message' => 'PO ini sudah selesai sebelumnya.',
+            ], 422);
         }
+
+        $productionOrder->update([
+            'current_stage' => 'completed',
+            'status'        => 'completed',
+        ]);
+
+        Log::info('=== PACKING SELESAI ===', [
+            'po_id'     => $poId,
+            'po_number' => $productionOrder->po_number,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "PO {$productionOrder->po_number} selesai! Produk jadi siap dikirim.",
+        ]);
     }
 }
