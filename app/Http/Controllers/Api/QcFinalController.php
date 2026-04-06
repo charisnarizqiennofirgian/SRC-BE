@@ -129,63 +129,30 @@ class QcFinalController extends Controller
             ]);
 
             // === PROSES ITEM LOLOS QC ===
-            // Kurangi stok gudang sumber → tambah stok Gudang Packing
+            // Item lolos → stok Gudang Packing TIDAK berkurang
+            // Hanya dicatat saja
             foreach ($data['passed'] as $index => $passed) {
                 $itemId   = $passed['item_id'];
                 $qty      = $passed['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // Cek & kurangi stok sumber
-                $sourceInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $data['source_warehouse_id'])
-                    ->lockForUpdate()
-                    ->first();
-
-                $availableQty = $sourceInv?->qty_pcs ?? 0;
-
-                if ($availableQty < $qty) {
-                    throw ValidationException::withMessages([
-                        "passed.{$index}.qty" => [
-                            "'{$itemName}' stok di {$sourceName} tidak cukup. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."
-                        ],
-                    ]);
-                }
-
-                $sourceInv->decrement('qty_pcs', $qty);
-
-                InventoryLog::create([
-                    'date'             => $data['date'],
-                    'time'             => now()->toTimeString(),
-                    'item_id'          => $itemId,
-                    'warehouse_id'     => $data['source_warehouse_id'],
-                    'qty'              => $qty,
-                    'qty_m3'           => 0,
-                    'direction'        => 'OUT',
-                    'transaction_type' => 'QC_FINAL',
-                    'reference_type'   => 'QcFinalProduction',
-                    'reference_id'     => $qcFinal->id,
-                    'reference_number' => $documentNumber,
-                    'notes'            => "Lolos QC Final dari {$sourceName} ({$documentNumber}) - PO: {$poNumber}",
-                    'user_id'          => Auth::id(),
-                ]);
-
-                // Tambah stok Gudang Packing
+                // Cek stok di Gudang Packing
                 $packingInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehousePacking->id)
                     ->lockForUpdate()
                     ->first();
 
-                if ($packingInv) {
-                    $packingInv->increment('qty_pcs', $qty);
-                } else {
-                    Inventory::create([
-                        'item_id'      => $itemId,
-                        'warehouse_id' => $warehousePacking->id,
-                        'qty_pcs'      => $qty,
-                        'ref_po_id'    => $data['ref_po_id'],
+                $availableQty = $packingInv?->qty_pcs ?? 0;
+
+                if ($availableQty < $qty) {
+                    throw ValidationException::withMessages([
+                        "passed.{$index}.qty" => [
+                            "'{$itemName}' stok di Gudang Packing tidak cukup. Tersedia: {$availableQty} pcs."
+                        ],
                     ]);
                 }
 
+                // Hanya catat log — stok tidak berubah
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
@@ -198,7 +165,7 @@ class QcFinalController extends Controller
                     'reference_type'   => 'QcFinalProduction',
                     'reference_id'     => $qcFinal->id,
                     'reference_number' => $documentNumber,
-                    'notes'            => "Lolos QC Final masuk Gudang Packing ({$documentNumber}) - PO: {$poNumber}",
+                    'notes'            => "Lolos QC Final ({$documentNumber}) - PO: {$poNumber}",
                     'user_id'          => Auth::id(),
                 ]);
 
@@ -208,11 +175,11 @@ class QcFinalController extends Controller
                     'qty'                    => $qty,
                 ]);
 
-                Log::info("Passed QC: {$itemName} - {$qty} pcs → Gudang Packing");
+                Log::info("Passed QC: {$itemName} - {$qty} pcs");
             }
 
             // === PROSES ITEM REJECT ===
-            // Kurangi stok sumber → tambah stok Gudang Reject
+            // Reject → stok Gudang Packing BERKURANG → masuk Gudang Reject
             if (!empty($data['rejects'])) {
                 foreach ($data['rejects'] as $reject) {
                     if (empty($reject['item_id']) || empty($reject['qty'])) continue;
@@ -221,29 +188,29 @@ class QcFinalController extends Controller
                     $qty      = $reject['qty'];
                     $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                    // Cek & kurangi stok sumber
-                    $sourceInv = Inventory::where('item_id', $itemId)
-                        ->where('warehouse_id', $data['source_warehouse_id'])
+                    // Kurangi stok Gudang Packing
+                    $packingInv = Inventory::where('item_id', $itemId)
+                        ->where('warehouse_id', $warehousePacking->id)
                         ->lockForUpdate()
                         ->first();
 
-                    $availableQty = $sourceInv?->qty_pcs ?? 0;
+                    $availableQty = $packingInv?->qty_pcs ?? 0;
 
                     if ($availableQty < $qty) {
                         throw ValidationException::withMessages([
                             'rejects' => [
-                                "Reject '{$itemName}' stok di {$sourceName} tidak cukup. Tersedia: {$availableQty} pcs."
+                                "Reject '{$itemName}' stok di Gudang Packing tidak cukup. Tersedia: {$availableQty} pcs."
                             ],
                         ]);
                     }
 
-                    $sourceInv->decrement('qty_pcs', $qty);
+                    $packingInv->decrement('qty_pcs', $qty);
 
                     InventoryLog::create([
                         'date'             => $data['date'],
                         'time'             => now()->toTimeString(),
                         'item_id'          => $itemId,
-                        'warehouse_id'     => $data['source_warehouse_id'],
+                        'warehouse_id'     => $warehousePacking->id,
                         'qty'              => $qty,
                         'qty_m3'           => 0,
                         'direction'        => 'OUT',

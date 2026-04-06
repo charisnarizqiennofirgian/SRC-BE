@@ -22,7 +22,7 @@ class PackingController extends Controller
     public function getAvailablePos()
     {
         $pos = ProductionOrder::where('status', '!=', 'completed')
-            ->with(['salesOrder.buyer'])
+            ->with(['salesOrder.buyer', 'details.item'])
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($po) {
@@ -32,6 +32,14 @@ class PackingController extends Controller
                     'label'      => $po->po_number,
                     'buyer_name' => $po->salesOrder?->buyer?->name ?? '-',
                     'so_number'  => $po->salesOrder?->so_number ?? '-',
+                    'details'    => $po->details->map(function ($d) {
+                        return [
+                            'item_id'     => $d->item_id,
+                            'item_code'   => $d->item?->code ?? '-',
+                            'item_name'   => $d->item?->name ?? '-',
+                            'qty_planned' => (float) $d->qty_planned,
+                        ];
+                    }),
                 ];
             });
 
@@ -39,44 +47,18 @@ class PackingController extends Controller
     }
 
     // =============================================
-    // GET: Stok dari Gudang Packing
-    // =============================================
-    public function getPackingItems()
-    {
-        $warehousePacking = Warehouse::where('code', 'PACKING')->first();
-
-        if (!$warehousePacking) {
-            return response()->json(['success' => true, 'data' => []]);
-        }
-
-        $inventories = Inventory::where('warehouse_id', $warehousePacking->id)
-            ->where('qty_pcs', '>', 0)
-            ->with('item')
-            ->get()
-            ->map(function ($inv) {
-                return [
-                    'item_id'       => $inv->item_id,
-                    'item_code'     => $inv->item?->code ?? '-',
-                    'item_name'     => $inv->item?->name ?? '-',
-                    'qty_available' => (float) $inv->qty_pcs,
-                ];
-            });
-
-        return response()->json(['success' => true, 'data' => $inventories]);
-    }
-
-    // =============================================
     // POST: Simpan proses packing
+    // Output: stok Gudang Packing NAMBAH
     // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'      => ['required', 'date'],
-            'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
-            'notes'     => ['nullable', 'string'],
-            'items'               => ['required', 'array', 'min:1'],
-            'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
-            'items.*.qty'         => ['required', 'numeric', 'min:1'],
+            'date'            => ['required', 'date'],
+            'ref_po_id'       => ['required', 'integer', 'exists:production_orders,id'],
+            'notes'           => ['nullable', 'string'],
+            'items'           => ['required', 'array', 'min:1'],
+            'items.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'items.*.qty'     => ['required', 'numeric', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
@@ -97,51 +79,31 @@ class PackingController extends Controller
             $runningNumber  = InventoryLog::where('transaction_type', 'PACKING')
                 ->whereYear('date', now()->year)
                 ->whereMonth('date', now()->month)
-                ->where('direction', 'OUT')
+                ->where('direction', 'IN')
                 ->count() + 1;
             $documentNumber = 'PKG-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            foreach ($data['items'] as $index => $item) {
+            foreach ($data['items'] as $item) {
                 $itemId   = $item['item_id'];
                 $qty      = $item['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // Cek stok di Gudang Packing
+                // Tambah stok di Gudang Packing (produk jadi)
                 $packingInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehousePacking->id)
                     ->lockForUpdate()
                     ->first();
 
-                $availableQty = $packingInv?->qty_pcs ?? 0;
-
-                if ($availableQty < $qty) {
-                    throw ValidationException::withMessages([
-                        "items.{$index}.qty" => [
-                            "'{$itemName}' stok di Gudang Packing tidak cukup. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."
-                        ],
+                if ($packingInv) {
+                    $packingInv->increment('qty_pcs', $qty);
+                } else {
+                    Inventory::create([
+                        'item_id'      => $itemId,
+                        'warehouse_id' => $warehousePacking->id,
+                        'qty_pcs'      => $qty,
+                        'ref_po_id'    => $data['ref_po_id'],
                     ]);
                 }
-
-                // Catat OUT dari Gudang Packing (dikemas)
-                $packingInv->decrement('qty_pcs', $qty);
-
-                InventoryLog::create([
-                    'date'             => $data['date'],
-                    'time'             => now()->toTimeString(),
-                    'item_id'          => $itemId,
-                    'warehouse_id'     => $warehousePacking->id,
-                    'qty'              => $qty,
-                    'qty_m3'           => 0,
-                    'direction'        => 'OUT',
-                    'transaction_type' => 'PACKING',
-                    'reference_type'   => 'Packing',
-                    'reference_number' => $documentNumber,
-                    'notes'            => "Dikemas ({$documentNumber}) - PO: {$poNumber}",
-                    'user_id'          => Auth::id(),
-                ]);
-
-                // Catat IN kembali ke Gudang Packing (sebagai produk jadi)
-                $packingInv->increment('qty_pcs', $qty);
 
                 InventoryLog::create([
                     'date'             => $data['date'],
@@ -154,11 +116,11 @@ class PackingController extends Controller
                     'transaction_type' => 'PACKING',
                     'reference_type'   => 'Packing',
                     'reference_number' => $documentNumber,
-                    'notes'            => "Produk jadi selesai dikemas ({$documentNumber}) - PO: {$poNumber}",
+                    'notes'            => "Produk jadi dikemas ({$documentNumber}) - PO: {$poNumber}",
                     'user_id'          => Auth::id(),
                 ]);
 
-                Log::info("Packing: {$itemName} - {$qty} pcs");
+                Log::info("Packing: {$itemName} - {$qty} pcs masuk Gudang Packing");
             }
 
             // Update stage PO

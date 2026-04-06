@@ -345,6 +345,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- MONITORING PRODUKSI ---
     Route::prefix('production-monitoring')->group(function () {
         Route::get('/', [ProductionMonitoringController::class, 'index']);
+        Route::get('/detail', [ProductionMonitoringController::class, 'detail']);
     });
 
     // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
