@@ -10,6 +10,7 @@ use App\Models\Item;
 use App\Models\Inventory;
 use App\Models\InventoryLog;
 use App\Models\ProductionOrder;
+use App\Models\Warehouse;
 use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,7 +44,14 @@ class SawmillProductionController extends Controller
             'rsts'                   => ['required', 'array', 'min:1'],
             'rsts.*.item_rst_id'     => ['required', 'exists:items,id'],
             'rsts.*.qty_rst_pcs'     => ['required', 'integer', 'min:1'],
-            'rsts.*.volume_rst_m3'   => ['required', 'numeric', 'min:0'],
+            'rsts.*.volume_rst_m3'      => ['required', 'numeric', 'min:0'],
+
+            // Jeblosan → Gudang SAWMILL
+            'jeblosans'                 => ['required', 'array', 'min:1'],
+            'jeblosans.*.item_id'       => ['required', 'exists:items,id'],
+            'jeblosans.*.qty_pcs'       => ['required', 'integer', 'min:1'],
+            'jeblosans.*.volume_m3'     => ['nullable', 'numeric', 'min:0'],
+            'jeblosans.*.is_sisa'       => ['nullable', 'boolean'],
         ]);
 
         $production = DB::transaction(function () use ($data) {
@@ -116,19 +124,73 @@ class SawmillProductionController extends Controller
                 ]);
             }
 
-            foreach ($data['rsts'] as $rst) {
-                $inventory = Inventory::where('item_id', $rst['item_rst_id'])
-                    ->where('warehouse_id', $data['warehouse_to_id'])
+            // === OUTPUT 1: JEBLOSAN → GUDANG SAWMILL ===
+            $warehouseSawmill = Warehouse::where('code', 'SAWMILL')->firstOrFail();
+
+            foreach ($data['jeblosans'] as $jeblosan) {
+                $isSisa = $jeblosan['is_sisa'] ?? false;
+
+                $inv = Inventory::where('item_id', $jeblosan['item_id'])
+                    ->where('warehouse_id', $warehouseSawmill->id)
                     ->lockForUpdate()
                     ->first();
 
-                if ($inventory) {
-                    $inventory->increment('qty_pcs', $rst['qty_rst_pcs']);
+                if ($inv) {
+                    $inv->increment('qty_pcs', $jeblosan['qty_pcs']);
+                } else {
+                    Inventory::create([
+                        'item_id'      => $jeblosan['item_id'],
+                        'warehouse_id' => $warehouseSawmill->id,
+                        'qty_pcs'      => $jeblosan['qty_pcs'],
+                        'qty_m3'       => $jeblosan['volume_m3'] ?? 0,
+                    ]);
+                }
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $jeblosan['item_id'],
+                    'warehouse_id'     => $warehouseSawmill->id,
+                    'qty'              => $jeblosan['qty_pcs'],
+                    'qty_m3'           => $jeblosan['volume_m3'] ?? 0,
+                    'direction'        => 'IN',
+                    'transaction_type' => 'SAWMILL',
+                    'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
+                    'reference_id'     => $referenceId ?? $production->id,
+                    'reference_number' => $referenceNumber,
+                    'notes'            => $isSisa
+                        ? "Sisa Jeblosan Sawmill ({$documentNumber})"
+                        : "Jeblosan Sawmill ({$documentNumber})",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                SawmillProductionRst::create([
+                    'sawmill_production_id'    => $production->id,
+                    'item_rst_id'              => $jeblosan['item_id'],
+                    'qty_rst_pcs'              => $jeblosan['qty_pcs'],
+                    'volume_rst_m3'            => $jeblosan['volume_m3'] ?? 0,
+                    'is_sisa'                  => $isSisa,
+                    'destination_warehouse_id' => $warehouseSawmill->id,
+                ]);
+            }
+
+            // === OUTPUT 2: RST BASAH → GUDANG RSTB ===
+            $warehouseRstb = Warehouse::where('code', 'RSTB')->firstOrFail();
+
+            foreach ($data['rsts'] as $rst) {
+                $inv = Inventory::where('item_id', $rst['item_rst_id'])
+                    ->where('warehouse_id', $warehouseRstb->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($inv) {
+                    $inv->increment('qty_pcs', $rst['qty_rst_pcs']);
                 } else {
                     Inventory::create([
                         'item_id'      => $rst['item_rst_id'],
-                        'warehouse_id' => $data['warehouse_to_id'],
+                        'warehouse_id' => $warehouseRstb->id,
                         'qty_pcs'      => $rst['qty_rst_pcs'],
+                        'qty_m3'       => $rst['volume_rst_m3'],
                     ]);
                 }
 
@@ -136,7 +198,7 @@ class SawmillProductionController extends Controller
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
                     'item_id'          => $rst['item_rst_id'],
-                    'warehouse_id'     => $data['warehouse_to_id'],
+                    'warehouse_id'     => $warehouseRstb->id,
                     'qty'              => $rst['qty_rst_pcs'],
                     'qty_m3'           => $rst['volume_rst_m3'],
                     'direction'        => 'IN',
@@ -144,15 +206,17 @@ class SawmillProductionController extends Controller
                     'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
                     'reference_id'     => $referenceId ?? $production->id,
                     'reference_number' => $referenceNumber,
-                    'notes'            => "Hasil produksi sawmill RST ({$documentNumber})",
+                    'notes'            => "RST Basah hasil Sawmill ({$documentNumber})",
                     'user_id'          => Auth::id(),
                 ]);
 
                 SawmillProductionRst::create([
-                    'sawmill_production_id' => $production->id,
-                    'item_rst_id'           => $rst['item_rst_id'],
-                    'qty_rst_pcs'           => $rst['qty_rst_pcs'],
-                    'volume_rst_m3'         => $rst['volume_rst_m3'],
+                    'sawmill_production_id'    => $production->id,
+                    'item_rst_id'              => $rst['item_rst_id'],
+                    'qty_rst_pcs'              => $rst['qty_rst_pcs'],
+                    'volume_rst_m3'            => $rst['volume_rst_m3'],
+                    'is_sisa'                  => false,
+                    'destination_warehouse_id' => $warehouseRstb->id,
                 ]);
             }
 
