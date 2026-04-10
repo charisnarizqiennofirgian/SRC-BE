@@ -231,6 +231,15 @@ class ProductionMonitoringController extends Controller
             foreach ($stages as $type => $label) {
                 $searchIds = $this->getSearchIds($type, $poIds);
 
+                // Untuk MESIN, kumpulkan subIds agar bisa query nama mesin
+                $subIds = [];
+                if ($type === 'MESIN' && !empty($poIds)) {
+                    $subIds = DB::table('mesin_productions')
+                        ->whereIn('ref_po_id', $poIds)
+                        ->pluck('id')
+                        ->toArray();
+                }
+
                 $logsIn  = InventoryLog::where('transaction_type', $type)
                     ->whereIn('reference_id', $searchIds)->where('direction', 'IN')
                     ->with(['warehouse', 'item', 'user'])->orderBy('date', 'asc')->get();
@@ -241,13 +250,24 @@ class ProductionMonitoringController extends Controller
 
                 if ($logsIn->isEmpty() && $logsOut->isEmpty()) continue;
 
+                // Ambil nama mesin jika stage MESIN
+                $machineName = null;
+                if ($type === 'MESIN' && !empty($subIds)) {
+                    $machineName = DB::table('mesin_productions')
+                        ->join('machines', 'machines.id', '=', 'mesin_productions.machine_id')
+                        ->whereIn('mesin_productions.id', $subIds)
+                        ->pluck('machines.name')
+                        ->unique()
+                        ->implode(', ');
+                }
+
                 $result[] = [
-                    'stage'     => $label,
-                    'type'      => $type,
-                    'total_in'  => (float) $logsIn->sum('qty'),
-                    'total_out' => (float) $logsOut->sum('qty'),
-                    'inputs'    => $logsIn->map($mapLog),
-                    'outputs'   => $logsOut->map($mapLog),
+                    'stage'        => $label . ($machineName ? " — {$machineName}" : ''),
+                    'type'         => $type,
+                    'total_in'     => (float) $logsIn->sum('qty'),
+                    'total_out'    => (float) $logsOut->sum('qty'),
+                    'inputs'       => $logsIn->map($mapLog),
+                    'outputs'      => $logsOut->map($mapLog),
                 ];
             }
 
