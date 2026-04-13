@@ -127,7 +127,10 @@ class DeliveryOrderController extends Controller
                 $details = json_decode($details, true);
             }
 
-            $packingWarehouseId = 11;
+            $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+            if (!$packingWarehouseId) {
+                throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada.');
+            }
 
             foreach ($details as $detail) {
                 $item = Item::with('unit')->find($detail['item_id']);
@@ -225,7 +228,10 @@ class DeliveryOrderController extends Controller
                 throw new \Exception("Hanya DO dengan status DRAFT yang bisa dikirim. Status saat ini: {$deliveryOrder->status}");
             }
 
-            $packingWarehouseId = 11;
+            $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+            if (!$packingWarehouseId) {
+                throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada.');
+            }
 
             foreach ($deliveryOrder->details as $detail) {
                 if (!$detail->nw_per_box || !$detail->gw_per_box) {
@@ -245,11 +251,10 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail->quantity_shipped}");
                 }
 
-                $item->decrement('stock', $detail->quantity_shipped);
-
                 $inventories = Inventory::where('item_id', $detail->item_id)
                     ->where('warehouse_id', $packingWarehouseId)
                     ->where('qty_pcs', '>', 0)
+                    ->lockForUpdate()
                     ->get();
                 
                 $remaining = $detail->quantity_shipped;

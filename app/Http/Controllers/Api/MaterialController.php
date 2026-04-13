@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\Stock;
 use App\Models\Inventory;
 use App\Models\InventoryLog;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -98,7 +99,7 @@ class MaterialController extends Controller
                 });
 
                 // Transformasi untuk produk jadi (tidak perlu jika category bukan produk jadi)
-                $packingWarehouseId = 11;
+                $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                 if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
                     $items->transform(function ($item) use ($packingWarehouseId) {
                         $inventory = Inventory::where('item_id', $item->id)

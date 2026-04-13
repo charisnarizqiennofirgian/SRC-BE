@@ -64,6 +64,7 @@ use App\Http\Controllers\Api\QcFinalController;
 // ==========================================
 
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
 Route::get('/password-policy', function () {
     return response()->json([

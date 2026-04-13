@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SalesOrder;
 use App\Models\Item;
 use App\Models\Inventory;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -169,7 +170,7 @@ class SalesOrderController extends Controller
 
             $salesOrders = $query->paginate($request->input('per_page', 25));
 
-            $packingWarehouseId = 11;
+            $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
 
             $salesOrders->getCollection()->transform(function ($so) use ($packingWarehouseId) {
                 $so->details->transform(function ($detail) use ($packingWarehouseId) {
