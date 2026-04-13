@@ -63,7 +63,7 @@ use App\Http\Controllers\Api\QcFinalController;
 // PUBLIC ROUTES (Tidak Perlu Login)
 // ==========================================
 
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
 Route::get('/password-policy', function () {
     return response()->json([
@@ -84,7 +84,7 @@ Route::get('/password-policy', function () {
 // PROTECTED ROUTES (Perlu Login)
 // ==========================================
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // --- USER INFO ---
     Route::get('/user', function (Request $request) {
