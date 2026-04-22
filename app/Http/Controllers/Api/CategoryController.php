@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\Item;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class CategoryController extends Controller
 {
@@ -26,7 +28,7 @@ class CategoryController extends Controller
             return response()->json($categories, 200);
             
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil data kategori: ' . $e->getMessage());
+            Log::error('Error saat mengambil data kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data kategori.',
@@ -43,7 +45,7 @@ class CategoryController extends Controller
                 'data' => $categories
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil semua data kategori: ' . $e->getMessage());
+            Log::error('Error saat mengambil semua data kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data kategori.',
@@ -67,13 +69,13 @@ class CategoryController extends Controller
                 'data' => $category
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
-            \Log::error('Validation error saat menambah kategori: ' . $e->getMessage());
+            Log::error('Validation error saat menambah kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => $e->errors()['name'][0] ?? 'Gagal menambahkan kategori. Data tidak valid.',
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat menambah kategori: ' . $e->getMessage());
+            Log::error('Error saat menambah kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menambahkan kategori.',
@@ -103,7 +105,7 @@ class CategoryController extends Controller
                 'message' => $e->errors()['name'][0] ?? 'Gagal memperbarui kategori. Data tidak valid.',
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat update kategori: ' . $e->getMessage());
+            Log::error('Error saat update kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat memperbarui kategori.',
@@ -114,7 +116,7 @@ class CategoryController extends Controller
     public function destroy(Category $category)
     {
         try {
-            $isUsed = \App\Models\Item::where('category_id', $category->id)->exists();
+            $isUsed = Item::where('category_id', $category->id)->exists();
             
             if ($isUsed) {
                 return response()->json([
@@ -131,7 +133,7 @@ class CategoryController extends Controller
             ], 200);
             
         } catch (\Exception $e) {
-            \Log::error('Error saat menghapus kategori: ' . $e->getMessage());
+            Log::error('Error saat menghapus kategori: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menghapus kategori.',
