@@ -15,6 +15,8 @@ use App\Imports\KayuStockImport;
 use App\Imports\UmumStockImport;
 use App\Imports\KartonBoxStockImport;
 use App\Imports\KomponenStockImport;
+use App\Imports\JeblosanStockImport;
+use App\Exports\JeblosanTemplateExport;
 use App\Exports\KayuLogTemplateExport;
 use App\Exports\KayuTemplateExport;
 use App\Exports\ProdukJadiTemplateExport;
@@ -757,6 +759,76 @@ class StockAdjustmentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan internal saat memproses file.',
+            ], 500);
+        }
+    }
+
+    /* ================== JEBLOSAN ================== */
+
+    public function downloadTemplateJeblosan()
+    {
+        try {
+            return Excel::download(
+                new JeblosanTemplateExport,
+                'template_saldo_awal_jeblosan.xlsx'
+            );
+        } catch (\Exception $e) {
+            Log::error('Gagal download template jeblosan: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mendownload template jeblosan.'
+            ], 500);
+        }
+    }
+
+    public function uploadSaldoAwalJeblosan(Request $request)
+    {
+        if (!$request->hasFile('file')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File tidak ditemukan.',
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'file' => [
+                'required', 'file',
+                'mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'max:5120'
+            ]
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi file gagal.',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $file       = $request->file('file');
+            $extension  = strtolower($file->getClientOriginalExtension());
+            $readerType = $extension === 'xlsx'
+                ? \Maatwebsite\Excel\Excel::XLSX
+                : \Maatwebsite\Excel\Excel::XLS;
+
+            Excel::import(new JeblosanStockImport, $file, null, $readerType);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Upload saldo awal Jeblosan berhasil.'
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Gagal upload Jeblosan: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
             ], 500);
         }
     }

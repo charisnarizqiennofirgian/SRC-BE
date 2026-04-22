@@ -182,6 +182,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         // 🟡 Komponen
         Route::get('/template-komponen', [StockAdjustmentController::class, 'downloadTemplateKomponen']);
         Route::post('/upload-komponen', [StockAdjustmentController::class, 'uploadSaldoAwalKomponen']);
+
+        // 🟢 Jeblosan
+        Route::get('/template-jeblosan', [StockAdjustmentController::class, 'downloadTemplateJeblosan']);
+        Route::post('/upload-jeblosan', [StockAdjustmentController::class, 'uploadSaldoAwalJeblosan']);
     });
 
     // --- PEMBELIAN ---

@@ -26,6 +26,7 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 20,               // stok_awal
                 'Pieces',         // satuan (harus sama dengan master Unit)
                 'SANWIL',         // gudang (kode gudang contoh)
+                'RAK-A1',         // no_rak
             ],
             [
                 'K-MRN-001',
@@ -42,6 +43,7 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 15,
                 'Pieces',
                 'SANWIL',
+                'RAK-B2',         // no_rak
             ],
         ];
     }
@@ -63,6 +65,7 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
             'stok_awal',
             'satuan',
             'gudang',
+            'no_rak',
         ];
     }
 }

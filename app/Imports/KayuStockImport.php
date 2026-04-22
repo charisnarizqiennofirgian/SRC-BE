@@ -104,6 +104,8 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 Log::info("ROW #{$index} - ITEM: {$uniqueName}");
 
                 // 1. Master Item
+                $noRak = isset($row['no_rak']) ? trim($row['no_rak']) : null;
+
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
@@ -118,6 +120,7 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                         'cutting_t' => $cutting_t,
                         'cutting_l' => $cutting_l,
                         'cutting_p' => $cutting_p,
+                        'no_rak' => $noRak,
                     ]
                 );
 
