@@ -137,7 +137,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/units/all', [UnitController::class, 'all']);
     Route::apiResource('units', UnitController::class);
 
+    Route::get('suppliers/template', [SupplierController::class, 'downloadTemplate']);
+    Route::post('suppliers/import', [SupplierController::class, 'import']);
+    Route::get('suppliers/export', [SupplierController::class, 'export']);
     Route::apiResource('suppliers', SupplierController::class);
+    Route::get('buyers/template', [BuyerController::class, 'downloadTemplate']);
+    Route::post('buyers/import', [BuyerController::class, 'import']);
+    Route::get('buyers/export', [BuyerController::class, 'export']);
     Route::apiResource('buyers', BuyerController::class);
 
     Route::post('/products/import', [ProductController::class, 'import']);

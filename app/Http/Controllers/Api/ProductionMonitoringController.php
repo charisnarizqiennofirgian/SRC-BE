@@ -72,6 +72,8 @@ class ProductionMonitoringController extends Controller
             foreach ($salesOrders as $so) {
                 $poIds = $so->productionOrders->pluck('id')->toArray();
 
+                $items = [];
+
                 foreach ($so->details as $detail) {
                     $itemId = $detail->item_id;
 
@@ -93,7 +95,7 @@ class ProductionMonitoringController extends Controller
 
                         $searchIds = $this->getSearchIds($txType, $poIds);
 
-                        $totalIn  = InventoryLog::where('transaction_type', $txType)
+                        $totalIn = InventoryLog::where('transaction_type', $txType)
                             ->whereIn('reference_id', $searchIds)
                             ->where('direction', 'IN')
                             ->sum('qty');
@@ -103,11 +105,7 @@ class ProductionMonitoringController extends Controller
                             ->where('direction', 'OUT')
                             ->sum('qty');
 
-                        if ($totalIn == 0) {
-                            $statusHulu[$key] = 'waiting';
-                        } else {
-                            $statusHulu[$key] = 'in_progress'; // selalu in_progress kalau ada aktivitas
-                        }
+                        $statusHulu[$key] = $totalIn == 0 ? 'waiting' : 'in_progress';
                     }
 
                     // === ZONA HILIR ===
@@ -134,23 +132,20 @@ class ProductionMonitoringController extends Controller
                     $qtyPacking  = $qtyHilir['packing'];
                     $poCompleted = $so->productionOrders->where('status', 'completed')->count() > 0;
 
-                    $result[] = [
-                        'so_id'             => $so->id,
-                        'so_number'         => $so->so_number,
-                        'so_date'           => $so->so_date ? Carbon::parse($so->so_date)->format('d/m/Y') : '-',
-                        'buyer_name'        => $so->buyer?->name ?? '-',
+                    $items[] = [
                         'item_id'           => $itemId,
                         'item_name'         => $detail->item?->name ?? '-',
                         'item_code'         => $detail->item?->code ?? '-',
                         'target'            => $target,
-                        'po_completed'      => $poCompleted,
 
+                        // Zona Hulu
                         'status_sanwil'     => $statusHulu['sanwil'],
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
                         'status_moulding'   => $statusHulu['moulding'],
                         'status_mesin'      => $statusHulu['mesin'],
 
+                        // Zona Hilir
                         'qty_ruskomp'       => $qtyHilir['ruskomp'],
                         'qty_assembling'    => $qtyHilir['assembling'],
                         'qty_sanding'       => $qtyHilir['sanding'],
@@ -165,6 +160,17 @@ class ProductionMonitoringController extends Controller
                         'is_done'           => ($qtyPacking >= $target && $target > 0) || $poCompleted,
                     ];
                 }
+
+                // Group per SO
+                $result[] = [
+                    'so_id'      => $so->id,
+                    'so_number'  => $so->so_number,
+                    'so_date'    => $so->so_date ? Carbon::parse($so->so_date)->format('d/m/Y') : '-',
+                    'buyer_name' => $so->buyer?->name ?? '-',
+                    'po_numbers' => $so->productionOrders->pluck('po_number'),
+                    'is_done'    => $so->productionOrders->where('status', 'completed')->count() > 0,
+                    'items'      => $items,
+                ];
             }
 
             return response()->json([
