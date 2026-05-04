@@ -55,6 +55,9 @@ class Item extends Model
         'no_skshhk',
         'no_kapling',
         'no_rak',
+        'buyer_name',
+        'model',
+        'jenis_karton',
         'mutu',
         'price',
     ];
@@ -171,6 +174,11 @@ class Item extends Model
     public function inventoryLogs()
     {
         return $this->hasMany(InventoryLog::class);
+    }
+
+    public function dimensionHistories()
+    {
+        return $this->hasMany(ItemDimensionHistory::class)->latest();
     }
 
     public function bomComponents()

@@ -68,6 +68,10 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithCustomCs
                     }
                 }
 
+                $buyerName   = trim($row['buyer_name']   ?? '');
+                $kualitas    = trim($row['kualitas']     ?? '');
+                $model       = trim($row['model']        ?? '');
+                $jenisKarton = trim($row['jenis_karton'] ?? '');
                 $p = (float) ($row['p'] ?? 0);
                 $l = (float) ($row['l'] ?? 0);
                 $t = (float) ($row['t'] ?? 0);
@@ -90,17 +94,21 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithCustomCs
                 $item = Item::firstOrCreate(
                     ['code' => $kode],
                     [
-                        'name' => $nama,
+                        'name'        => $nama,
                         'category_id' => $category->id,
-                        'unit_id' => $unit->id,
-                        'uuid' => Str::uuid(),
+                        'unit_id'     => $unit->id,
+                        'uuid'        => Str::uuid(),
                     ]
                 );
 
                 $item->specifications = $specifications;
-                $item->stock = $stokAwal;
-                $item->category_id = $category->id;
-                $item->unit_id = $unit->id;
+                $item->stock          = $stokAwal;
+                $item->category_id    = $category->id;
+                $item->unit_id        = $unit->id;
+                $item->buyer_name     = $buyerName   ?: $item->buyer_name;
+                $item->kualitas       = $kualitas    ?: $item->kualitas;
+                $item->model          = $model       ?: $item->model;
+                $item->jenis_karton   = $jenisKarton ?: $item->jenis_karton;
                 $item->save();
 
                 Log::info("ROW #{$index} - ITEM SAVED: {$nama} (ID: {$item->id})");

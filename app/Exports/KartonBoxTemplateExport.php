@@ -4,8 +4,9 @@ namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 
-class KartonBoxTemplateExport implements FromArray, WithHeadings
+class KartonBoxTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
 {
     public function headings(): array
     {
@@ -14,6 +15,10 @@ class KartonBoxTemplateExport implements FromArray, WithHeadings
             'nama',
             'kategori',
             'satuan',
+            'buyer_name',
+            'model',
+            'jenis_karton',
+            'kualitas',
             'p',
             'l',
             't',
@@ -26,13 +31,31 @@ class KartonBoxTemplateExport implements FromArray, WithHeadings
         return [
             [
                 'KRT-001',
-                'Karton Box 1',
+                'BOX U. AGAVE 90X90',
                 'Karton Box',
                 'PCS',
-                500,
-                400,
-                300,
+                'ETHIMO',
+                'AGAVE',
+                'RST',
+                'A',
+                920,
+                510,
+                130,
                 100,
+            ],
+            [
+                'KRT-002',
+                'BOX U. AGAVE D 110',
+                'Karton Box',
+                'PCS',
+                'ETHIMO',
+                'AGAVE D',
+                'RST',
+                'A',
+                1140,
+                1140,
+                60,
+                50,
             ],
         ];
     }

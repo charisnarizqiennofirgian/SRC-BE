@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\PembahananController;
 use App\Http\Controllers\Api\MouldingController;
 use App\Http\Controllers\Api\ProductBomController;
 use App\Http\Controllers\Api\OperatorMesinController;
+use App\Http\Controllers\Api\ItemDimensionHistoryController;
 
 use App\Http\Controllers\Api\SandingController;
 use App\Http\Controllers\Api\RustikController;
@@ -154,6 +155,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/materials/quick-store-jeblosan', [MaterialController::class, 'quickStoreJeblosan']);
     Route::get('/materials/template', [MaterialController::class, 'downloadTemplate']);
     Route::apiResource('materials', MaterialController::class);
+
+    // --- DIMENSI KARTON BOX ---
+    Route::get('/items/{id}/dimension-history', [ItemDimensionHistoryController::class, 'index']);
+    Route::put('/items/{id}/dimensions', [ItemDimensionHistoryController::class, 'update']);
 
     // --- MANAJEMEN STOK ---
     Route::get('/stock-report', [StockReportController::class, 'index']);

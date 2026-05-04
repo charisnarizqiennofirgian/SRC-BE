@@ -57,7 +57,10 @@ class StockReportController extends Controller
                 'items.no_skshhk',
                 'items.no_kapling',
                 'items.mutu',
-                'items.price'
+                'items.price',
+                'items.buyer_name',
+                'items.model',
+                'items.jenis_karton',
             )
                 ->with([
                     'unit:id,name',
