@@ -50,9 +50,9 @@ class JeblosanStockImport implements ToCollection, WithHeadingRow, WithCustomCsv
             // Wajib: nama_dasar, tebal_mm, stok_awal, gudang
             if (
                 empty($row['nama_dasar']) ||
-                empty($row['tebal_mm']) ||
-                !isset($row['stok_awal']) ||
-                empty($row['gudang'])
+                !isset($row['tebal_mm']) || $row['tebal_mm'] === '' ||
+                !isset($row['stok_awal']) || $row['stok_awal'] === '' ||
+                !isset($row['gudang'])    || trim($row['gudang']) === ''
             ) {
                 $skippedRows[] = [
                     'row_number' => $index + 2,
@@ -106,11 +106,12 @@ class JeblosanStockImport implements ToCollection, WithHeadingRow, WithCustomCsv
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
-                        'name'        => $uniqueName,
-                        'category_id' => $this->categoryJeblosan->id,
-                        'unit_id'     => $unit->id,
+                        'name'           => $uniqueName,
+                        'category_id'    => $this->categoryJeblosan->id,
+                        'unit_id'        => $unit->id,
                         'specifications' => $specifications,
-                        'volume_m3'   => $kubikasiPerPcs,
+                        'stock'          => $stokAwal,
+                        'volume_m3'      => $kubikasiPerPcs,
                     ]
                 );
 

@@ -50,9 +50,9 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             // wajib: nama_dasar, tebal_mm, stok_awal, gudang
             if (
                 empty($row['nama_dasar']) ||
-                empty($row['tebal_mm']) ||
-                !isset($row['stok_awal']) ||
-                empty($row['gudang'])
+                !isset($row['tebal_mm']) || $row['tebal_mm'] === '' ||
+                !isset($row['stok_awal']) || $row['stok_awal'] === '' ||
+                !isset($row['gudang'])    || trim($row['gudang']) === ''
             ) {
                 $skippedRows[] = [
                     'row_number' => $index + 2,
@@ -109,18 +109,19 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
-                        'name' => $uniqueName,
-                        'category_id' => $this->categoryKayu->id,
-                        'unit_id' => $unit->id,
+                        'name'           => $uniqueName,
+                        'category_id'    => $this->categoryKayu->id,
+                        'unit_id'        => $unit->id,
                         'specifications' => $specifications,
-                        'jenis' => $jenis,
-                        'kualitas' => $kualitas,
-                        'bentuk' => $bentuk,
-                        'volume_m3' => $kubikasiPerPcs,
-                        'cutting_t' => $cutting_t,
-                        'cutting_l' => $cutting_l,
-                        'cutting_p' => $cutting_p,
-                        'no_rak' => $noRak,
+                        'stock'          => $stokAwal,
+                        'jenis'          => $jenis,
+                        'kualitas'       => $kualitas,
+                        'bentuk'         => $bentuk,
+                        'volume_m3'      => $kubikasiPerPcs,
+                        'cutting_t'      => $cutting_t,
+                        'cutting_l'      => $cutting_l,
+                        'cutting_p'      => $cutting_p,
+                        'no_rak'         => $noRak,
                     ]
                 );
 
