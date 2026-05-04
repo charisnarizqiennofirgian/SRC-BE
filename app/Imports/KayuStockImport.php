@@ -106,24 +106,25 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 // 1. Master Item
                 $noRak = isset($row['no_rak']) ? trim($row['no_rak']) : null;
 
-                $item = Item::updateOrCreate(
-                    ['code' => $kodeBarang],
-                    [
-                        'name'           => $uniqueName,
-                        'category_id'    => $this->categoryKayu->id,
-                        'unit_id'        => $unit->id,
-                        'specifications' => $specifications,
-                        'stock'          => $stokAwal,
-                        'jenis'          => $jenis,
-                        'kualitas'       => $kualitas,
-                        'bentuk'         => $bentuk,
-                        'volume_m3'      => $kubikasiPerPcs,
-                        'cutting_t'      => $cutting_t,
-                        'cutting_l'      => $cutting_l,
-                        'cutting_p'      => $cutting_p,
-                        'no_rak'         => $noRak,
-                    ]
-                );
+                $itemValues = [
+                    'name'           => $uniqueName,
+                    'category_id'    => $this->categoryKayu->id,
+                    'unit_id'        => $unit->id,
+                    'specifications' => $specifications,
+                    'stock'          => $stokAwal,
+                    'jenis'          => $jenis,
+                    'kualitas'       => $kualitas,
+                    'bentuk'         => $bentuk,
+                    'volume_m3'      => $kubikasiPerPcs,
+                ];
+
+                // Hanya update cutting jika kolom ada di Excel (hindari overwrite dengan null)
+                if ($cutting_t !== null) $itemValues['cutting_t'] = $cutting_t;
+                if ($cutting_l !== null) $itemValues['cutting_l'] = $cutting_l;
+                if ($cutting_p !== null) $itemValues['cutting_p'] = $cutting_p;
+                if ($noRak     !== null) $itemValues['no_rak']    = $noRak;
+
+                $item = Item::updateOrCreate(['code' => $kodeBarang], $itemValues);
 
                 // 2. Stock Movement (legacy)
                 if ($stokAwal > 0) {
