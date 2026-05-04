@@ -54,6 +54,7 @@ class Item extends Model
         'tanggal_terima',
         'no_skshhk',
         'no_kapling',
+        'no_rak',
         'mutu',
         'price',
     ];
