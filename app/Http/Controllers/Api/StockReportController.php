@@ -128,7 +128,7 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0) {
+                if ($totalFromStocks == 0 && !$warehouseId) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 
@@ -173,7 +173,7 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0) {
+                if ($totalFromStocks == 0 && !$warehouseId) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 

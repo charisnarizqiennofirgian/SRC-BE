@@ -16,8 +16,9 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
+use Maatwebsite\Excel\Concerns\WithCalculatedFormulas;
 
-class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
+class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings, WithCalculatedFormulas
 {
     private $categoryKayu;
     private $defaultUnit;
