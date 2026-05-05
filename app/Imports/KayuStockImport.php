@@ -82,9 +82,14 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             $t = (float) $row['tebal_mm'];
             $l = (float) ($row['lebar_mm'] ?? 0);
             $p = (float) ($row['panjang_mm'] ?? 0);
-            $cutting_t = isset($row['cutting_tebal_mm']) ? (float) $row['cutting_tebal_mm'] : null;
-            $cutting_l = isset($row['cutting_lebar_mm']) ? (float) $row['cutting_lebar_mm'] : null;
-            $cutting_p = isset($row['cutting_panjang_mm']) ? (float) $row['cutting_panjang_mm'] : null;
+            $rawCT = $row['cutting_tebal_mm'] ?? null;
+            $rawCL = $row['cutting_lebar_mm'] ?? null;
+            $rawCP = $row['cutting_panjang_mm'] ?? null;
+            $cutting_t = ($rawCT !== null && $rawCT !== '') ? (float) $rawCT : null;
+            $cutting_l = ($rawCL !== null && $rawCL !== '') ? (float) $rawCL : null;
+            $cutting_p = ($rawCP !== null && $rawCP !== '') ? (float) $rawCP : null;
+
+            Log::info("ROW #{$index} - CUTTING READ: CT={$rawCT}, CL={$rawCL}, CP={$rawCP} → parsed: {$cutting_t}/{$cutting_l}/{$cutting_p}");
             $stokAwal = (float) $row['stok_awal'];
 
             $uniqueName = "{$namaDasar} ({$t}x{$l}x{$p})";
