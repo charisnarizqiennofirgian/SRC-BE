@@ -58,6 +58,12 @@ class Item extends Model
         'buyer_name',
         'model',
         'jenis_karton',
+        'nama_produk',
+        'qty_natural',
+        'qty_warna',
+        'qty_set',
+        'm3_natural',
+        'm3_warna',
         'mutu',
         'price',
     ];

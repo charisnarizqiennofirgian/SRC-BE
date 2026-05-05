@@ -12,7 +12,6 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 use Maatwebsite\Excel\Concerns\Importable;
 use Illuminate\Support\Facades\Log;
@@ -21,7 +20,6 @@ use Illuminate\Support\Facades\Auth;
 class KomponenStockImport implements
     ToCollection,
     WithHeadingRow,
-    WithValidation,
     WithCustomCsvSettings
 {
     use Importable;
@@ -31,14 +29,22 @@ class KomponenStockImport implements
         foreach ($rows as $index => $row) {
             try {
                 // Normalisasi string
-                $kode = trim((string) ($row['kode'] ?? ''));
-                $nama = trim((string) ($row['nama'] ?? ''));
-                $kategori = trim((string) ($row['kategori'] ?? ''));
-                $satuan = trim((string) ($row['satuan'] ?? ''));
-                $gudang = trim((string) ($row['gudang'] ?? ''));
+                $kode       = trim((string) ($row['kode']          ?? ''));
+                $nama       = trim((string) ($row['nama_komponen'] ?? ''));
+                $kategori   = trim((string) ($row['kategori']      ?? 'Komponen'));
+                $satuan     = trim((string) ($row['satuan']        ?? ''));
+                $gudang     = trim((string) ($row['gudang']        ?? ''));
+                $buyer      = trim((string) ($row['buyer']         ?? ''));
+                $namaProduk = trim((string) ($row['nama_produk']   ?? ''));
+                $jenisKayu  = trim((string) ($row['jenis_kayu']    ?? ''));
 
-                if ($kode === '' || $nama === '') {
+                if ($kode === '') {
                     continue;
+                }
+
+                // Kalau nama kosong, pakai kode sebagai nama
+                if ($nama === '') {
+                    $nama = $kode;
                 }
 
                 // Category
@@ -50,13 +56,13 @@ class KomponenStockImport implements
                     ]
                 );
 
-                // Unit
-                $unit = Unit::firstOrCreate(
-                    ['name' => $satuan],
-                    [
-                        'short_name' => $satuan,
-                    ]
-                );
+                // Unit — cari by name atau short_name karena short_name ada unique constraint
+                $unit = Unit::where('name', $satuan)
+                    ->orWhere('short_name', $satuan)
+                    ->first();
+                if (!$unit) {
+                    $unit = Unit::create(['name' => $satuan, 'short_name' => $satuan]);
+                }
 
                 // Warehouse
                 $warehouse = Warehouse::where('code', $gudang)
@@ -71,41 +77,56 @@ class KomponenStockImport implements
                     continue;
                 }
 
-                $p = (float) ($row['p'] ?? 0);
-                $l = (float) ($row['l'] ?? 0);
-                $t = (float) ($row['t'] ?? 0);
-                $stokAwal = (float) ($row['stok_awal'] ?? 0);
+                $t        = (float) ($row['t']          ?? 0);
+                $l        = (float) ($row['l']          ?? 0);
+                $p        = (float) ($row['p']          ?? 0);
+                $qtySet   = (float) ($row['qty_set']     ?? 0);
+                $qtyNat   = (float) ($row['qty_natural'] ?? 0);
+                $qtyWarna = (float) ($row['qty_warna']   ?? 0);
+                $m3Total  = (float) ($row['m3_total']   ?? 0);
+                $m3Nat    = (float) ($row['m3_natural'] ?? 0);
+                $m3Warna  = (float) ($row['m3_warna']   ?? 0);
 
-                $m3PerPcs = 0;
-                if ($p > 0 && $l > 0 && $t > 0) {
-                    $m3PerPcs = ($p * $l * $t) / 1_000_000_000;
+                // Kalau m3_total diisi dan natural+warna kosong → pakai m3_total untuk natural
+                if ($m3Total > 0 && $m3Nat == 0 && $m3Warna == 0) {
+                    $m3Nat = $m3Total;
                 }
+                $stokAwal = $qtyNat + $qtyWarna;
+
+                // m3_per_pcs dihitung otomatis dari dimensi
+                $m3PerPcs = ($p > 0 && $l > 0 && $t > 0)
+                    ? ($t * $l * $p) / 1_000_000_000
+                    : 0;
 
                 $totalM3 = $m3PerPcs * $stokAwal;
 
                 $specifications = [
-                    'p' => $p,
-                    'l' => $l,
-                    't' => $t,
+                    'p'          => $p,
+                    'l'          => $l,
+                    't'          => $t,
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
                 // 1. Master Item
-                $item = Item::firstOrCreate(
+                $item = Item::updateOrCreate(
                     ['code' => $kode],
                     [
-                        'name' => $nama,
-                        'category_id' => $category->id,
-                        'unit_id' => $unit->id,
-                        'uuid' => Str::uuid(),
-                        'type' => 'component',
+                        'name'           => $nama,
+                        'category_id'    => $category->id,
+                        'unit_id'        => $unit->id,
+                        'specifications' => $specifications,
+                        'stock'          => $stokAwal,
+                        'qty_set'        => $qtySet,
+                        'qty_natural'    => $qtyNat,
+                        'qty_warna'      => $qtyWarna,
+                        'm3_natural'     => $m3Nat,
+                        'm3_warna'       => $m3Warna,
+                        'buyer_name'     => $buyer      ?: null,
+                        'nama_produk'    => $namaProduk ?: null,
+                        'jenis_kayu'     => $jenisKayu  ?: null,
+                        'volume_m3'      => $m3PerPcs,
                     ]
                 );
-
-                $item->specifications = $specifications;
-                $item->category_id = $category->id;
-                $item->unit_id = $unit->id;
-                $item->save();
 
                 // 2. Update Inventory
                 if ($stokAwal > 0) {
@@ -168,21 +189,6 @@ class KomponenStockImport implements
                 );
             }
         }
-    }
-
-    public function rules(): array
-    {
-        return [
-            'kode' => 'required|string|max:255',
-            'nama' => 'required|string|max:255',
-            'kategori' => 'required|string|max:255',
-            'satuan' => 'required|string|max:255',
-            'gudang' => 'required|string|max:255',
-            'p' => 'required|numeric|min:0',
-            'l' => 'required|numeric|min:0',
-            't' => 'required|numeric|min:0',
-            'stok_awal' => 'required|numeric|min:0',
-        ];
     }
 
     public function getCsvSettings(): array
