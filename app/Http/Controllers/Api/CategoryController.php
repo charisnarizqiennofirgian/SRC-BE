@@ -14,13 +14,27 @@ class CategoryController extends Controller
     {
         try {
             $perPage = $request->input('per_page', 10);
-            $search = $request->input('search');
+            $search = $request->input('search') ?: $request->input('q');
+            $all = $request->query('all');
+            $limit = $request->input('limit');
             
             $query = Category::query();
             
             if ($search) {
                 $query->where('name', 'like', "%{$search}%")
                       ->orWhere('description', 'like', "%{$search}%");
+            }
+
+            if ($all || $limit) {
+                $query->orderBy('name');
+                if ($limit) {
+                    $query->limit((int) $limit);
+                }
+                $categories = $query->get();
+                return response()->json([
+                    'success' => true,
+                    'data' => $categories
+                ], 200);
             }
             
             $categories = $query->paginate($perPage);

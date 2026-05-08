@@ -89,6 +89,7 @@ class MaterialController extends Controller
 
                 $items = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($request) {
                     return Item::with(['category:id,name', 'unit:id,name'])
+                        ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock')
                         ->when($request->filled('category_name'), function ($q) use ($request) {
                             $q->whereHas('category', function ($qq) use ($request) {
                                 $qq->where('name', 'like', '%' . $request->category_name . '%');
@@ -98,9 +99,8 @@ class MaterialController extends Controller
                         ->get();
                 });
 
-                // Transformasi untuk produk jadi (tidak perlu jika category bukan produk jadi)
-                $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                 if ($request->filled('category_name') && str_contains(strtolower($request->category_name), 'produk jadi')) {
+                    $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                     $items->transform(function ($item) use ($packingWarehouseId) {
                         $inventory = Inventory::where('item_id', $item->id)
                             ->where('warehouse_id', $packingWarehouseId)
@@ -114,7 +114,8 @@ class MaterialController extends Controller
             }
 
             $perPage = (int) $request->input('per_page', 50);
-            $search = $request->input('search');
+            $limit   = $request->input('limit');
+            $search  = $request->input('search') ?: $request->input('q');
 
             $query = Item::with($relations)
                 ->select(
@@ -155,6 +156,13 @@ class MaterialController extends Controller
                 });
             }
 
+            if ($request->filled('category_ids')) {
+                $categoryIds = array_filter(array_map('intval', explode(',', $request->category_ids)));
+                if (!empty($categoryIds)) {
+                    $query->whereIn('category_id', $categoryIds);
+                }
+            }
+
             if ($request->has('category_id') && $request->category_id) {
                 $query->where('category_id', $request->category_id);
             } elseif ($request->has('category_name') && $request->category_name) {
@@ -171,6 +179,12 @@ class MaterialController extends Controller
                 $query->orderBy($sortBy, $sortOrder);
             } else {
                 $query->latest();
+            }
+
+            // Jika ada limit, return simple array (untuk optimasi dropdown)
+            if ($limit) {
+                $items = $query->limit((int) $limit)->get();
+                return response()->json(['success' => true, 'data' => $items]);
             }
 
             // Kalau per_page >= 500, return semua sekaligus (untuk dropdown)

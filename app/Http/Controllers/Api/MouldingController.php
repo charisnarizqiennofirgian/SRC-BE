@@ -179,23 +179,36 @@ class MouldingController extends Controller
                     'qty'                    => $input['qty'],
                 ]);
 
-                // Catat inventory log OUT dari Gudang Pembahanan
-                $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
-                if ($bufferWarehouse) {
+                // Cari stok RST dari gudang manapun (BUFFER → RSTK → RSTB)
+                $gudangUrutan = ['BUFFER', 'RSTK', 'RSTB'];
+                $sourceWarehouse = null;
+                $sourceInventory = null;
+
+                foreach ($gudangUrutan as $kode) {
+                    $wh = Warehouse::where('code', $kode)->first();
+                    if (!$wh) continue;
+
                     $inv = Inventory::where('item_id', $input['item_id'])
-                        ->where('warehouse_id', $bufferWarehouse->id)
+                        ->where('warehouse_id', $wh->id)
+                        ->where('qty_pcs', '>=', $input['qty'])
                         ->lockForUpdate()
                         ->first();
 
-                    if ($inv && $inv->qty_pcs >= $input['qty']) {
-                        $inv->decrement('qty_pcs', $input['qty']);
+                    if ($inv) {
+                        $sourceWarehouse = $wh;
+                        $sourceInventory = $inv;
+                        break;
                     }
+                }
+
+                if ($sourceInventory) {
+                    $sourceInventory->decrement('qty_pcs', $input['qty']);
 
                     InventoryLog::create([
                         'date'             => $data['date'],
                         'time'             => now()->toTimeString(),
                         'item_id'          => $input['item_id'],
-                        'warehouse_id'     => $bufferWarehouse->id,
+                        'warehouse_id'     => $sourceWarehouse->id,
                         'qty'              => $input['qty'],
                         'qty_m3'           => 0,
                         'direction'        => 'OUT',
@@ -203,9 +216,11 @@ class MouldingController extends Controller
                         'reference_type'   => 'MouldingProduction',
                         'reference_id'     => $moulding->id,
                         'reference_number' => $documentNumber,
-                        'notes'            => "RST dipakai proses moulding ({$documentNumber})",
+                        'notes'            => "RST dipakai proses moulding ({$documentNumber}) dari {$sourceWarehouse->name}",
                         'user_id'          => Auth::id(),
                     ]);
+                } else {
+                    Log::warning("Stok RST tidak cukup di semua gudang untuk item_id={$input['item_id']}");
                 }
 
                 Log::info("Input RST: item_id={$input['item_id']}, qty={$input['qty']}");

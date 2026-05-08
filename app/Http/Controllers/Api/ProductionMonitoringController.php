@@ -95,17 +95,40 @@ class ProductionMonitoringController extends Controller
 
                         $searchIds = $this->getSearchIds($txType, $poIds);
 
-                        $totalIn = InventoryLog::where('transaction_type', $txType)
+                        $hasActivity = InventoryLog::where('transaction_type', $txType)
                             ->whereIn('reference_id', $searchIds)
-                            ->where('direction', 'IN')
-                            ->sum('qty');
+                            ->exists();
 
-                        $totalOut = InventoryLog::where('transaction_type', $txType)
-                            ->whereIn('reference_id', $searchIds)
-                            ->where('direction', 'OUT')
-                            ->sum('qty');
+                        // Cek apakah stage berikutnya sudah ada aktivitas (berarti stage ini done)
+                        $nextStageMap = [
+                            'sanwil'     => 'KD',
+                            'kd'         => 'PEMBAHANAN',
+                            'pembahanan' => 'MOULDING',
+                            'moulding'   => 'MESIN',
+                            'mesin'      => null,
+                        ];
 
-                        $statusHulu[$key] = $totalIn == 0 ? 'waiting' : 'in_progress';
+                        $nextTxType = $nextStageMap[$key] ?? null;
+                        $nextHasActivity = false;
+                        if ($nextTxType) {
+                            $nextSearchIds = $this->getSearchIds($nextTxType, $poIds);
+                            $nextHasActivity = InventoryLog::where('transaction_type', $nextTxType)
+                                ->whereIn('reference_id', $nextSearchIds)
+                                ->exists();
+                        }
+
+                        if ($nextHasActivity && !$hasActivity) {
+                            // Stage ini di-skip (SO tidak lewat sini)
+                            $statusHulu[$key] = 'skip';
+                        } elseif ($nextHasActivity && $hasActivity) {
+                            // Stage ini sudah selesai
+                            $statusHulu[$key] = 'done';
+                        } elseif ($hasActivity) {
+                            // Stage ini sedang berjalan
+                            $statusHulu[$key] = 'in_progress';
+                        } else {
+                            $statusHulu[$key] = 'waiting';
+                        }
                     }
 
                     // === ZONA HILIR ===

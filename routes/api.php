@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\MouldingController;
 use App\Http\Controllers\Api\ProductBomController;
 use App\Http\Controllers\Api\OperatorMesinController;
 use App\Http\Controllers\Api\ItemDimensionHistoryController;
+use App\Http\Controllers\Api\PurchaseRequestController;
 
 use App\Http\Controllers\Api\SandingController;
 use App\Http\Controllers\Api\RustikController;
@@ -191,6 +192,18 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         // 🟢 Jeblosan
         Route::get('/template-jeblosan', [StockAdjustmentController::class, 'downloadTemplateJeblosan']);
         Route::post('/upload-jeblosan', [StockAdjustmentController::class, 'uploadSaldoAwalJeblosan']);
+    });
+
+    // --- PURCHASE REQUEST ---
+    Route::prefix('purchase-requests')->group(function () {
+        Route::get('/',           [PurchaseRequestController::class, 'index']);
+        Route::post('/',          [PurchaseRequestController::class, 'store']);
+        Route::get('/{id}',       [PurchaseRequestController::class, 'show']);
+        Route::put('/{id}',       [PurchaseRequestController::class, 'update']);
+        Route::delete('/{id}',    [PurchaseRequestController::class, 'destroy']);
+        Route::post('/{id}/submit',        [PurchaseRequestController::class, 'submit']);
+        Route::post('/{id}/cancel',        [PurchaseRequestController::class, 'cancel']);
+        Route::post('/{id}/convert-to-po', [PurchaseRequestController::class, 'convertToPO']);
     });
 
     // --- PEMBELIAN ---

@@ -62,6 +62,7 @@ class PermissionsSeeder extends Seeder
             'produksi-master-bom',
 
             // Pembelian
+            'pembelian-purchase-request',
             'pembelian-operasional',
             'pembelian-karton',
             'pembelian-kayu',
