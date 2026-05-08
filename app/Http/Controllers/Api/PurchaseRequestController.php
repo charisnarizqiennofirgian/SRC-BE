@@ -285,21 +285,41 @@ class PurchaseRequestController extends Controller
                 ->count();
             $poNumber = 'PO-' . now()->format('Ym') . '-' . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
 
+            // Hitung subtotal dari details
+            $subtotal = collect($request->details)->sum(fn($d) => $d['quantity'] * $d['price']);
+            $ppnRate  = $request->ppn_percentage ?? 12;
+            $actualPpnRate = ($ppnRate == 11.12) ? 11 : $ppnRate;
+            $ppnAmount  = $subtotal * ($actualPpnRate / 100);
+            $grandTotal = $subtotal + $ppnAmount;
+
+            // Tentukan type dari item pertama
+            $firstItemId = $request->details[0]['item_id'];
+            $firstItem   = \App\Models\Item::with('category')->find($firstItemId);
+            $catName     = strtolower($firstItem?->category?->name ?? '');
+            $type = 'operasional';
+            if (str_contains($catName, 'karton')) $type = 'karton';
+            elseif (str_contains($catName, 'kayu')) $type = 'kayu';
+
             $po = PurchaseOrder::create([
-                'po_number'       => $poNumber,
-                'supplier_id'     => $request->supplier_id,
-                'order_date'      => $request->order_date,
-                'ppn_percentage'  => $request->ppn_percentage ?? 12,
-                'notes'           => $request->notes,
-                'status'          => 'pending',
-                'created_by'      => Auth::id(),
+                'po_number'      => $poNumber,
+                'supplier_id'    => $request->supplier_id,
+                'order_date'     => $request->order_date,
+                'delivery_date'  => $request->delivery_date ?? null,
+                'ppn_percentage' => $ppnRate,
+                'ppn_amount'     => $ppnAmount,
+                'subtotal'       => $subtotal,
+                'grand_total'    => $grandTotal,
+                'notes'          => $request->notes,
+                'status'         => 'Open',
+                'type'           => $type,
             ]);
 
             foreach ($request->details as $detail) {
                 $po->details()->create([
-                    'item_id'          => $detail['item_id'],
-                    'quantity_ordered'  => $detail['quantity'],
-                    'price'            => $detail['price'],
+                    'item_id'         => $detail['item_id'],
+                    'quantity_ordered' => $detail['quantity'],
+                    'price'           => $detail['price'],
+                    'subtotal'        => $detail['quantity'] * $detail['price'],
                 ]);
 
                 // Update qty_approved di PR detail
