@@ -12,13 +12,12 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
 use Maatwebsite\Excel\Concerns\WithCustomCsvSettings;
 use Maatwebsite\Excel\Concerns\Importable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 
-class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, WithCustomCsvSettings
+class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSettings
 {
     use Importable;
 
@@ -37,8 +36,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
                 $kode = trim((string) ($row['kode'] ?? ''));
                 $nama = trim((string) ($row['nama'] ?? ''));
 
-                if ($kode === '' || $nama === '') {
-                    Log::warning("ROW #{$index} - DITOLAK: kode atau nama kosong");
+                $kategori = trim((string) ($row['kategori'] ?? ''));
+                $satuan   = trim((string) ($row['satuan']   ?? ''));
+
+                if ($kode === '' || $nama === '' || $kategori === '' || $satuan === '') {
+                    Log::warning("ROW #{$index} - DITOLAK: kode/nama/kategori/satuan kosong");
                     continue;
                 }
 
@@ -147,17 +149,7 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithValidation, W
         }
     }
 
-    public function rules(): array
-    {
-        return [
-            'kode' => 'required|string|max:255',
-            'nama' => 'required|string|max:255',
-            'kategori' => 'required|string|max:255',
-            'satuan' => 'required|string|max:255',
-            'gudang' => 'nullable|string|max:255',
-            'stok_awal' => 'required|numeric|min:0',
-        ];
-    }
+
 
     public function getCsvSettings(): array
     {
