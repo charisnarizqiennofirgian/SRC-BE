@@ -55,7 +55,9 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                             'created_by' => 1,
                         ]);
                     } catch (\Exception $e) {
-                        $category = Category::withTrashed()->where('name', $kategori)->first();
+                        $category = Category::withTrashed()->get()->first(function($c) use ($kategori) {
+                            return strtoupper(preg_replace('/\s+/u', '', $c->name)) === strtoupper(preg_replace('/\s+/u', '', $kategori));
+                        });
                         if (!$category) throw $e;
                     }
                 }
@@ -74,7 +76,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                             'description' => 'Satuan untuk ' . $satuan,
                         ]);
                     } catch (\Exception $e) {
-                        $unit = Unit::withTrashed()->where('name', $satuan)->first();
+                        $unit = Unit::withTrashed()->get()->first(function($u) use ($satuan) {
+                            $cleanInput = strtoupper(preg_replace('/\s+/u', '', $satuan));
+                            return strtoupper(preg_replace('/\s+/u', '', $u->name)) === $cleanInput || 
+                                   strtoupper(preg_replace('/\s+/u', '', $u->short_name)) === $cleanInput;
+                        });
                         if (!$unit) throw $e;
                     }
                 }
@@ -108,7 +114,7 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                             'uuid' => Str::uuid(),
                         ]);
                     } catch (\Exception $e) {
-                        $item = Item::withTrashed()->where('code', $kode)->first();
+                        $item = Item::withTrashed()->whereRaw("REPLACE(code, ' ', '') = ?", [str_replace(' ', '', $kode)])->first();
                         if (!$item) throw $e;
                     }
                 }
