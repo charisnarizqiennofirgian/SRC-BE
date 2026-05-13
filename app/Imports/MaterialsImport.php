@@ -49,23 +49,60 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         continue;
                     }
 
-                    $category = Category::firstOrCreate(
-                        ['name' => trim($row['kategori'])],
-                        ['name' => trim($row['kategori'])]
-                    );
+                    $catName = strtoupper(trim($row['kategori']));
+                    $category = Category::withTrashed()->where('name', $catName)->first();
+                    if (!$category) {
+                        try {
+                            $category = Category::create([
+                                'name' => $catName,
+                                'type' => 'umum',
+                                'description' => 'Kategori ' . $catName,
+                                'created_by' => 1,
+                            ]);
+                        } catch (\Exception $e) {
+                            $category = Category::withTrashed()->get()->first(function($c) use ($catName) {
+                                return strtoupper(preg_replace('/\s+/u', '', $c->name)) === strtoupper(preg_replace('/\s+/u', '', $catName));
+                            });
+                            if (!$category) throw $e;
+                        }
+                    }
+                    if ($category && $category->trashed()) {
+                        $category->restore();
+                    }
 
-                    $unitShortName = trim($row['satuan']);
-                    $unit = Unit::firstOrCreate(
-                        ['short_name' => $unitShortName],
-                        [
-                            'name' => $unitShortName,
-                            'short_name' => $unitShortName
-                        ]
-                    );
+                    $unitShortName = strtoupper(trim($row['satuan']));
+                    $unit = Unit::withTrashed()
+                        ->where('short_name', $unitShortName)
+                        ->orWhere('name', $unitShortName)
+                        ->first();
+                        
+                    if (!$unit) {
+                        try {
+                            $unit = Unit::create([
+                                'name' => $unitShortName,
+                                'short_name' => $unitShortName,
+                                'symbol' => $unitShortName,
+                                'description' => 'Satuan ' . $unitShortName,
+                            ]);
+                        } catch (\Exception $e) {
+                            $unit = Unit::withTrashed()->get()->first(function($u) use ($unitShortName) {
+                                $cleanInput = strtoupper(preg_replace('/\s+/u', '', $unitShortName));
+                                return strtoupper(preg_replace('/\s+/u', '', $u->name)) === $cleanInput || 
+                                       strtoupper(preg_replace('/\s+/u', '', $u->short_name)) === $cleanInput;
+                            });
+                            if (!$unit) throw $e;
+                        }
+                    }
+                    if ($unit && $unit->trashed()) {
+                        $unit->restore();
+                    }
 
                     // ✅ Cast kode to string (handle numeric from Excel)
-                    $kode = (string) trim($row['kode']);
-                    $item = Item::firstOrNew(['code' => $kode]);
+                    $kode = strtoupper(trim((string) $row['kode']));
+                    $item = Item::withTrashed()->firstOrNew(['code' => $kode]);
+                    if ($item->trashed()) {
+                        $item->restore();
+                    }
 
                     $stokLama = $item->stock ?? 0;
                     $stokBaru = isset($row['stok_awal']) ? (float) $row['stok_awal'] : 0;
