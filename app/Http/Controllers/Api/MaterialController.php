@@ -331,7 +331,7 @@ class MaterialController extends Controller
                         'warehouse_id' => $initialWarehouseId,
                     ],
                     [
-                        'qty' => $initialStock,
+                        'qty_pcs' => $initialStock,
                     ]
                 );
 
@@ -520,7 +520,7 @@ class MaterialController extends Controller
                             'warehouse_id' => $initialWarehouseId,
                         ],
                         [
-                            'qty' => $initialStock,
+                            'qty_pcs' => $initialStock,
                         ]
                     );
 

@@ -120,7 +120,7 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
                             'warehouse_id' => $this->packingWarehouseId,
                         ],
                         [
-                            'qty' => $stok,
+                            'qty_pcs' => $stok,
                         ]
                     );
 

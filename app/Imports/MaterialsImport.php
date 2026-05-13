@@ -242,7 +242,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                                     'warehouse_id' => $warehouse->id,
                                 ],
                                 [
-                                    'qty' => $stokBaru,
+                                    'qty_pcs' => $stokBaru,
                                 ]
                             );
 

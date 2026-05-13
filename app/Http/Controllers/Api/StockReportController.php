@@ -137,7 +137,7 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0 && !$warehouseId) {
+                if ($totalFromStocks == 0) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 
@@ -182,7 +182,7 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0 && !$warehouseId) {
+                if ($totalFromStocks == 0) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 
@@ -202,13 +202,7 @@ class StockReportController extends Controller
                 return $item;
             });
 
-            if ($warehouseId) {
-                $collection = $collection->filter(function ($item) {
-                    return ($item->total_stock_from_stocks ?? 0) > 0;
-                })->values();
-
-                $items->setCollection($collection);
-            }
+            $items->setCollection($collection);
 
             return response()->json([
                 'success' => true,
