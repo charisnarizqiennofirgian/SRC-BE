@@ -33,11 +33,11 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
     {
         foreach ($rows as $index => $row) {
             try {
-                $kode = trim((string) ($row['kode'] ?? ''));
+                $kode = strtoupper(trim((string) ($row['kode'] ?? '')));
                 $nama = trim((string) ($row['nama'] ?? ''));
 
-                $kategori = trim((string) ($row['kategori'] ?? ''));
-                $satuan   = trim((string) ($row['satuan']   ?? ''));
+                $kategori = strtoupper(trim((string) ($row['kategori'] ?? '')));
+                $satuan   = strtoupper(trim((string) ($row['satuan']   ?? '')));
 
                 if ($kode === '' || $nama === '' || $kategori === '' || $satuan === '') {
                     Log::warning("ROW #{$index} - DITOLAK: kode/nama/kategori/satuan kosong");
@@ -45,28 +45,40 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 }
 
                 // Category
-                $category = Category::withTrashed()->firstOrCreate(
-                    ['name' => $kategori],
-                    [
-                        'type' => 'umum',
-                        'description' => 'Kategori untuk barang umum',
-                        'created_by' => 1,
-                    ]
-                );
-                if ($category->trashed()) {
+                $category = Category::withTrashed()->where('name', $kategori)->first();
+                if (!$category) {
+                    try {
+                        $category = Category::create([
+                            'name' => $kategori,
+                            'type' => 'umum',
+                            'description' => 'Kategori untuk barang umum',
+                            'created_by' => 1,
+                        ]);
+                    } catch (\Exception $e) {
+                        $category = Category::withTrashed()->where('name', $kategori)->first();
+                        if (!$category) throw $e;
+                    }
+                }
+                if ($category && $category->trashed()) {
                     $category->restore();
                 }
 
                 // Unit
-                $unit = Unit::withTrashed()->firstOrCreate(
-                    ['name' => $satuan],
-                    [
-                        'short_name' => $satuan,
-                        'symbol' => $satuan,
-                        'description' => 'Satuan untuk ' . $satuan,
-                    ]
-                );
-                if ($unit->trashed()) {
+                $unit = Unit::withTrashed()->where('name', $satuan)->first();
+                if (!$unit) {
+                    try {
+                        $unit = Unit::create([
+                            'name' => $satuan,
+                            'short_name' => $satuan,
+                            'symbol' => $satuan,
+                            'description' => 'Satuan untuk ' . $satuan,
+                        ]);
+                    } catch (\Exception $e) {
+                        $unit = Unit::withTrashed()->where('name', $satuan)->first();
+                        if (!$unit) throw $e;
+                    }
+                }
+                if ($unit && $unit->trashed()) {
                     $unit->restore();
                 }
 
@@ -84,17 +96,23 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 $stokAwal = (float) ($row['stok_awal'] ?? 0);
 
                 // 1. Master Item
-                $item = Item::withTrashed()->firstOrCreate(
-                    ['code' => $kode],
-                    [
-                        'name' => $nama,
-                        'category_id' => $category->id,
-                        'unit_id' => $unit->id,
-                        'type' => 'um',
-                        'uuid' => Str::uuid(),
-                    ]
-                );
-                if ($item->trashed()) {
+                $item = Item::withTrashed()->where('code', $kode)->first();
+                if (!$item) {
+                    try {
+                        $item = Item::create([
+                            'code' => $kode,
+                            'name' => $nama,
+                            'category_id' => $category->id,
+                            'unit_id' => $unit->id,
+                            'type' => 'um',
+                            'uuid' => Str::uuid(),
+                        ]);
+                    } catch (\Exception $e) {
+                        $item = Item::withTrashed()->where('code', $kode)->first();
+                        if (!$item) throw $e;
+                    }
+                }
+                if ($item && $item->trashed()) {
                     $item->restore();
                 }
 
