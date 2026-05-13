@@ -14,8 +14,7 @@ class PermissionsSeeder extends Seeder
     {
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
-        // Hapus semua permission lama
-        Permission::query()->delete();
+        // Tidak hapus semua — hanya tambah yang belum ada
 
         $permissions = [
             // Dashboard
@@ -57,6 +56,7 @@ class PermissionsSeeder extends Seeder
             'produksi-sanding',
             'produksi-rustik',
             'produksi-finishing',
+            'produksi-anyam',
             'produksi-qc-final',
             'produksi-packing',
             'produksi-master-bom',
@@ -84,10 +84,7 @@ class PermissionsSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::firstOrCreate(
-                ['name' => $permission],
-                ['guard_name' => 'web']
-            );
+            Permission::firstOrCreate(['name' => $permission]);
         }
 
         // Super Admin dapat semua permission

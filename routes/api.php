@@ -53,6 +53,7 @@ use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\RustikKomponenController;
 use App\Http\Controllers\Api\AssemblingProductionController;
 use App\Http\Controllers\Api\QcFinalController;
+use App\Http\Controllers\Api\AnyamController;
 
 
 /*
@@ -338,6 +339,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // --- PROSES FINISHING ---
     Route::post('/produksi/finishing/store', [FinishingController::class, 'store']);
+
+    // --- PROSES ANYAM ---
+    Route::prefix('produksi/anyam')->group(function () {
+        Route::get('/available-pos',      [AnyamController::class, 'getAvailableProductionOrders']);
+        Route::get('/source-inventories', [AnyamController::class, 'sourceInventories']);
+        Route::post('/',                  [AnyamController::class, 'store']);
+    });
 
     // --- QC FINAL ---
     Route::prefix('qc-final')->group(function () {
