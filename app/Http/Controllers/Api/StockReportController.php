@@ -80,7 +80,10 @@ class StockReportController extends Controller
                 $search = $request->input('search');
                 $query->where(function ($q) use ($search) {
                     $q->where('items.name', 'like', "%{$search}%")
-                        ->orWhere('items.code', 'like', "%{$search}%");
+                        ->orWhere('items.code', 'like', "%{$search}%")
+                        ->orWhere('items.buyer_name', 'like', "%{$search}%")
+                        ->orWhere('items.nama_produk', 'like', "%{$search}%")
+                        ->orWhereRaw('LOWER(items.specifications) LIKE ?', ['%' . strtolower($search) . '%']);
                 });
             }
 
