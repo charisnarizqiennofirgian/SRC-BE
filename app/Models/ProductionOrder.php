@@ -12,6 +12,7 @@ class ProductionOrder extends Model
     protected $fillable = [
         'po_number',
         'sales_order_id',
+        'type',
         'status',
         'current_stage',
         'skip_sawmill',

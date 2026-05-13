@@ -57,6 +57,11 @@ class ProductionOrderController extends Controller
             ]);
         }
 
+        // Filter by type (production / sample)
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
         // ✅ FILTER BY CURRENT STAGE (UNTUK MENU MOULDING, ASSEMBLY, DST)
         if ($request->filled('current_stage')) {
             $query->where('current_stage', $request->current_stage);
@@ -230,6 +235,42 @@ class ProductionOrderController extends Controller
                         : 'PO bisa langsung ke Pembahanan (RST tersedia)',
                     'missing_items' => $routing['missing_items'],
                 ],
+            ]);
+        });
+    }
+
+    // BUAT PO SAMPEL DARI SALES ORDER
+    public function storeFromSalesOrderSample(Request $request, SalesOrder $salesOrder)
+    {
+        return DB::transaction(function () use ($request, $salesOrder) {
+            $salesOrder->load('buyer');
+            $poNumber = 'Sampel - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
+
+            $productionOrder = ProductionOrder::create([
+                'po_number'      => $poNumber,
+                'sales_order_id' => $salesOrder->id,
+                'status'         => 'released',
+                'current_stage'  => ProductionOrder::STAGE_PENDING,
+                'skip_sawmill'   => false,
+                'type'           => 'sample',
+                'notes'          => $request->input('notes'),
+                'created_by'     => $request->user()->id,
+            ]);
+
+            foreach ($salesOrder->details as $detail) {
+                ProductionOrderDetail::create([
+                    'production_order_id'   => $productionOrder->id,
+                    'sales_order_detail_id' => $detail->id,
+                    'item_id'               => $detail->item_id,
+                    'qty_planned'           => $detail->quantity,
+                    'qty_produced'          => 0,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Production Order Sampel berhasil dibuat.',
+                'data'    => $productionOrder->load('details'),
             ]);
         });
     }

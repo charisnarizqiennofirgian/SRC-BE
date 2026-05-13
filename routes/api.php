@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\RustikKomponenController;
 use App\Http\Controllers\Api\AssemblingProductionController;
 use App\Http\Controllers\Api\QcFinalController;
 use App\Http\Controllers\Api\AnyamController;
+use App\Http\Controllers\Api\PrototypeController;
 
 
 /*
@@ -278,6 +279,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
     Route::post('/candy-productions', [CandyProductionController::class, 'store']);
     Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
+    Route::post('/sales-orders/{salesOrder}/generate-sample-po', [ProductionOrderController::class, 'storeFromSalesOrderSample']);
     Route::get('/production-orders', [ProductionOrderController::class, 'index']);
     Route::get('/production-orders/simple', [ProductionOrderController::class, 'simpleList']);
     Route::get('/production-orders/{productionOrder}', [ProductionOrderController::class, 'show']);
@@ -345,6 +347,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/available-pos',      [AnyamController::class, 'getAvailableProductionOrders']);
         Route::get('/source-inventories', [AnyamController::class, 'sourceInventories']);
         Route::post('/',                  [AnyamController::class, 'store']);
+    });
+
+    // --- PROSES PROTOTYPE ---
+    Route::prefix('produksi/prototype')->group(function () {
+        Route::get('/available-pos',      [PrototypeController::class, 'getAvailableProductionOrders']);
+        Route::get('/source-inventories', [PrototypeController::class, 'sourceInventories']);
+        Route::post('/',                  [PrototypeController::class, 'store']);
     });
 
     // --- QC FINAL ---
