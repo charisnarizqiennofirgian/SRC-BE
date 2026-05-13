@@ -45,24 +45,30 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 }
 
                 // Category
-                $category = Category::firstOrCreate(
-                    ['name' => $row['kategori']],
+                $category = Category::withTrashed()->firstOrCreate(
+                    ['name' => $kategori],
                     [
                         'type' => 'umum',
                         'description' => 'Kategori untuk barang umum',
                         'created_by' => 1,
                     ]
                 );
+                if ($category->trashed()) {
+                    $category->restore();
+                }
 
                 // Unit
-                $unit = Unit::firstOrCreate(
-                    ['name' => $row['satuan']],
+                $unit = Unit::withTrashed()->firstOrCreate(
+                    ['name' => $satuan],
                     [
-                        'short_name' => $row['satuan'],
-                        'symbol' => $row['satuan'],
-                        'description' => 'Satuan untuk ' . $row['satuan'],
+                        'short_name' => $satuan,
+                        'symbol' => $satuan,
+                        'description' => 'Satuan untuk ' . $satuan,
                     ]
                 );
+                if ($unit->trashed()) {
+                    $unit->restore();
+                }
 
                 // Gudang dari Excel atau default
                 $gudangCode = strtoupper(trim($row['gudang'] ?? ''));
@@ -78,7 +84,7 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 $stokAwal = (float) ($row['stok_awal'] ?? 0);
 
                 // 1. Master Item
-                $item = Item::firstOrCreate(
+                $item = Item::withTrashed()->firstOrCreate(
                     ['code' => $kode],
                     [
                         'name' => $nama,
@@ -88,6 +94,9 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                         'uuid' => Str::uuid(),
                     ]
                 );
+                if ($item->trashed()) {
+                    $item->restore();
+                }
 
                 $item->stock = $stokAwal;
                 $item->category_id = $category->id;
