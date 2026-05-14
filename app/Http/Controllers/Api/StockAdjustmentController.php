@@ -9,6 +9,7 @@ use App\Models\StockMovement;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\KayuLogStockImport;
 use App\Imports\KayuStockImport;
@@ -153,6 +154,8 @@ class StockAdjustmentController extends Controller
             Excel::import(new UmumStockImport, $file, null, $readerType);
 
             DB::commit();
+
+            Cache::flush();
 
             return response()->json([
                 'success' => true,

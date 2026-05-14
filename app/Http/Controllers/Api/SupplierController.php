@@ -34,6 +34,12 @@ class SupplierController extends Controller
                       ->orWhere('phone', 'like', "%{$search}%");
             }
 
+            // Return semua data tanpa pagination jika all=true
+            if ($request->boolean('all')) {
+                $suppliers = $query->get();
+                return response()->json(['data' => $suppliers], 200);
+            }
+
             // Paginate hasil query
             $suppliers = $query->paginate($perPage);
 
