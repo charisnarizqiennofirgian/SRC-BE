@@ -21,6 +21,15 @@ use App\Imports\MaterialsImport;
 
 class MaterialController extends Controller
 {
+    private function clearMaterialsCache(): void
+    {
+        Cache::forget('materials_all');
+        $slugs = Category::pluck('name')->map(fn($name) => Str::slug($name));
+        foreach ($slugs as $slug) {
+            Cache::forget('materials_all_cat_' . $slug);
+        }
+    }
+
     private function calculateVolumeM3(array $itemData): ?float
     {
         $category = Category::find($itemData['category_id'] ?? null);
@@ -62,21 +71,17 @@ class MaterialController extends Controller
 
             if ($request->query('all')) {
 
-                // ✅ TAMBAHAN: Support filter category_ids (untuk optimasi FormOperasional)
+                // category_ids: query langsung tanpa cache karena kombinasi ID terlalu dinamis untuk di-invalidate
                 if ($request->filled('category_ids')) {
                     $categoryIds = array_filter(
                         array_map('intval', explode(',', $request->category_ids))
                     );
-                    sort($categoryIds);
-                    $cacheKey = 'materials_all_cat_ids_' . implode('_', $categoryIds);
 
-                    $items = Cache::remember($cacheKey, now()->addMinutes(15), function () use ($categoryIds) {
-                        return Item::with(['category:id,name', 'unit:id,name'])
-                            ->whereIn('category_id', $categoryIds)
-                            ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock')
-                            ->orderBy('name')
-                            ->get();
-                    });
+                    $items = Item::with(['category:id,name', 'unit:id,name'])
+                        ->whereIn('category_id', $categoryIds)
+                        ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock')
+                        ->orderBy('name')
+                        ->get();
 
                     return response()->json(['success' => true, 'data' => $items]);
                 }
@@ -353,10 +358,7 @@ class MaterialController extends Controller
 
             DB::commit();
 
-            Cache::forget('materials_all');
-            Cache::forget('materials_all_cat_kayu-rst');
-            Cache::forget('materials_all_cat_produk-jadi');
-            Cache::forget('materials_all_cat_karton-box');
+            $this->clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
@@ -546,10 +548,7 @@ class MaterialController extends Controller
 
             DB::commit();
 
-            Cache::forget('materials_all');
-            Cache::forget('materials_all_cat_kayu-rst');
-            Cache::forget('materials_all_cat_produk-jadi');
-            Cache::forget('materials_all_cat_karton-box');
+            $this->clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
@@ -570,10 +569,7 @@ class MaterialController extends Controller
     {
         try {
             $material->delete();
-            Cache::forget('materials_all');
-            Cache::forget('materials_all_cat_kayu-rst');
-            Cache::forget('materials_all_cat_produk-jadi');
-            Cache::forget('materials_all_cat_karton-box');
+            $this->clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
@@ -766,10 +762,7 @@ class MaterialController extends Controller
 
             Excel::import(new MaterialsImport(), $file, null, $readerType);
 
-            Cache::forget('materials_all');
-            Cache::forget('materials_all_cat_kayu-rst');
-            Cache::forget('materials_all_cat_produk-jadi');
-            Cache::forget('materials_all_cat_karton-box');
+            $this->clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
