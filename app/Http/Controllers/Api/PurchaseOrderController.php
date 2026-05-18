@@ -40,17 +40,18 @@ class PurchaseOrderController extends Controller
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
 
             $order = PurchaseOrder::create([
-                'po_number' => $this->generatePoNumber(),
-                'supplier_id' => $validatedData['supplier_id'],
-                'order_date' => $validatedData['order_date'],
-                'delivery_date' => $validatedData['delivery_date'] ?? null,
-                'status' => 'Open',
-                'notes' => $validatedData['notes'] ?? null,
-                'type' => $validatedData['type'],
-                'subtotal' => $totals['subtotal'],
-                'ppn_percentage' => $totals['ppn_percentage'],
-                'ppn_amount' => $totals['ppn_amount'],
-                'grand_total' => $totals['grand_total'],
+                'po_number'       => $this->generatePoNumber(),
+                'supplier_id'     => $validatedData['supplier_id'],
+                'order_date'      => $validatedData['order_date'],
+                'delivery_date'   => $validatedData['delivery_date'] ?? null,
+                'no_surat_jalan'  => $validatedData['no_surat_jalan'] ?? null,
+                'status'          => 'Open',
+                'notes'           => $validatedData['notes'] ?? null,
+                'type'            => $validatedData['type'],
+                'subtotal'        => $totals['subtotal'],
+                'ppn_percentage'  => $totals['ppn_percentage'],
+                'ppn_amount'      => $totals['ppn_amount'],
+                'grand_total'     => $totals['grand_total'],
             ]);
 
             $order->details()->createMany($this->prepareDetails($validatedData['details']));
@@ -242,7 +243,9 @@ class PurchaseOrderController extends Controller
             'details.*.item_id' => 'required|exists:items,id',
             'details.*.quantity' => 'required|numeric|min:0.01',
             'details.*.price' => 'required|numeric|min:0',
-            'details.*.specifications' => 'nullable|array',
+            'details.*.specifications'  => 'nullable|array',
+            'no_surat_jalan'            => 'nullable|string|max:100',
+            'details.*.delivery_date'   => 'nullable|date',
         ]);
     }
 
@@ -269,11 +272,12 @@ class PurchaseOrderController extends Controller
     {
         return collect($details)->map(function ($item) {
             return [
-                'item_id' => $item['item_id'],
+                'item_id'          => $item['item_id'],
                 'quantity_ordered' => $item['quantity'],
-                'price' => $item['price'],
-                'subtotal' => $item['quantity'] * $item['price'],
-                'specifications' => isset($item['specifications']) ? json_encode($item['specifications']) : null,
+                'price'            => $item['price'],
+                'subtotal'         => $item['quantity'] * $item['price'],
+                'delivery_date'    => $item['delivery_date'] ?? null,
+                'specifications'   => isset($item['specifications']) ? json_encode($item['specifications']) : null,
             ];
         })->all();
     }
