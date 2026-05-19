@@ -290,7 +290,7 @@ class PurchaseOrderController extends Controller
 
         $lastOrder = PurchaseOrder::whereYear('created_at', $year)
             ->whereMonth('created_at', $month)
-            ->orderBy('id', 'desc')
+            ->orderByRaw("CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(po_number, '.', 2), '.', -1) AS UNSIGNED) DESC")
             ->first();
 
         $counter = 1;
@@ -299,8 +299,15 @@ class PurchaseOrderController extends Controller
         }
 
         $counterPadded = str_pad($counter, 3, '0', STR_PAD_LEFT);
+        $candidate = "No.{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
 
-        return "No.{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
+        while (PurchaseOrder::where('po_number', $candidate)->exists()) {
+            $counter++;
+            $counterPadded = str_pad($counter, 3, '0', STR_PAD_LEFT);
+            $candidate = "No.{$counterPadded}/PO-SBC/{$romanMonth}/{$year}";
+        }
+
+        return $candidate;
     }
 
     private function toRoman(int $month): string
