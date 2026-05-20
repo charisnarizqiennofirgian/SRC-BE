@@ -79,10 +79,7 @@ class PurchaseRequestController extends Controller
         DB::beginTransaction();
         try {
             // Generate PR number
-            $count = PurchaseRequest::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->count();
-            $prNumber = 'PR-' . now()->format('Ym') . '-' . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
+            $prNumber = $this->generatePrNumber();
 
             $pr = PurchaseRequest::create([
                 'pr_number'    => $prNumber,
@@ -343,5 +340,32 @@ class PurchaseRequestController extends Controller
             Log::error('Error convert PR to PO: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Gagal konvert ke PO.'], 500);
         }
+    }
+
+    private function generatePrNumber(): string
+    {
+        $year  = now()->format('Y');
+        $month = now()->format('m');
+
+        // Ambil nomor tertinggi yang pernah ada bulan ini
+        $last = PurchaseRequest::whereYear('created_at', $year)
+            ->whereMonth('created_at', $month)
+            ->orderByRaw("CAST(SUBSTRING_INDEX(pr_number, '-', -1) AS UNSIGNED) DESC")
+            ->first();
+
+        $counter = 1;
+        if ($last && preg_match('/PR-\d{6}-(\d{3})/', $last->pr_number, $matches)) {
+            $counter = intval($matches[1]) + 1;
+        }
+
+        // Pastikan tidak duplikat dengan while loop
+        $candidate = 'PR-' . $year . $month . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
+
+        while (PurchaseRequest::where('pr_number', $candidate)->exists()) {
+            $counter++;
+            $candidate = 'PR-' . $year . $month . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
+        }
+
+        return $candidate;
     }
 }
