@@ -100,9 +100,9 @@ class StockReportController extends Controller
             }
 
             if ($request->filled('warehouse_id')) {
-                $query->whereHas('stocks', function ($q) use ($request) {
+                $query->whereHas('inventories', function ($q) use ($request) {
                     $q->where('warehouse_id', $request->input('warehouse_id'))
-                      ->where('quantity', '>', 0);
+                      ->where('qty_pcs', '>', 0);
                 });
             }
 
