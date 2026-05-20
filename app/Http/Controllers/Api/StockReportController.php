@@ -99,6 +99,13 @@ class StockReportController extends Controller
                 $query->where('items.mutu', $request->input('mutu'));
             }
 
+            if ($request->filled('warehouse_id')) {
+                $query->whereHas('stocks', function ($q) use ($request) {
+                    $q->where('warehouse_id', $request->input('warehouse_id'))
+                      ->where('quantity', '>', 0);
+                });
+            }
+
             $sortBy = $request->input('sort_by', 'name');
             $sortOrder = $request->input('sort_order', 'asc');
             $allowedSortFields = ['name', 'code', 'created_at', 'tanggal_terima'];
