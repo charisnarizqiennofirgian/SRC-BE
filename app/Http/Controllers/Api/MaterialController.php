@@ -893,13 +893,17 @@ class MaterialController extends Controller
     public function quickStoreRst(Request $request)
     {
         $data = $request->validate([
-            'nama_dasar'  => ['required', 'string', 'max:255'],
-            'kode_barang' => ['nullable', 'string', 'max:100', 'unique:items,code'],
-            'tebal_mm'    => ['required', 'numeric', 'min:0'],
-            'lebar_mm'    => ['nullable', 'numeric', 'min:0'],
-            'panjang_mm'  => ['nullable', 'numeric', 'min:0'],
-            'jenis'       => ['nullable', 'string', 'max:100'],
-            'kualitas'    => ['nullable', 'string', 'max:100'],
+            'nama_dasar'         => ['required', 'string', 'max:255'],
+            'kode_barang'        => ['nullable', 'string', 'max:100', 'unique:items,code'],
+            'tebal_mm'           => ['required', 'numeric', 'min:0'],
+            'lebar_mm'           => ['nullable', 'numeric', 'min:0'],
+            'panjang_mm'         => ['nullable', 'numeric', 'min:0'],
+            'jenis'              => ['nullable', 'string', 'max:100'],
+            'kualitas'           => ['nullable', 'string', 'max:100'],
+            'no_rak'             => ['nullable', 'string', 'max:100'],
+            'cutting_tebal_mm'   => ['nullable', 'numeric', 'min:0'],
+            'cutting_lebar_mm'   => ['nullable', 'numeric', 'min:0'],
+            'cutting_panjang_mm' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         $categoryKayu = \App\Models\Category::firstOrCreate(
@@ -934,6 +938,11 @@ class MaterialController extends Controller
             'volume_m3'      => $volumeM3,
             'kubikasi'       => $volumeM3,
             'jenis'          => $data['jenis'] ?? null,
+            'kualitas'       => $data['kualitas'] ?? null,
+            'no_rak'         => $data['no_rak'] ?? null,
+            'cutting_t'      => $data['cutting_tebal_mm'] ?? null,
+            'cutting_l'      => $data['cutting_lebar_mm'] ?? null,
+            'cutting_p'      => $data['cutting_panjang_mm'] ?? null,
             'specifications' => [
                 't'          => $t,
                 'l'          => $l,
@@ -946,12 +955,17 @@ class MaterialController extends Controller
             'success' => true,
             'message' => "Item RST '{$uniqueName}' berhasil ditambahkan.",
             'data' => [
-                'id'       => $item->id,
-                'code'     => $item->code,
-                'name'     => $item->name,
-                'label'    => "{$item->code} - {$item->name}",
-                'volume_m3'=> $item->volume_m3,
+                'id'             => $item->id,
+                'code'           => $item->code,
+                'name'           => $item->name,
+                'label'          => "{$item->code} - {$item->name}",
+                'volume_m3'      => $item->volume_m3,
                 'specifications' => $item->specifications,
+                'cutting_t'      => $item->cutting_t,
+                'cutting_l'      => $item->cutting_l,
+                'cutting_p'      => $item->cutting_p,
+                'no_rak'         => $item->no_rak,
+                'kualitas'       => $item->kualitas,
             ],
         ], 201);
     }
