@@ -94,7 +94,11 @@ class MaterialController extends Controller
 
                 $items = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($request) {
                     return Item::with(['category:id,name', 'unit:id,name'])
-                        ->select('id', 'name', 'code', 'unit_id', 'category_id', 'stock')
+                        ->select(
+                            'id', 'name', 'code', 'unit_id', 'category_id', 'stock',
+                            'specifications', 'cutting_t', 'cutting_l', 'cutting_p',
+                            'kualitas', 'no_rak'
+                        )
                         ->when($request->filled('category_name'), function ($q) use ($request) {
                             $q->whereHas('category', function ($qq) use ($request) {
                                 $qq->where('name', 'like', '%' . $request->category_name . '%');
@@ -950,6 +954,8 @@ class MaterialController extends Controller
                 'm3_per_pcs' => $volumeM3,
             ],
         ]);
+
+        $this->clearMaterialsCache();
 
         return response()->json([
             'success' => true,
