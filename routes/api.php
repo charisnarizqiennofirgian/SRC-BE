@@ -423,6 +423,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // --- JURNAL UMUM ---
+    // Opening Balance
+    Route::get('/journal-entries/opening-balance/check',    [JournalEntryController::class, 'checkOpeningBalance']);
+    Route::get('/journal-entries/opening-balance/template', [JournalEntryController::class, 'downloadTemplate']);
+    Route::post('/journal-entries/opening-balance',         [JournalEntryController::class, 'storeOpeningBalance']);
+    Route::delete('/journal-entries/opening-balance',       [JournalEntryController::class, 'destroyOpeningBalance']);
+    Route::post('/journal-entries/opening-balance/import',  [JournalEntryController::class, 'importOpeningBalance']);
+
     Route::prefix('journal-entries')->group(function () {
         Route::get('/', [JournalEntryController::class, 'index']);
         Route::post('/manual', [JournalEntryController::class, 'storeManual']);

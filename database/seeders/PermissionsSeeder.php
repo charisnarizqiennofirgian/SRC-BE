@@ -31,6 +31,7 @@ class PermissionsSeeder extends Seeder
 
             // Keuangan
             'keuangan-jurnal-umum',
+            'keuangan-opening-balance',
             'keuangan-buku-besar',
             'keuangan-laba-rugi',
             'keuangan-pembayaran-hutang',

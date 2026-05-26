@@ -25,6 +25,7 @@ class JournalEntry extends Model
         'unpost_reason',
         'last_edited_by',
         'last_edited_at',
+        'is_opening_balance',
     ];
 
     protected $casts = [

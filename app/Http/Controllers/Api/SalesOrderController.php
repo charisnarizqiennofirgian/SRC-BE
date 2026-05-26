@@ -174,9 +174,15 @@ class SalesOrderController extends Controller
 
             $salesOrders->getCollection()->transform(function ($so) use ($packingWarehouseId) {
                 $so->details->transform(function ($detail) use ($packingWarehouseId) {
-                    $detail->current_stock = (float) Inventory::where('item_id', $detail->item_id)
+                    $packingStock = (float) Inventory::where('item_id', $detail->item_id)
                         ->where('warehouse_id', $packingWarehouseId)
                         ->sum('qty_pcs');
+
+                    // Fall back to items.stock when no inventory row exists in PACKING,
+                    // mirroring the same logic used by the stock index report.
+                    $detail->current_stock = $packingStock > 0
+                        ? $packingStock
+                        : (float) ($detail->item->stock ?? 0);
 
                     return $detail;
                 });

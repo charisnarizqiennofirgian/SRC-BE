@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Item;
+use App\Models\Inventory;
+use App\Models\Warehouse;
 use App\Models\StockMovement;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -64,6 +66,20 @@ class StockAdjustmentController extends Controller
 
             $item->increment('stock', $movementQuantity);
             $item->refresh();
+
+            // Untuk Produk Jadi, sync juga ke tabel inventories gudang PACKING
+            // agar form pengiriman membaca stok yang sama dengan hasil adjustment ini.
+            if ($item->type === Item::TYPE_FINISHED_GOOD) {
+                $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+                if ($packingWarehouseId) {
+                    $inventory = Inventory::firstOrCreate(
+                        ['warehouse_id' => $packingWarehouseId, 'item_id' => $item->id],
+                        ['qty_pcs' => 0, 'qty_m3' => 0]
+                    );
+                    $newQty = $inventory->qty_pcs + $movementQuantity;
+                    $inventory->update(['qty_pcs' => max(0, $newQty)]);
+                }
+            }
 
             DB::commit();
 
