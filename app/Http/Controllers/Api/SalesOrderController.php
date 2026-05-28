@@ -71,6 +71,8 @@ class SalesOrderController extends Controller
 
             'currency' => 'required|string|in:IDR,USD',
             'exchange_rate' => 'nullable|numeric',
+            'shipment_date' => 'nullable|date',
+            'payment_term' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -87,6 +89,8 @@ class SalesOrderController extends Controller
                 'buyer_id',
                 'so_date',
                 'delivery_date',
+                'shipment_date',
+                'payment_term',
                 'customer_po_number',
                 'notes',
                 'status',
@@ -94,7 +98,7 @@ class SalesOrderController extends Controller
                 'discount',
                 'tax_ppn',
                 'tax_rate',
-                'grand_total',  // ← TAMBAH tax_rate
+                'grand_total',
                 'currency'
             ]);
 
@@ -225,7 +229,7 @@ class SalesOrderController extends Controller
                         'keterangan'
                     );
                 },
-                'details.item:id,name,code'
+                'details.item:id,name,code,hs_code'
             ])->findOrFail($id);
 
             return response()->json([
@@ -268,6 +272,8 @@ class SalesOrderController extends Controller
 
             'currency' => 'required|string|in:IDR,USD',
             'exchange_rate' => 'nullable|numeric',
+            'shipment_date' => 'nullable|date',
+            'payment_term' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -286,6 +292,8 @@ class SalesOrderController extends Controller
                 'buyer_id',
                 'so_date',
                 'delivery_date',
+                'shipment_date',
+                'payment_term',
                 'customer_po_number',
                 'notes',
                 'status',
@@ -293,7 +301,7 @@ class SalesOrderController extends Controller
                 'discount',
                 'tax_ppn',
                 'tax_rate',
-                'grand_total',  // ← TAMBAH tax_rate
+                'grand_total',
                 'currency'
             ]);
 
@@ -386,5 +394,51 @@ class SalesOrderController extends Controller
         }
 
         return $prefix . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+    }
+
+    public function generatePINumber(string $id)
+    {
+        DB::beginTransaction();
+        try {
+            $salesOrder = SalesOrder::lockForUpdate()->findOrFail($id);
+
+            if ($salesOrder->no_pi) {
+                return response()->json([
+                    'success' => true,
+                    'no_pi' => $salesOrder->no_pi,
+                ]);
+            }
+
+            $yymm = date('ym');
+
+            $last = SalesOrder::whereNotNull('no_pi')
+                ->where('no_pi', 'LIKE', "PI/{$yymm}/%")
+                ->orderByRaw('CAST(SUBSTRING(no_pi, 9) AS UNSIGNED) DESC')
+                ->first();
+
+            $newNumber = 1;
+            if ($last) {
+                $lastSeq = (int) substr($last->no_pi, strrpos($last->no_pi, '/') + 1);
+                $newNumber = $lastSeq + 1;
+            }
+
+            $noPi = 'PI/' . $yymm . '/' . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+
+            $salesOrder->update(['no_pi' => $noPi]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'no_pi' => $noPi,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Gagal generate PI number: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal generate nomor PI: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

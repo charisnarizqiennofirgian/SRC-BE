@@ -12,10 +12,13 @@ class SalesOrder extends Model
 
     protected $fillable = [
     'so_number',
+    'no_pi',
     'buyer_id',
     'user_id',
     'so_date',
     'delivery_date',
+    'shipment_date',
+    'payment_term',
     'customer_po_number',
     'subtotal',
     'discount',
@@ -31,6 +34,7 @@ class SalesOrder extends Model
     protected $casts = [
         'so_date' => 'date',
         'delivery_date' => 'date',
+        'shipment_date' => 'date',
     ];
 
     protected $with = [

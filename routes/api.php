@@ -230,6 +230,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     // --- PENJUALAN ---
     Route::apiResource('sales-orders', SalesOrderController::class);
     Route::get('sales-orders-open', [SalesOrderController::class, 'getOpenSalesOrders']);
+    Route::get('sales-orders/{id}/generate-pi-number', [SalesOrderController::class, 'generatePINumber']);
 
     // --- PENGIRIMAN ---
     Route::prefix('delivery-orders')->group(function () {
