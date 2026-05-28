@@ -160,6 +160,9 @@ class ProductionMonitoringController extends Controller
                         'item_name'         => $detail->item?->name ?? '-',
                         'item_code'         => $detail->item?->code ?? '-',
                         'target'            => $target,
+                        'delivery_date'     => $detail->delivery_date
+                                                ? Carbon::parse($detail->delivery_date)->format('d/m/Y')
+                                                : '-',
 
                         // Zona Hulu
                         'status_sanwil'     => $statusHulu['sanwil'],

@@ -309,6 +309,7 @@ class PurchaseRequestController extends Controller
                 'notes'          => $request->notes,
                 'status'         => 'Open',
                 'type'           => $type,
+                'source_type'    => 'pr',
             ]);
 
             foreach ($request->details as $detail) {

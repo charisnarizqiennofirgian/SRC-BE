@@ -20,11 +20,16 @@ class PurchaseOrderController extends Controller
             $query->where('type', $request->type);
         }
 
+        if ($request->has('source_type')) {
+            $query->where('source_type', $request->source_type);
+        }
+
         if ($request->has('search')) {
             $query->where('po_number', 'like', '%' . $request->search . '%');
         }
 
-        $orders = $query->paginate(15);
+        $perPage = $request->get('per_page', 15);
+        $orders = $query->paginate($perPage);
         return response()->json(['success' => true, 'data' => $orders]);
     }
 
@@ -50,6 +55,7 @@ class PurchaseOrderController extends Controller
                 'status'          => 'Open',
                 'notes'           => $validatedData['notes'] ?? null,
                 'type'            => $validatedData['type'],
+                'source_type'     => 'direct',
                 'subtotal'        => $totals['subtotal'],
                 'ppn_percentage'  => $totals['ppn_percentage'],
                 'ppn_amount'      => $totals['ppn_amount'],

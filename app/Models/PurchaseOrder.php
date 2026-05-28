@@ -24,6 +24,7 @@ class PurchaseOrder extends Model
         'ppn_amount',
         'grand_total',
         'notes',
+        'source_type',
     ];
 
     /**
