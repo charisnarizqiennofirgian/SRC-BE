@@ -154,8 +154,8 @@ class OpeningBalanceImport implements ToArray
             if (str_starts_with($namaAkun, '=')) continue;
 
             if ($dualColMode) {
-                $valDebit  = $this->parseAngka($row[$saldoDebitCol]  ?? '');
-                $valKredit = $this->parseAngka($row[$saldoKreditCol] ?? '');
+                $valDebit  = abs($this->parseAngka($row[$saldoDebitCol]  ?? ''));
+                $valKredit = abs($this->parseAngka($row[$saldoKreditCol] ?? ''));
                 if ($valDebit == 0 && $valKredit == 0) continue;
             } else {
                 $saldoAkhir = $this->parseAngka($row[$saldoDebitCol] ?? '');
