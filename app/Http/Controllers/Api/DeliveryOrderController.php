@@ -138,9 +138,15 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
 
-               $currentStock = (float) Inventory::where('item_id', $detail['item_id'])
-    ->where('warehouse_id', $packingWarehouseId)
-    ->sum('qty_pcs');
+                $currentStock = (float) Inventory::where('item_id', $detail['item_id'])
+                    ->where('warehouse_id', $packingWarehouseId)
+                    ->sum('qty_pcs');
+
+                // Fallback ke items.stock jika inventories PACKING belum terisi
+                // (konsisten dengan tampilan di Stok Index Barang Jadi)
+                if ($currentStock <= 0) {
+                    $currentStock = (float) $item->stock;
+                }
 
                 if ($currentStock < $detail['quantity_shipped']) {
                     throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
@@ -243,28 +249,45 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Item ID {$detail->item_id} tidak ditemukan");
                 }
 
-                $currentStock = (float) Inventory::where('item_id', $detail->item_id)
+                $inventoryStock = (float) Inventory::where('item_id', $detail->item_id)
                     ->where('warehouse_id', $packingWarehouseId)
                     ->sum('qty_pcs');
 
-                if ($currentStock < $detail->quantity_shipped) {
-                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail->quantity_shipped}");
+                // Fallback ke items.stock jika inventories PACKING belum terisi
+                $useItemStockFallback = $inventoryStock <= 0;
+                $effectiveStock = $useItemStockFallback ? (float) $item->stock : $inventoryStock;
+
+                if ($effectiveStock < $detail->quantity_shipped) {
+                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$effectiveStock}, Diminta: {$detail->quantity_shipped}");
                 }
 
-                $inventories = Inventory::where('item_id', $detail->item_id)
-                    ->where('warehouse_id', $packingWarehouseId)
-                    ->where('qty_pcs', '>', 0)
-                    ->lockForUpdate()
-                    ->get();
-                
-                $remaining = $detail->quantity_shipped;
-                foreach ($inventories as $inv) {
-                    /** @var Inventory $inv */
-                    if ($remaining <= 0) break;
-                    $toTake = min($remaining, $inv->qty_pcs);
-                    $inv->decrement('qty_pcs', $toTake);
-                    $remaining -= $toTake;
+                if (!$useItemStockFallback) {
+                    // Normal: kurangi dari inventories
+                    $inventories = Inventory::where('item_id', $detail->item_id)
+                        ->where('warehouse_id', $packingWarehouseId)
+                        ->where('qty_pcs', '>', 0)
+                        ->lockForUpdate()
+                        ->get();
+
+                    $remaining = $detail->quantity_shipped;
+                    foreach ($inventories as $inv) {
+                        /** @var Inventory $inv */
+                        if ($remaining <= 0) break;
+                        $toTake = min($remaining, $inv->qty_pcs);
+                        $inv->decrement('qty_pcs', $toTake);
+                        $remaining -= $toTake;
+                    }
+                } else {
+                    // Fallback: stok ada di items.stock, sync ke inventories sekalian
+                    $inv = Inventory::firstOrCreate(
+                        ['warehouse_id' => $packingWarehouseId, 'item_id' => $detail->item_id],
+                        ['qty_pcs' => 0, 'qty_m3' => 0]
+                    );
+                    $inv->update(['qty_pcs' => max(0, (float) $item->stock - $detail->quantity_shipped)]);
                 }
+
+                // Selalu kurangi items.stock agar tetap sinkron
+                $item->decrement('stock', $detail->quantity_shipped);
 
                 StockMovement::create([
                     'item_id' => $detail->item_id,
