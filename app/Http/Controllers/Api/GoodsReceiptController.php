@@ -7,7 +7,6 @@ use App\Models\GoodsReceipt;
 use App\Models\PurchaseOrder;
 use App\Models\StockMovement;
 use App\Models\Warehouse;
-use App\Models\Stock;
 use App\Models\InventoryLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -81,20 +80,12 @@ class GoodsReceiptController extends Controller
                         'user_id' => Auth::id(),
                     ]);
 
+                    // items.stock adalah satu-satunya saldo global.
+                    // stocks per-warehouse tidak di-decrement saat barang keluar,
+                    // sehingga hanya InventoryLog yang dipakai untuk tracking per-warehouse.
                     $item = Item::find($detail['item_id']);
                     if ($item) {
                         $item->increment('stock', $detail['quantity_received']);
-                    }
-
-                    if ($bufferWarehouse) {
-                        $stock = Stock::firstOrCreate([
-                            'item_id' => $detail['item_id'],
-                            'warehouse_id' => $bufferWarehouse->id,
-                        ], [
-                            'quantity' => 0,
-                        ]);
-
-                        $stock->increment('quantity', $detail['quantity_received']);
                     }
                 }
             }

@@ -101,7 +101,7 @@ class DownPaymentService
     public function getAvailableDownPayments(int $buyerId)
     {
         return DownPayment::where('buyer_id', $buyerId)
-            ->where('status', 'PENDING')
+            ->whereIn('status', [DownPayment::STATUS_PENDING, DownPayment::STATUS_PARTIALLY_USED])
             ->where('remaining_amount', '>', 0)
             ->orderBy('payment_date', 'asc')
             ->get();

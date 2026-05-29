@@ -55,6 +55,8 @@ use App\Http\Controllers\Api\AssemblingProductionController;
 use App\Http\Controllers\Api\QcFinalController;
 use App\Http\Controllers\Api\AnyamController;
 use App\Http\Controllers\Api\PrototypeController;
+use App\Http\Controllers\Api\ArAgingController;
+use App\Http\Controllers\Api\ApAgingController;
 
 
 /*
@@ -396,6 +398,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/detail', [ProductionMonitoringController::class, 'detail']);
         Route::get('/export-excel', [ProductionMonitoringController::class, 'exportExcel']);
     });
+
+    // --- AR AGING (PIUTANG) ---
+    Route::get('/ar-aging', [ArAgingController::class, 'index']);
+
+    // --- AP AGING (HUTANG) ---
+    Route::get('/ap-aging', [ApAgingController::class, 'index']);
 
     // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
     Route::prefix('coa')->group(function () {
