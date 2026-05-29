@@ -48,23 +48,25 @@ class PackingController extends Controller
 
     // =============================================
     // POST: Simpan proses packing
-    // Output: stok Gudang Packing NAMBAH
+    // Output: stok keluar dari gudang sumber → masuk Gudang Packing
     // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'            => ['required', 'date'],
-            'ref_po_id'       => ['required', 'integer', 'exists:production_orders,id'],
-            'notes'           => ['nullable', 'string'],
-            'items'           => ['required', 'array', 'min:1'],
-            'items.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'items.*.qty'     => ['required', 'numeric', 'min:1'],
+            'date'                => ['required', 'date'],
+            'ref_po_id'           => ['required', 'integer', 'exists:production_orders,id'],
+            'source_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            'notes'               => ['nullable', 'string'],
+            'items'               => ['required', 'array', 'min:1'],
+            'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
+            'items.*.qty'         => ['required', 'numeric', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
             Log::info('=== PACKING START ===', ['po_id' => $data['ref_po_id']]);
 
             $warehousePacking = Warehouse::where('code', 'PACKING')->first();
+            $sourceWarehouse  = Warehouse::findOrFail($data['source_warehouse_id']);
 
             if (!$warehousePacking) {
                 throw ValidationException::withMessages([
@@ -88,7 +90,41 @@ class PackingController extends Controller
                 $qty      = $item['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // Tambah stok di Gudang Packing (produk jadi)
+                // === KURANGI STOK GUDANG SUMBER ===
+                $sourceInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $sourceWarehouse->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                $availableQty = $sourceInv?->qty_pcs ?? 0;
+                if ($availableQty < $qty) {
+                    throw ValidationException::withMessages([
+                        'items' => [
+                            "Stok '{$itemName}' di gudang {$sourceWarehouse->name} tidak cukup. " .
+                            "Tersedia: {$availableQty} pcs, diminta: {$qty} pcs."
+                        ],
+                    ]);
+                }
+
+                $sourceInv->decrement('qty_pcs', $qty);
+
+                InventoryLog::create([
+                    'date'             => $data['date'],
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $itemId,
+                    'warehouse_id'     => $sourceWarehouse->id,
+                    'qty'              => $qty,
+                    'qty_m3'           => 0,
+                    'direction'        => 'OUT',
+                    'transaction_type' => 'PACKING',
+                    'reference_type'   => 'ProductionOrder',
+                    'reference_id'     => $data['ref_po_id'],
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Keluar dari {$sourceWarehouse->name} untuk dikemas ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                // === TAMBAH STOK GUDANG PACKING ===
                 $packingInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehousePacking->id)
                     ->lockForUpdate()
@@ -121,7 +157,7 @@ class PackingController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                Log::info("Packing: {$itemName} - {$qty} pcs masuk Gudang Packing");
+                Log::info("Packing: {$itemName} - {$qty} pcs | {$sourceWarehouse->name} → Gudang Packing");
             }
 
             // Update stage PO
