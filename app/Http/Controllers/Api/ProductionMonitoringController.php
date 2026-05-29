@@ -189,13 +189,14 @@ class ProductionMonitoringController extends Controller
 
                 // Group per SO
                 $result[] = [
-                    'so_id'      => $so->id,
-                    'so_number'  => $so->so_number,
-                    'so_date'    => $so->so_date ? Carbon::parse($so->so_date)->format('d/m/Y') : '-',
-                    'buyer_name' => $so->buyer?->name ?? '-',
-                    'po_numbers' => $so->productionOrders->pluck('po_number'),
-                    'is_done'    => $so->productionOrders->where('status', 'completed')->count() > 0,
-                    'items'      => $items,
+                    'so_id'              => $so->id,
+                    'so_number'          => $so->so_number,
+                    'so_date'            => $so->so_date ? Carbon::parse($so->so_date)->format('d/m/Y') : '-',
+                    'buyer_name'         => $so->buyer?->name ?? '-',
+                    'customer_po_number' => $so->customer_po_number ?? null,
+                    'po_numbers'         => $so->productionOrders->pluck('po_number'),
+                    'is_done'            => $so->productionOrders->where('status', 'completed')->count() > 0,
+                    'items'              => $items,
                 ];
             }
 

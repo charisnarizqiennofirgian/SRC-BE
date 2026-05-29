@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PaymentMethod;
 use App\Models\ChartOfAccount;
+use App\Models\PurchaseBill;
+use App\Models\PurchasePayment;
 use Illuminate\Http\Request;
 
 class PaymentMethodController extends Controller
@@ -86,13 +88,21 @@ class PaymentMethodController extends Controller
     {
         $paymentMethod = PaymentMethod::findOrFail($id);
 
-        // TODO: Cek apakah sudah dipakai di transaksi nanti
+        $usedInBill    = PurchaseBill::where('payment_method_id', $id)->exists();
+        $usedInPayment = PurchasePayment::where('payment_method_id', $id)->exists();
+
+        if ($usedInBill || $usedInPayment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Metode pembayaran tidak dapat dihapus karena sudah digunakan dalam transaksi.',
+            ], 422);
+        }
 
         $paymentMethod->delete();
 
         return response()->json([
             'success' => true,
-            'message' => 'Metode pembayaran berhasil dihapus'
+            'message' => 'Metode pembayaran berhasil dihapus',
         ]);
     }
 

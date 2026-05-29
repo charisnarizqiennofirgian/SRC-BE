@@ -116,8 +116,19 @@ class ProductController extends Controller
                 'success' => true,
                 'message' => 'Data berhasil di-import.',
             ], 200);
+
         } catch (ValidationException $e) {
-            // ... (error handling Anda sudah bagus)
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak valid.',
+                'errors'  => $e->errors(),
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal mengimport file. Pastikan format file sesuai template.',
+            ], 500);
         }
     }
 }
