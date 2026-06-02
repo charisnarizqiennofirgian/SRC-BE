@@ -25,7 +25,13 @@ class PurchaseOrderController extends Controller
         }
 
         if ($request->has('search')) {
-            $query->where('po_number', 'like', '%' . $request->search . '%');
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('po_number', 'like', '%' . $search . '%')
+                  ->orWhereHas('supplier', function ($sq) use ($search) {
+                      $sq->where('name', 'like', '%' . $search . '%');
+                  });
+            });
         }
 
         $perPage = $request->get('per_page', 15);
