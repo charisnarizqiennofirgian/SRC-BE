@@ -159,7 +159,12 @@ class MaterialController extends Controller
                     'nama_produk',
                     'cutting_t',
                     'cutting_l',
-                    'cutting_p'
+                    'cutting_p',
+                    'qty_natural',
+                    'qty_warna',
+                    'qty_set',
+                    'm3_natural',
+                    'm3_warna'
                 );
 
             if ($search) {
@@ -174,6 +179,17 @@ class MaterialController extends Controller
                 if (!empty($categoryIds)) {
                     $query->whereIn('category_id', $categoryIds);
                 }
+            }
+
+            if ($request->filled('warehouse_id')) {
+                $query->where(function ($q) use ($request) {
+                    $q->whereHas('inventories', function ($inner) use ($request) {
+                        $inner->where('warehouse_id', (int) $request->warehouse_id);
+                    })
+                    ->orWhere(function ($inner) {
+                        $inner->doesntHave('inventories')->where('stock', '>', 0);
+                    });
+                });
             }
 
             if ($request->has('category_id') && $request->category_id) {

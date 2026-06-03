@@ -31,21 +31,27 @@ class StockAdjustmentController extends Controller
 {
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'item_id' => 'required|integer|exists:items,id',
-            'type' => 'required|string|in:Stok Masuk,Stok Keluar',
-            'quantity' => 'required|numeric|min:0.01',
-            'notes' => 'nullable|string|max:1000',
-        ], [
+        $isKomponen = $request->filled('adj_natural') || $request->filled('adj_warna');
+
+        $rules = ['item_id' => 'required|integer|exists:items,id', 'notes' => 'nullable|string|max:1000'];
+        if ($isKomponen) {
+            $rules['adj_natural'] = 'nullable|numeric';
+            $rules['adj_warna']   = 'nullable|numeric';
+        } else {
+            $rules['type']     = 'required|string|in:Stok Masuk,Stok Keluar';
+            $rules['quantity'] = 'required|numeric|min:0.01';
+        }
+
+        $validator = Validator::make($request->all(), $rules, [
             'quantity.min' => 'Kuantitas harus lebih besar dari 0.',
-            'type.in' => 'Tipe penyesuaian tidak valid.'
+            'type.in'      => 'Tipe penyesuaian tidak valid.',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validasi gagal.',
-                'errors' => $validator->errors()
+                'errors'  => $validator->errors()
             ], 422);
         }
 
@@ -53,15 +59,83 @@ class StockAdjustmentController extends Controller
         try {
             $item = Item::lockForUpdate()->findOrFail($request->item_id);
 
+            // ── KOMPONEN: update qty_natural + qty_warna ─────────────────────
+            if ($isKomponen) {
+                $adjNatural = (float) ($request->adj_natural ?? 0);
+                $adjWarna   = (float) ($request->adj_warna   ?? 0);
+                $totalAdj   = $adjNatural + $adjWarna;
+
+                $newNatural = (float) $item->qty_natural + $adjNatural;
+                $newWarna   = (float) $item->qty_warna   + $adjWarna;
+
+                if ($newNatural < 0 || $newWarna < 0) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Stok tidak boleh negatif.'
+                    ], 422);
+                }
+
+                $item->qty_natural = $newNatural;
+                $item->qty_warna   = $newWarna;
+                $item->stock       = $newNatural + $newWarna;
+                $item->save();
+
+                // ── Sync inventories agar StockIndex total qty ikut berubah ──
+                if ($totalAdj != 0) {
+                    $warehouseId = $request->filled('warehouse_id')
+                        ? (int) $request->warehouse_id
+                        : null;
+
+                    $invQuery = Inventory::where('item_id', $item->id);
+                    if ($warehouseId) {
+                        $invQuery->where('warehouse_id', $warehouseId);
+                    }
+                    $inventory = $invQuery->first();
+
+                    if ($inventory) {
+                        $inventory->qty_pcs = max(0, (float) $inventory->qty_pcs + $totalAdj);
+                        $inventory->save();
+                    } elseif ($warehouseId && $totalAdj > 0) {
+                        // Belum ada entry → buat baru
+                        Inventory::create([
+                            'item_id'      => $item->id,
+                            'warehouse_id' => $warehouseId,
+                            'qty_pcs'      => $totalAdj,
+                            'qty_m3'       => 0,
+                        ]);
+                    }
+
+                    $type = $totalAdj > 0 ? 'Stok Masuk' : 'Stok Keluar';
+                    StockMovement::create([
+                        'item_id'  => $item->id,
+                        'type'     => $type,
+                        'quantity' => $totalAdj,
+                        'notes'    => $request->notes ?? "Penyesuaian komponen: Natural {$adjNatural}, Warna {$adjWarna}",
+                    ]);
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'success'     => true,
+                    'message'     => 'Stok komponen berhasil disesuaikan.',
+                    'qty_natural' => $item->qty_natural,
+                    'qty_warna'   => $item->qty_warna,
+                    'new_stock'   => $item->stock,
+                ], 201);
+            }
+
+            // ── NON-KOMPONEN: behaviour lama ──────────────────────────────────
             $quantity = (float) $request->quantity;
             $type = $request->type;
             $movementQuantity = ($type === 'Stok Keluar') ? -$quantity : $quantity;
 
             StockMovement::create([
-                'item_id' => $item->id,
-                'type' => $type,
+                'item_id'  => $item->id,
+                'type'     => $type,
                 'quantity' => $movementQuantity,
-                'notes' => $request->notes ?? 'Penyesuaian manual dari admin.',
+                'notes'    => $request->notes ?? 'Penyesuaian manual dari admin.',
             ]);
 
             $item->increment('stock', $movementQuantity);
@@ -83,8 +157,8 @@ class StockAdjustmentController extends Controller
             DB::commit();
 
             return response()->json([
-                'success' => true,
-                'message' => 'Penyesuaian stok berhasil disimpan.',
+                'success'   => true,
+                'message'   => 'Penyesuaian stok berhasil disimpan.',
                 'new_stock' => $item->stock
             ], 201);
 

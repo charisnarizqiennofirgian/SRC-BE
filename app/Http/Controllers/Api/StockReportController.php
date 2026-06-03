@@ -100,9 +100,16 @@ class StockReportController extends Controller
             }
 
             if ($request->filled('warehouse_id')) {
-                $query->whereHas('inventories', function ($q) use ($request) {
-                    $q->where('warehouse_id', $request->input('warehouse_id'))
-                      ->where('qty_pcs', '>', 0);
+                $query->where(function ($q) use ($request) {
+                    // Item yang punya inventory di gudang ini (berapa pun qty-nya)
+                    $q->whereHas('inventories', function ($inner) use ($request) {
+                        $inner->where('warehouse_id', (int) $request->input('warehouse_id'));
+                    })
+                    // ATAU item yang belum punya inventory entry sama sekali
+                    // (stok hanya di items.stock, belum diassign ke gudang)
+                    ->orWhere(function ($inner) {
+                        $inner->doesntHave('inventories')->where('stock', '>', 0);
+                    });
                 });
             }
 
