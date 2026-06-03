@@ -156,7 +156,10 @@ class MaterialController extends Controller
                     'no_kapling',
                     'mutu',
                     'price',
-                    'nama_produk'
+                    'nama_produk',
+                    'cutting_t',
+                    'cutting_l',
+                    'cutting_p'
                 );
 
             if ($search) {

@@ -57,6 +57,7 @@ use App\Http\Controllers\Api\AnyamController;
 use App\Http\Controllers\Api\PrototypeController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\ApAgingController;
+use App\Http\Controllers\Api\DokumenController;
 
 
 /*
@@ -460,6 +461,15 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // --- NERACA (BALANCE SHEET) ---
     Route::get('balance-sheet', [BalanceSheetController::class, 'index']);
+
+    // --- DOKUMEN ---
+    Route::prefix('dokumen')->group(function () {
+        Route::get('/',              [DokumenController::class, 'index']);
+        Route::post('/upload',       [DokumenController::class, 'upload']);
+        Route::post('/{id}/revisi',  [DokumenController::class, 'revisi']);
+        Route::get('/{id}/download', [DokumenController::class, 'download']);
+        Route::delete('/{id}',       [DokumenController::class, 'hapus']);
+    });
 
     // --- UTILITAS DASHBOARD ---
     Route::get('/dashboard-route', function (Request $request) {

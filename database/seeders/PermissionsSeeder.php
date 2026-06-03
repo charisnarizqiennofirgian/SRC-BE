@@ -89,6 +89,11 @@ class PermissionsSeeder extends Seeder
             // System
             'manage-users',
             'manage-roles',
+            
+            // Dokumen
+            'dokumen-lihat',
+            'dokumen-upload',
+            'dokumen-hapus',
         ];
 
         foreach ($permissions as $permission) {

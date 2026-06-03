@@ -303,7 +303,6 @@ class PurchaseOrderController extends Controller
         $romanMonth = $this->toRoman($month);
 
         $lastOrder = PurchaseOrder::whereYear('created_at', $year)
-            ->whereMonth('created_at', $month)
             ->orderByRaw("CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(po_number, '.', 2), '.', -1) AS UNSIGNED) DESC")
             ->first();
 
