@@ -11,7 +11,6 @@ use App\Models\Warehouse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class PrototypeController extends Controller
@@ -34,119 +33,123 @@ class PrototypeController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    public function sourceInventories(Request $request)
+    // Komponen dari Gudang MESIN — input untuk prototype
+    public function getSourceItems()
     {
-        $request->validate(['warehouse_id' => 'required|integer|exists:warehouses,id']);
+        $warehouse = Warehouse::where('code', 'MESIN')->first();
+        if (!$warehouse) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
 
-        $inventories = Inventory::where('warehouse_id', $request->warehouse_id)
+        $items = Inventory::where('warehouse_id', $warehouse->id)
             ->where('qty_pcs', '>', 0)
-            ->with(['item', 'warehouse'])
+            ->with('item')
             ->get()
             ->map(fn($inv) => [
-                'id'             => $inv->id,
                 'item_id'        => $inv->item_id,
                 'item_code'      => $inv->item?->code ?? '-',
                 'item_name'      => $inv->item?->name ?? '-',
-                'warehouse_id'   => $inv->warehouse_id,
-                'warehouse_name' => $inv->warehouse?->name ?? '-',
-                'qty_pcs'        => (float) $inv->qty_pcs,
+                'qty_available'  => (float) $inv->qty_pcs,
+                'warehouse_id'   => $warehouse->id,
+                'warehouse_code' => $warehouse->code,
+                'warehouse_name' => $warehouse->name,
             ]);
 
-        return response()->json(['success' => true, 'data' => $inventories]);
+        return response()->json(['success' => true, 'data' => $items]);
     }
 
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'            => ['required', 'date'],
-            'ref_po_id'       => ['required', 'integer', 'exists:production_orders,id'],
-            'notes'           => ['nullable', 'string'],
-            'items'           => ['required', 'array', 'min:1'],
-            'items.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'items.*.qty'     => ['required', 'numeric', 'min:1'],
+            'date'      => ['required', 'date'],
+            'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
+            'notes'     => ['nullable', 'string'],
+
+            'inputs'             => ['required', 'array', 'min:1'],
+            'inputs.*.item_id'   => ['required', 'integer', 'exists:items,id'],
+            'inputs.*.warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            'inputs.*.qty'       => ['required', 'numeric', 'min:0.01'],
+
+            'outputs'           => ['required', 'array', 'min:1'],
+            'outputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
+            'outputs.*.qty'     => ['required', 'numeric', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
-            // Gudang sumber: S4S (output Moulding)
-            $sourceWarehouse = Warehouse::where('code', 'S4S')->first();
-            if (!$sourceWarehouse) {
+            $warehousePrototype = Warehouse::where('code', 'PROTOTYPE')->first();
+            if (!$warehousePrototype) {
                 throw ValidationException::withMessages([
-                    'warehouse' => ['Gudang S4S tidak ditemukan.'],
-                ]);
-            }
-
-            // Gudang tujuan: PROTOTYPE
-            $targetWarehouse = Warehouse::where('code', 'PROTOTYPE')->first();
-            if (!$targetWarehouse) {
-                throw ValidationException::withMessages([
-                    'warehouse' => ['Gudang Prototype tidak ditemukan.'],
+                    'warehouse' => ['Gudang PROTOTYPE tidak ditemukan.'],
                 ]);
             }
 
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // Generate nomor dokumen
-            $count          = DB::table('inventory_logs')
-                ->where('transaction_type', 'PROTOTYPE')
+            $runningNumber  = InventoryLog::where('transaction_type', 'PROTOTYPE')
                 ->whereYear('date', now()->year)
                 ->whereMonth('date', now()->month)
                 ->distinct('reference_number')
                 ->count('reference_number') + 1;
-            $documentNumber = 'PROTO-' . now()->format('Ym') . '-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+            $documentNumber = 'PROTO-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            foreach ($data['items'] as $index => $itemData) {
-                $itemId = $itemData['item_id'];
-                $qty    = $itemData['qty'];
-                $item   = Item::find($itemId);
+            // INPUT: Kurangi komponen dari gudang sumber (MESIN)
+            foreach ($data['inputs'] as $idx => $input) {
+                $itemId      = $input['item_id'];
+                $warehouseId = $input['warehouse_id'];
+                $qty         = $input['qty'];
+                $itemName    = Item::find($itemId)?->name ?? "ID {$itemId}";
+                $whName      = Warehouse::find($warehouseId)?->name ?? "ID {$warehouseId}";
 
-                // Cek stok S4S
                 $sourceInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $sourceWarehouse->id)
-                    ->lockForUpdate()
-                    ->first();
+                    ->where('warehouse_id', $warehouseId)
+                    ->lockForUpdate()->first();
 
                 $available = $sourceInv?->qty_pcs ?? 0;
                 if ($available < $qty) {
                     throw ValidationException::withMessages([
-                        "items.{$index}.qty" => [
-                            "'{$item?->name}' stok tidak cukup di Gudang S4S. Tersedia: {$available} pcs."
+                        "inputs.{$idx}.qty" => [
+                            "'{$itemName}' stok di {$whName} tidak cukup. Tersedia: {$available} pcs.",
                         ],
                     ]);
                 }
 
-                // Kurangi stok S4S
                 $sourceInv->decrement('qty_pcs', $qty);
 
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
                     'item_id'          => $itemId,
-                    'warehouse_id'     => $sourceWarehouse->id,
+                    'warehouse_id'     => $warehouseId,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
                     'direction'        => 'OUT',
                     'transaction_type' => 'PROTOTYPE',
-                    'reference_type'   => 'PrototypeProduction',
+                    'reference_type'   => 'ProductionOrder',
                     'reference_id'     => $data['ref_po_id'],
                     'reference_number' => $documentNumber,
-                    'notes'            => "Keluar untuk Prototype PO: {$poNumber}",
+                    'notes'            => "Komponen masuk Prototype ({$documentNumber}) PO:{$poNumber}",
                     'user_id'          => Auth::id(),
                 ]);
+            }
 
-                // Tambah stok Prototype
+            // OUTPUT: Tambah produk ke Gudang PROTOTYPE
+            foreach ($data['outputs'] as $output) {
+                $itemId = $output['item_id'];
+                $qty    = $output['qty'];
+
                 $targetInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $targetWarehouse->id)
-                    ->lockForUpdate()
-                    ->first();
+                    ->where('warehouse_id', $warehousePrototype->id)
+                    ->lockForUpdate()->first();
 
                 if ($targetInv) {
                     $targetInv->increment('qty_pcs', $qty);
                 } else {
                     Inventory::create([
                         'item_id'      => $itemId,
-                        'warehouse_id' => $targetWarehouse->id,
+                        'warehouse_id' => $warehousePrototype->id,
                         'qty_pcs'      => $qty,
+                        'ref_po_id'    => $data['ref_po_id'],
                     ]);
                 }
 
@@ -154,22 +157,19 @@ class PrototypeController extends Controller
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
                     'item_id'          => $itemId,
-                    'warehouse_id'     => $targetWarehouse->id,
+                    'warehouse_id'     => $warehousePrototype->id,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
                     'direction'        => 'IN',
                     'transaction_type' => 'PROTOTYPE',
-                    'reference_type'   => 'PrototypeProduction',
+                    'reference_type'   => 'ProductionOrder',
                     'reference_id'     => $data['ref_po_id'],
                     'reference_number' => $documentNumber,
-                    'notes'            => "Masuk Gudang Prototype PO: {$poNumber}",
+                    'notes'            => "Hasil Prototype → Gudang PROTOTYPE ({$documentNumber}) PO:{$poNumber}",
                     'user_id'          => Auth::id(),
                 ]);
-
-                Log::info("Prototype item: item_id={$itemId}, qty={$qty}");
             }
 
-            // Update stage PO
             if ($productionOrder) {
                 $productionOrder->current_stage = 'prototype';
                 $productionOrder->status        = 'in_progress';
@@ -179,10 +179,7 @@ class PrototypeController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => "Proses Prototype berhasil ({$documentNumber})",
-                'data'    => [
-                    'document_number' => $documentNumber,
-                    'total_items'     => count($data['items']),
-                ],
+                'data'    => ['document_number' => $documentNumber],
             ], 201);
         });
     }

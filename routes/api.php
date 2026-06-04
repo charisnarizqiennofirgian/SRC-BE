@@ -319,6 +319,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/inventories', [InventoryController::class, 'index']);
 
     // --- PRODUKSI PENGGERGAJAN ---
+    Route::get('/sawmill-productions/sawmill-stock', [SawmillProductionController::class, 'getSawmillStock']);
     Route::post('/sawmill-productions', [SawmillProductionController::class, 'store']);
 
     // --- PROSES RUSTIK KOMPONEN ---
@@ -355,9 +356,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // --- PROSES PROTOTYPE ---
     Route::prefix('produksi/prototype')->group(function () {
-        Route::get('/available-pos',      [PrototypeController::class, 'getAvailableProductionOrders']);
-        Route::get('/source-inventories', [PrototypeController::class, 'sourceInventories']);
-        Route::post('/',                  [PrototypeController::class, 'store']);
+        Route::get('/available-pos',  [PrototypeController::class, 'getAvailableProductionOrders']);
+        Route::get('/source-items',   [PrototypeController::class, 'getSourceItems']);
+        Route::post('/',              [PrototypeController::class, 'store']);
     });
 
     // --- QC FINAL ---
