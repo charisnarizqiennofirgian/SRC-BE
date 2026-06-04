@@ -15,10 +15,13 @@ class ProductionMonitoringController extends Controller
 {
     // Sub-tabel map — dipakai di index, detail, dan exportExcel
     private array $subTableMap = [
-        'KD'         => 'kd_productions',
-        'PEMBAHANAN' => 'pembahanan_productions',
-        'MOULDING'   => 'moulding_productions',
-        'MESIN'      => 'mesin_productions',
+        'KD'              => 'kd_productions',
+        'PEMBAHANAN'      => 'pembahanan_productions',
+        'MOULDING'        => 'moulding_productions',
+        'MESIN'           => 'mesin_productions',
+        'RUSTIK_KOMPONEN' => 'rustik_komponen_productions',
+        'SUB_ASSEMBLING'  => 'assembling_productions',
+        'RAKIT'           => 'assembling_productions',
     ];
 
     private function getSearchIds(string $txType, array $poIds): array
@@ -32,6 +35,25 @@ class ProductionMonitoringController extends Controller
             $searchIds = array_merge($poIds, $subIds);
         }
         return $searchIds;
+    }
+
+    // Kumpulkan semua ID produksi dari semua sub-tabel untuk query reject
+    private function getAllProductionIds(array $poIds): array
+    {
+        if (empty($poIds)) return [];
+
+        $allIds = $poIds;
+        $uniqueTables = array_unique(array_values($this->subTableMap));
+
+        foreach ($uniqueTables as $table) {
+            $subIds = DB::table($table)
+                ->whereIn('ref_po_id', $poIds)
+                ->pluck('id')
+                ->toArray();
+            $allIds = array_merge($allIds, $subIds);
+        }
+
+        return array_unique($allIds);
     }
 
     public function index(Request $request)
@@ -147,8 +169,9 @@ class ProductionMonitoringController extends Controller
                         ->when(!empty($poIds), fn($q) => $q->whereIn('reference_id', $poIds))
                         ->sum('qty');
 
+                    $allProductionIds = $this->getAllProductionIds($poIds);
                     $qtyReject = InventoryLog::where('transaction_type', 'LIKE', '%REJECT%')
-                        ->when(!empty($poIds), fn($q) => $q->whereIn('reference_id', $poIds))
+                        ->when(!empty($allProductionIds), fn($q) => $q->whereIn('reference_id', $allProductionIds))
                         ->where('direction', 'IN')
                         ->sum('qty');
 
@@ -304,8 +327,9 @@ class ProductionMonitoringController extends Controller
                 ];
             }
 
+            $allProductionIds = $this->getAllProductionIds($poIds);
             $rejectLogs = InventoryLog::where('transaction_type', 'LIKE', '%REJECT%')
-                ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                ->whereIn('reference_id', $allProductionIds)->where('direction', 'IN')
                 ->with(['warehouse', 'item', 'user'])->orderBy('date', 'asc')->get();
 
             $rejects = $rejectLogs->map(fn($log) => [
@@ -382,8 +406,9 @@ class ProductionMonitoringController extends Controller
                 ];
             }
 
+            $allProductionIds = $this->getAllProductionIds($poIds);
             $rejectLogs = InventoryLog::where('transaction_type', 'LIKE', '%REJECT%')
-                ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                ->whereIn('reference_id', $allProductionIds)->where('direction', 'IN')
                 ->with(['warehouse', 'item', 'user'])->orderBy('date', 'asc')->get();
 
             // === BUAT EXCEL ===

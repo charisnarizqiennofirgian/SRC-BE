@@ -21,4 +21,14 @@ class MouldingProductionInput extends Model
     {
         return $this->belongsTo(Item::class);
     }
+
+    public function output()
+    {
+        return $this->hasOne(MouldingProductionOutput::class, 'moulding_production_input_id');
+    }
+
+    public function reject()
+    {
+        return $this->hasOne(MouldingProductionReject::class, 'moulding_production_input_id');
+    }
 }

@@ -21,4 +21,14 @@ class MesinProductionInput extends Model
     {
         return $this->belongsTo(Item::class);
     }
+
+    public function output()
+    {
+        return $this->hasOne(MesinProductionOutput::class, 'mesin_production_input_id');
+    }
+
+    public function reject()
+    {
+        return $this->hasOne(MesinProductionReject::class, 'mesin_production_input_id');
+    }
 }

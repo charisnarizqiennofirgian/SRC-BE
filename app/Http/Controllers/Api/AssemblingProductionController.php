@@ -48,36 +48,27 @@ class AssemblingProductionController extends Controller
     // =============================================
     public function getSourceItems(Request $request)
     {
-        $warehouseCodes = ['MESIN', 'RUSKOMP', 'ASSEMBLING'];
+        $warehouse = Warehouse::where('code', 'MESIN')->first();
 
-        $result = [];
-
-        foreach ($warehouseCodes as $code) {
-            $warehouse = Warehouse::where('code', $code)->first();
-            if (!$warehouse) continue;
-
-            $inventories = Inventory::where('warehouse_id', $warehouse->id)
-                ->where('qty_pcs', '>', 0)
-                ->with('item')
-                ->get()
-                ->map(function ($inv) use ($warehouse) {
-                    return [
-                        'item_id'        => $inv->item_id,
-                        'item_code'      => $inv->item?->code ?? '-',
-                        'item_name'      => $inv->item?->name ?? '-',
-                        'nama_produk'    => $inv->item?->nama_produk ?? null,
-                        'qty_available'  => (float) $inv->qty_pcs,
-                        'warehouse_id'   => $warehouse->id,
-                        'warehouse_code' => $warehouse->code,
-                        'warehouse_name' => $warehouse->name,
-                        'label'          => "[{$warehouse->code}] {$inv->item?->code} - {$inv->item?->name}",
-                    ];
-                });
-
-            $result = array_merge($result, $inventories->toArray());
+        if (!$warehouse) {
+            return response()->json(['success' => true, 'data' => []]);
         }
 
-        return response()->json(['success' => true, 'data' => $result]);
+        $inventories = Inventory::where('warehouse_id', $warehouse->id)
+            ->where('qty_pcs', '>', 0)
+            ->with('item')
+            ->get()
+            ->map(fn($inv) => [
+                'item_id'        => $inv->item_id,
+                'item_code'      => $inv->item?->code ?? '-',
+                'item_name'      => $inv->item?->name ?? '-',
+                'qty_available'  => (float) $inv->qty_pcs,
+                'warehouse_id'   => $warehouse->id,
+                'warehouse_code' => $warehouse->code,
+                'warehouse_name' => $warehouse->name,
+            ]);
+
+        return response()->json(['success' => true, 'data' => $inventories]);
     }
 
     // =============================================
