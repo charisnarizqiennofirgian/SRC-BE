@@ -43,6 +43,12 @@ class JournalEntryController extends Controller
             $query->where('reference_type', $request->reference_type);
         }
 
+        if ($request->account_id) {
+            $query->whereHas('lines', function ($q) use ($request) {
+                $q->where('account_id', $request->account_id);
+            });
+        }
+
         $journals = $query->paginate(15);
 
         return response()->json([

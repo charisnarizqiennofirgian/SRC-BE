@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lah /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"raw\\\\|DB::raw\\\\|whereRaw\\\\|orderByRaw\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"request->input\\\\|request->get\\\\|request->all\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"SELECT\\\\|select\\\\|where.*in\\(\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"response\\\\\\(\\\\\\)->json\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"throw new\\\\|Exception\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(xargs grep:*)",
+      "Bash(wc -l /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(grep -r \"->get\\\\\\(\\\\\\)\\\\|->paginate\\\\\\(\\\\\\)\\\\|->first\\\\\\(\\\\\\)\" /c/ERP/SRC-BE/app/Http/Controllers/Api/*.php)",
+      "Bash(composer show:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.get\\('require',{}\\).items\\(\\)}, indent=2\\)\\)\")",
+      "Bash(grep -L \"SoftDeletes\" /c/ERP/SRC-BE/app/Models/*.php)",
+      "Read(//c/ERP//**)",
+      "Read(//c//**)",
+      "PowerShell(Get-Content *)"
+    ]
+  }
+}
