@@ -23,26 +23,22 @@ class PurchaseBillController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'supplier_id' => 'required|exists:suppliers,id',
-            'supplier_invoice_number' => 'required|string|max:255',
-            'bill_date' => 'required|date',
-            'due_date' => 'required|date|after_or_equal:bill_date',
-            'notes' => 'nullable|string',
-            'ppn_percentage' => 'nullable|numeric|min:0|max:100',
-
-            // ✅ GANTI: 1 COA untuk semuanya
-            'coa_id' => 'required|exists:chart_of_accounts,id',
-
-            // ✅ GANTI: Details tidak perlu account_id per item
-            'details' => 'required|array|min:1',
-            'details.*.goods_receipt_detail_id' => 'nullable|exists:goods_receipt_details,id',
-            'details.*.item_id' => 'required|exists:items,id',
-            'details.*.quantity' => 'required|numeric|min:0.01',
-            'details.*.price' => 'required|numeric|min:0',
-
-            // ✅ GANTI: Payment type saja, tidak perlu payment_method_id
-            'payment_type' => 'required|in:TEMPO,TUNAI,DP',
-            'paid_amount' => 'required_if:payment_type,DP|nullable|numeric|min:0',
+            'supplier_id'                        => 'required|exists:suppliers,id',
+            'supplier_invoice_number'             => 'required|string|max:255',
+            'bill_date'                           => 'required|date',
+            'due_date'                            => 'required|date|after_or_equal:bill_date',
+            'notes'                               => 'nullable|string',
+            'ppn_percentage'                      => 'nullable|numeric|min:0|max:100',
+            'currency'                            => 'nullable|string|in:IDR,USD',
+            'exchange_rate'                       => 'nullable|numeric|min:1',
+            'coa_id'                              => 'required|exists:chart_of_accounts,id',
+            'details'                             => 'required|array|min:1',
+            'details.*.goods_receipt_detail_id'   => 'nullable|exists:goods_receipt_details,id',
+            'details.*.item_id'                   => 'required|exists:items,id',
+            'details.*.quantity'                  => 'required|numeric|min:0.01',
+            'details.*.price'                     => 'required|numeric|min:0',
+            'payment_type'                        => 'required|in:TEMPO,TUNAI,DP',
+            'paid_amount'                         => 'required_if:payment_type,DP|nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -56,16 +52,19 @@ class PurchaseBillController extends Controller
         try {
             $validatedData = $validator->validated();
 
-            // Hitung subtotal
+            $currency     = $validatedData['currency'] ?? 'IDR';
+            $exchangeRate = (float) ($validatedData['exchange_rate'] ?? 1);
+
+            // Hitung subtotal dalam IDR (price * qty * exchange_rate)
             $subtotal = 0;
             foreach ($validatedData['details'] as $detail) {
-                $subtotal += $detail['quantity'] * $detail['price'];
+                $subtotal += $detail['quantity'] * $detail['price'] * $exchangeRate;
             }
 
             // Hitung PPN
             $ppnPercentage = $validatedData['ppn_percentage'] ?? 0;
-            $ppnAmount = $subtotal * ($ppnPercentage / 100);
-            $totalAmount = $subtotal + $ppnAmount;
+            $ppnAmount     = $subtotal * ($ppnPercentage / 100);
+            $totalAmount   = $subtotal + $ppnAmount;
 
             // Hitung paid_amount dan remaining_amount berdasarkan payment_type
             $paidAmount = 0;
@@ -89,21 +88,23 @@ class PurchaseBillController extends Controller
 
             // Simpan Purchase Bill
             $purchaseBill = PurchaseBill::create([
-                'supplier_id' => $validatedData['supplier_id'],
-                'bill_number' => $this->generateBillNumber(),
+                'supplier_id'             => $validatedData['supplier_id'],
+                'bill_number'             => $this->generateBillNumber(),
                 'supplier_invoice_number' => $validatedData['supplier_invoice_number'],
-                'bill_date' => $validatedData['bill_date'],
-                'due_date' => $validatedData['due_date'],
-                'subtotal' => $subtotal,
-                'ppn_percentage' => $ppnPercentage,
-                'ppn_amount' => $ppnAmount,
-                'total_amount' => $totalAmount,
-                'status' => 'Posted',
-                'payment_type' => $validatedData['payment_type'],
-                'coa_id' => $validatedData['coa_id'],  // ✅ Simpan COA yang dipilih
-                'paid_amount' => $paidAmount,
-                'remaining_amount' => $remainingAmount,
-                'notes' => $validatedData['notes'] ?? null,
+                'bill_date'               => $validatedData['bill_date'],
+                'due_date'                => $validatedData['due_date'],
+                'subtotal'                => $subtotal,
+                'ppn_percentage'          => $ppnPercentage,
+                'ppn_amount'              => $ppnAmount,
+                'total_amount'            => $totalAmount,
+                'status'                  => 'Posted',
+                'payment_type'            => $validatedData['payment_type'],
+                'coa_id'                  => $validatedData['coa_id'],
+                'paid_amount'             => $paidAmount,
+                'remaining_amount'        => $remainingAmount,
+                'notes'                   => $validatedData['notes'] ?? null,
+                'currency'                => $currency,
+                'exchange_rate'           => $exchangeRate,
             ]);
 
             // Simpan Details (tanpa account_id per item)
@@ -122,11 +123,11 @@ class PurchaseBillController extends Controller
 
                 $purchaseBill->details()->create([
                     'goods_receipt_detail_id' => $detail['goods_receipt_detail_id'] ?? null,
-                    'item_id' => $detail['item_id'],
-                    'quantity' => $detail['quantity'],
-                    'price' => $detail['price'],
-                    'subtotal' => $detail['quantity'] * $detail['price'],
-                    'specifications' => $specifications,
+                    'item_id'                 => $detail['item_id'],
+                    'quantity'                => $detail['quantity'],
+                    'price'                   => $detail['price'],
+                    'subtotal'                => $detail['quantity'] * $detail['price'] * $exchangeRate,
+                    'specifications'          => $specifications,
                 ]);
 
                 // Update status billed di goods receipt detail

@@ -50,7 +50,9 @@ class PurchaseOrderController extends Controller
         try {
             $validatedData = $validator->validated();
 
-            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
+            $currency     = $validatedData['currency'] ?? 'IDR';
+            $exchangeRate = (float) ($validatedData['exchange_rate'] ?? 1);
+            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate);
 
             $order = PurchaseOrder::create([
                 'po_number'       => $this->generatePoNumber(),
@@ -62,13 +64,15 @@ class PurchaseOrderController extends Controller
                 'notes'           => $validatedData['notes'] ?? null,
                 'type'            => $validatedData['type'],
                 'source_type'     => 'direct',
+                'currency'        => $currency,
+                'exchange_rate'   => $exchangeRate,
                 'subtotal'        => $totals['subtotal'],
                 'ppn_percentage'  => $totals['ppn_percentage'],
                 'ppn_amount'      => $totals['ppn_amount'],
                 'grand_total'     => $totals['grand_total'],
             ]);
 
-            $order->details()->createMany($this->prepareDetails($validatedData['details']));
+            $order->details()->createMany($this->prepareDetails($validatedData['details'], $exchangeRate));
 
             DB::commit();
 
@@ -114,22 +118,26 @@ class PurchaseOrderController extends Controller
         try {
             $validatedData = $validator->validated();
 
-            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage']);
+            $currency     = $validatedData['currency'] ?? 'IDR';
+            $exchangeRate = (float) ($validatedData['exchange_rate'] ?? 1);
+            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate);
 
             $purchaseOrder->update([
-                'supplier_id' => $validatedData['supplier_id'],
-                'order_date' => $validatedData['order_date'],
+                'supplier_id'   => $validatedData['supplier_id'],
+                'order_date'    => $validatedData['order_date'],
                 'delivery_date' => $validatedData['delivery_date'] ?? null,
-                'notes' => $validatedData['notes'] ?? null,
-                'type' => $validatedData['type'],
-                'subtotal' => $totals['subtotal'],
-                'ppn_percentage' => $totals['ppn_percentage'],
-                'ppn_amount' => $totals['ppn_amount'],
-                'grand_total' => $totals['grand_total'],
+                'notes'         => $validatedData['notes'] ?? null,
+                'type'          => $validatedData['type'],
+                'currency'      => $currency,
+                'exchange_rate' => $exchangeRate,
+                'subtotal'      => $totals['subtotal'],
+                'ppn_percentage'=> $totals['ppn_percentage'],
+                'ppn_amount'    => $totals['ppn_amount'],
+                'grand_total'   => $totals['grand_total'],
             ]);
 
             $purchaseOrder->details()->delete();
-            $purchaseOrder->details()->createMany($this->prepareDetails($validatedData['details']));
+            $purchaseOrder->details()->createMany($this->prepareDetails($validatedData['details'], $exchangeRate));
 
             DB::commit();
 
@@ -247,49 +255,52 @@ class PurchaseOrderController extends Controller
     private function validatePurchaseOrder(Request $request)
     {
         return Validator::make($request->all(), [
-            'supplier_id' => 'required|exists:suppliers,id',
-            'order_date' => 'required|date',
-            'delivery_date' => 'nullable|date',
-            'notes' => 'nullable|string',
-            'type' => 'required|string|in:operasional,karton,kayu',
-            'ppn_percentage' => 'required|numeric|in:0,11,11.12,12',  
-            'details' => 'required|array|min:1',
-            'details.*.item_id' => 'required|exists:items,id',
-            'details.*.quantity' => 'required|numeric|min:0.01',
-            'details.*.price' => 'required|numeric|min:0',
+            'supplier_id'               => 'required|exists:suppliers,id',
+            'order_date'                => 'required|date',
+            'delivery_date'             => 'nullable|date',
+            'notes'                     => 'nullable|string',
+            'type'                      => 'required|string|in:operasional,karton,kayu',
+            'ppn_percentage'            => 'required|numeric|in:0,11,11.12,12',
+            'currency'                  => 'nullable|string|in:IDR,USD',
+            'exchange_rate'             => 'nullable|numeric|min:1',
+            'details'                   => 'required|array|min:1',
+            'details.*.item_id'         => 'required|exists:items,id',
+            'details.*.quantity'        => 'required|numeric|min:0.01',
+            'details.*.price'           => 'required|numeric|min:0',
             'details.*.specifications'  => 'nullable|array',
             'no_surat_jalan'            => 'nullable|string|max:100',
             'details.*.delivery_date'   => 'nullable|date',
         ]);
     }
 
-    // ✅ UPDATED: DETEKSI 11.12 → HITUNG PAKAI 11%
-    private function calculateTotals(array $details, float $ppnPercentage): array
+    // price per detail adalah harga dalam currency PO. subtotal selalu IDR.
+    private function calculateTotals(array $details, float $ppnPercentage, float $exchangeRate = 1): array
     {
-        $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price']);
+        $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price'] * $exchangeRate);
 
         // Special case: 11.12 → hitung pakai 11%
         $actualPpnRate = ($ppnPercentage == 11.12) ? 11 : $ppnPercentage;
 
-        $ppnAmount = $subtotal * ($actualPpnRate / 100);
+        $ppnAmount  = $subtotal * ($actualPpnRate / 100);
         $grandTotal = $subtotal + $ppnAmount;
 
         return [
-            'subtotal' => $subtotal,
-            'ppn_percentage' => $ppnPercentage,  // Simpan 11.12 untuk display
-            'ppn_amount' => $ppnAmount,           // Tapi hitung pakai 11%
-            'grand_total' => $grandTotal,
+            'subtotal'       => $subtotal,
+            'ppn_percentage' => $ppnPercentage,
+            'ppn_amount'     => $ppnAmount,
+            'grand_total'    => $grandTotal,
         ];
     }
 
-    private function prepareDetails(array $details): array
+    // price disimpan dalam currency asli (USD/IDR), subtotal selalu IDR
+    private function prepareDetails(array $details, float $exchangeRate = 1): array
     {
-        return collect($details)->map(function ($item) {
+        return collect($details)->map(function ($item) use ($exchangeRate) {
             return [
                 'item_id'          => $item['item_id'],
                 'quantity_ordered' => $item['quantity'],
                 'price'            => $item['price'],
-                'subtotal'         => $item['quantity'] * $item['price'],
+                'subtotal'         => $item['quantity'] * $item['price'] * $exchangeRate,
                 'delivery_date'    => $item['delivery_date'] ?? null,
                 'specifications'   => isset($item['specifications']) ? json_encode($item['specifications']) : null,
             ];

@@ -17,28 +17,36 @@ class PurchaseBill extends Model
         'bill_date',
         'due_date',
         'subtotal',
-        'ppn_percentage',  // ✅ TAMBAH
+        'ppn_percentage',
         'ppn_amount',
         'total_amount',
         'status',
         'payment_type',
-        'coa_id',  // ✅ GANTI: dari payment_method_id jadi coa_id
+        'coa_id',
         'paid_amount',
         'remaining_amount',
         'journal_entry_id',
         'notes',
+        'currency',
+        'exchange_rate',
     ];
 
     protected $casts = [
-        'bill_date' => 'date',
-        'due_date' => 'date',
-        'subtotal' => 'decimal:2',
-        'ppn_percentage' => 'decimal:2',  // ✅ TAMBAH
-        'ppn_amount' => 'decimal:2',
-        'total_amount' => 'decimal:2',
-        'paid_amount' => 'decimal:2',
-        'remaining_amount' => 'decimal:2',
+        'bill_date'      => 'date',
+        'due_date'       => 'date',
+        'subtotal'       => 'decimal:2',
+        'ppn_percentage' => 'decimal:2',
+        'ppn_amount'     => 'decimal:2',
+        'total_amount'   => 'decimal:2',
+        'paid_amount'    => 'decimal:2',
+        'remaining_amount'=> 'decimal:2',
+        'exchange_rate'  => 'decimal:4',
     ];
+
+    public function isUSD(): bool
+    {
+        return $this->currency === 'USD';
+    }
 
     // Konstanta Tipe Pembayaran
     const PAYMENT_TEMPO = 'TEMPO';

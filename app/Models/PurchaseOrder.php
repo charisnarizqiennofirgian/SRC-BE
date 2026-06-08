@@ -25,7 +25,21 @@ class PurchaseOrder extends Model
         'grand_total',
         'notes',
         'source_type',
+        'currency',
+        'exchange_rate',
     ];
+
+    protected $casts = [
+        'exchange_rate' => 'decimal:4',
+        'subtotal'      => 'decimal:2',
+        'ppn_amount'    => 'decimal:2',
+        'grand_total'   => 'decimal:2',
+    ];
+
+    public function isUSD(): bool
+    {
+        return $this->currency === 'USD';
+    }
 
     /**
      * Relasi ke Supplier.
