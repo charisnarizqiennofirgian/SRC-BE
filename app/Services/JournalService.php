@@ -66,7 +66,7 @@ class JournalService
                 'total_credit' => $totalCredit,
             ]);
 
-            if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+            if (abs($totalDebit - $totalCredit) > 1) {
                 throw new \Exception(
                     "Jurnal tidak balance! Debit: Rp " . number_format($totalDebit, 2, ',', '.') .
                     ", Kredit: Rp " . number_format($totalCredit, 2, ',', '.')
@@ -223,7 +223,7 @@ class JournalService
             ]);
 
             // Validasi balance
-            if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+            if (abs($totalDebit - $totalCredit) > 1) {
                 Log::error('JURNAL TIDAK BALANCE!', [
                     'debit' => $totalDebit,
                     'credit' => $totalCredit,
@@ -489,7 +489,7 @@ class JournalService
             ]);
 
             // Validasi balance
-            if (round($totalDebit, 2) !== round($totalCredit, 2)) {
+            if (abs($totalDebit - $totalCredit) > 1) {
                 throw new \Exception(
                     "Jurnal tidak balance! Debit: Rp " . number_format($totalDebit, 2, ',', '.') .
                     ", Kredit: Rp " . number_format($totalCredit, 2, ',', '.')
