@@ -175,10 +175,6 @@ class OpeningBalanceImport implements ToArray
             elseif (str_starts_with($namaUpper, 'PIHUTANG DAGANG')) {
                 $candidateNames = ['PIHUTANG DAGANG'];
             }
-            // PIHUTANG LAIN-LAIN (karyawan) → PIHUTANG LAIN-LAIN - KARYAWAN
-            elseif (str_starts_with($namaUpper, 'PIHUTANG LAIN-LAIN')) {
-                $candidateNames = ['PIHUTANG LAIN-LAIN - KARYAWAN', 'PIHUTANG KARYAWAN -'];
-            }
             // HUTANG DAGANG per supplier → akun induk hutang dagang
             elseif (str_starts_with($namaUpper, 'HUTANG DAGANG')) {
                 $candidateNames = ['HUTANG DAGANG', 'HUTANG USAHA'];
