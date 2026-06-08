@@ -16,66 +16,109 @@ class BalanceSheetService
 
     public function generate(string $asOfDate): array
     {
-        $aset = $this->getAset($asOfDate);
+        $aset      = $this->getAset($asOfDate);
         $kewajiban = $this->getKewajiban($asOfDate);
-        $modal = $this->getModal($asOfDate);
-        $labaRugi = $this->getLabaTahunBerjalan($asOfDate);
+        $modal     = $this->getModal($asOfDate);
+        $labaRugi  = $this->getLabaTahunBerjalan($asOfDate);
 
-        $totalAset = $aset->sum('amount');
-        $totalKewajiban = $kewajiban->sum('amount');
-        $totalModal = $modal->sum('amount');
-        $totalPasiva = $totalKewajiban + $totalModal + $labaRugi;
+        $totalAset      = $aset['total'];
+        $totalKewajiban = $kewajiban['total'];
+        $totalModal     = $modal['total'];
+        $totalPasiva    = $totalKewajiban + $totalModal + $labaRugi;
 
-        $isBalanced = abs($totalAset - $totalPasiva) < 0.01;
-        $selisih = $totalAset - $totalPasiva;
+        $isBalanced = abs($totalAset - $totalPasiva) < 1;
+        $selisih    = $totalAset - $totalPasiva;
 
         return [
-            'as_of_date' => $asOfDate,
-            'aset' => [
-                'accounts' => $aset,
-                'total' => $totalAset,
-            ],
-            'kewajiban' => [
-                'accounts' => $kewajiban,
-                'total' => $totalKewajiban,
-            ],
-            'modal' => [
-                'accounts' => $modal,
-                'total' => $totalModal,
-            ],
+            'as_of_date'          => $asOfDate,
+            'aset'                => $aset,
+            'kewajiban'           => $kewajiban,
+            'modal'               => $modal,
             'laba_tahun_berjalan' => $labaRugi,
-            'total_pasiva' => $totalPasiva,
-            'is_balanced' => $isBalanced,
-            'selisih' => $selisih,
+            'total_pasiva'        => $totalPasiva,
+            'is_balanced'         => $isBalanced,
+            'selisih'             => $selisih,
         ];
     }
 
-    private function getAset(string $asOfDate)
+    private function getAset(string $asOfDate): array
     {
-        return $this->getAccountsByType('ASET', $asOfDate, 'debit');
+        $accounts = $this->fetchAccountAmounts('ASET', $asOfDate, 'debit');
+
+        $lancar  = $accounts->where('sub_type', ChartOfAccount::SUB_TYPE_AKTIVA_LANCAR)->values();
+        $tetap   = $accounts->where('sub_type', ChartOfAccount::SUB_TYPE_AKTIVA_TETAP)->values();
+        $lainnya = $accounts->whereNotIn('sub_type', [
+            ChartOfAccount::SUB_TYPE_AKTIVA_LANCAR,
+            ChartOfAccount::SUB_TYPE_AKTIVA_TETAP,
+        ])->values();
+
+        return [
+            'aktiva_lancar' => [
+                'accounts' => $lancar,
+                'total'    => $lancar->sum('amount'),
+            ],
+            'aktiva_tetap' => [
+                'accounts' => $tetap,
+                'total'    => $tetap->sum('amount'),
+            ],
+            'lainnya' => [
+                'accounts' => $lainnya,
+                'total'    => $lainnya->sum('amount'),
+            ],
+            'accounts' => $accounts->values(),
+            'total'    => $accounts->sum('amount'),
+        ];
     }
 
-    private function getKewajiban(string $asOfDate)
+    private function getKewajiban(string $asOfDate): array
     {
-        return $this->getAccountsByType('KEWAJIBAN', $asOfDate, 'credit');
+        $accounts = $this->fetchAccountAmounts('KEWAJIBAN', $asOfDate, 'credit');
+
+        $lancar        = $accounts->where('sub_type', ChartOfAccount::SUB_TYPE_HUTANG_LANCAR)->values();
+        $jangkaPanjang = $accounts->where('sub_type', ChartOfAccount::SUB_TYPE_HUTANG_JANGKA_PANJANG)->values();
+        $lainnya       = $accounts->whereNotIn('sub_type', [
+            ChartOfAccount::SUB_TYPE_HUTANG_LANCAR,
+            ChartOfAccount::SUB_TYPE_HUTANG_JANGKA_PANJANG,
+        ])->values();
+
+        return [
+            'hutang_lancar' => [
+                'accounts' => $lancar,
+                'total'    => $lancar->sum('amount'),
+            ],
+            'hutang_jangka_panjang' => [
+                'accounts' => $jangkaPanjang,
+                'total'    => $jangkaPanjang->sum('amount'),
+            ],
+            'lainnya' => [
+                'accounts' => $lainnya,
+                'total'    => $lainnya->sum('amount'),
+            ],
+            'accounts' => $accounts->values(),
+            'total'    => $accounts->sum('amount'),
+        ];
     }
 
-    private function getModal(string $asOfDate)
+    private function getModal(string $asOfDate): array
     {
-        return $this->getAccountsByType('MODAL', $asOfDate, 'credit');
+        $accounts = $this->fetchAccountAmounts('MODAL', $asOfDate, 'credit');
+
+        return [
+            'accounts' => $accounts->values(),
+            'total'    => $accounts->sum('amount'),
+        ];
     }
 
     private function getLabaTahunBerjalan(string $asOfDate): float
     {
-        $year = date('Y', strtotime($asOfDate));
+        $year      = date('Y', strtotime($asOfDate));
         $startDate = $year . '-01-01';
-
-        $labaRugi = $this->incomeStatementService->generate($startDate, $asOfDate);
+        $labaRugi  = $this->incomeStatementService->generate($startDate, $asOfDate);
 
         return $labaRugi['laba_bersih'];
     }
 
-    private function getAccountsByType(string $type, string $asOfDate, string $normalPosition)
+    private function fetchAccountAmounts(string $type, string $asOfDate, string $normalPosition)
     {
         $accounts = ChartOfAccount::where('type', $type)
             ->where('is_active', true)
@@ -104,12 +147,13 @@ class BalanceSheetService
 
             if ($amount != 0) {
                 $result[] = [
-                    'account_id' => $account->id,
+                    'account_id'   => $account->id,
                     'account_code' => $account->code,
                     'account_name' => $account->name,
-                    'debit' => $debit,
-                    'credit' => $credit,
-                    'amount' => $amount,
+                    'sub_type'     => $account->sub_type,
+                    'debit'        => $debit,
+                    'credit'       => $credit,
+                    'amount'       => $amount,
                 ];
             }
         }

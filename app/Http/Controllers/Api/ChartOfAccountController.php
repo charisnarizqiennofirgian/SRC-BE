@@ -63,16 +63,18 @@ class ChartOfAccountController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'code' => 'required|string|max:20|unique:chart_of_accounts,code',
-            'name' => 'required|string|max:100',
-            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
+            'code'     => 'required|string|max:20|unique:chart_of_accounts,code',
+            'name'     => 'required|string|max:100',
+            'type'     => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
+            'sub_type' => 'nullable|in:aktiva_lancar,aktiva_tetap,hutang_lancar,hutang_jangka_panjang',
             'currency' => 'nullable|string|max:3',
         ]);
 
         $account = ChartOfAccount::create([
-            'code' => $request->code,
-            'name' => $request->name,
-            'type' => $request->type,
+            'code'     => $request->code,
+            'name'     => $request->name,
+            'type'     => $request->type,
+            'sub_type' => $request->sub_type,
             'currency' => $request->currency ?? 'IDR',
             'is_active' => true,
         ]);
@@ -99,17 +101,19 @@ class ChartOfAccountController extends Controller
         $account = ChartOfAccount::findOrFail($id);
 
         $request->validate([
-            'code' => 'required|string|max:20|unique:chart_of_accounts,code,' . $id,
-            'name' => 'required|string|max:100',
-            'type' => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
+            'code'     => 'required|string|max:20|unique:chart_of_accounts,code,' . $id,
+            'name'     => 'required|string|max:100',
+            'type'     => 'required|in:ASET,KEWAJIBAN,MODAL,PENDAPATAN,HPP,BIAYA',
+            'sub_type' => 'nullable|in:aktiva_lancar,aktiva_tetap,hutang_lancar,hutang_jangka_panjang',
             'currency' => 'nullable|string|max:3',
             'is_active' => 'nullable|boolean',
         ]);
 
         $account->update([
-            'code' => $request->code,
-            'name' => $request->name,
-            'type' => $request->type,
+            'code'     => $request->code,
+            'name'     => $request->name,
+            'type'     => $request->type,
+            'sub_type' => $request->sub_type,
             'currency' => $request->currency ?? 'IDR',
             'is_active' => $request->is_active ?? true,
         ]);

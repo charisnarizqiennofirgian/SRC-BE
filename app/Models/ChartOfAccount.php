@@ -13,6 +13,7 @@ class ChartOfAccount extends Model
         'code',
         'name',
         'type',
+        'sub_type',
         'currency',
         'is_active',
     ];
@@ -23,6 +24,21 @@ class ChartOfAccount extends Model
     const TYPE_PENDAPATAN = 'PENDAPATAN';
     const TYPE_HPP = 'HPP';
     const TYPE_BIAYA = 'BIAYA';
+
+    const SUB_TYPE_AKTIVA_LANCAR         = 'aktiva_lancar';
+    const SUB_TYPE_AKTIVA_TETAP          = 'aktiva_tetap';
+    const SUB_TYPE_HUTANG_LANCAR         = 'hutang_lancar';
+    const SUB_TYPE_HUTANG_JANGKA_PANJANG = 'hutang_jangka_panjang';
+
+    public static function getSubTypes(): array
+    {
+        return [
+            self::SUB_TYPE_AKTIVA_LANCAR         => 'Aktiva Lancar',
+            self::SUB_TYPE_AKTIVA_TETAP          => 'Aktiva Tetap',
+            self::SUB_TYPE_HUTANG_LANCAR         => 'Hutang Lancar',
+            self::SUB_TYPE_HUTANG_JANGKA_PANJANG => 'Hutang Jangka Panjang',
+        ];
+    }
 
     public function getAccountNameAttribute()
     {
