@@ -261,7 +261,7 @@ class PurchaseOrderController extends Controller
             'notes'                     => 'nullable|string',
             'type'                      => 'required|string|in:operasional,karton,kayu',
             'ppn_percentage'            => 'required|numeric|in:0,11,11.12,12',
-            'currency'                  => 'nullable|string|in:IDR,USD',
+            'currency'                  => 'nullable|string|in:IDR,USD,EUR',
             'exchange_rate'             => 'nullable|numeric|min:1',
             'details'                   => 'required|array|min:1',
             'details.*.item_id'         => 'required|exists:items,id',

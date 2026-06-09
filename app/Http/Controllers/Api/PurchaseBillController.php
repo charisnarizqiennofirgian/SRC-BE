@@ -29,7 +29,7 @@ class PurchaseBillController extends Controller
             'due_date'                            => 'required|date|after_or_equal:bill_date',
             'notes'                               => 'nullable|string',
             'ppn_percentage'                      => 'nullable|numeric|min:0|max:100',
-            'currency'                            => 'nullable|string|in:IDR,USD',
+            'currency'                            => 'nullable|string|in:IDR,USD,EUR',
             'exchange_rate'                       => 'nullable|numeric|min:1',
             'coa_id'                              => 'required|exists:chart_of_accounts,id',
             'details'                             => 'required|array|min:1',

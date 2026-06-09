@@ -48,6 +48,16 @@ class PurchaseBill extends Model
         return $this->currency === 'USD';
     }
 
+    public function isEUR(): bool
+    {
+        return $this->currency === 'EUR';
+    }
+
+    public function isForeignCurrency(): bool
+    {
+        return in_array($this->currency, ['USD', 'EUR']);
+    }
+
     // Konstanta Tipe Pembayaran
     const PAYMENT_TEMPO = 'TEMPO';
     const PAYMENT_TUNAI = 'TUNAI';

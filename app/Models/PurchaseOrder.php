@@ -41,6 +41,16 @@ class PurchaseOrder extends Model
         return $this->currency === 'USD';
     }
 
+    public function isEUR(): bool
+    {
+        return $this->currency === 'EUR';
+    }
+
+    public function isForeignCurrency(): bool
+    {
+        return in_array($this->currency, ['USD', 'EUR']);
+    }
+
     /**
      * Relasi ke Supplier.
      */
