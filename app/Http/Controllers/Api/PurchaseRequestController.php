@@ -310,6 +310,7 @@ class PurchaseRequestController extends Controller
                 'status'         => 'Open',
                 'type'           => $type,
                 'source_type'    => 'pr',
+                'pr_id'          => $pr->id,
             ]);
 
             foreach ($request->details as $detail) {
@@ -341,6 +342,39 @@ class PurchaseRequestController extends Controller
             Log::error('Error convert PR to PO: ' . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Gagal konvert ke PO.'], 500);
         }
+    }
+
+    // POST /purchase-requests/{id}/unpost
+    public function unpost($id)
+    {
+        $pr = PurchaseRequest::findOrFail($id);
+
+        if ($pr->status !== 'completed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Hanya PR berstatus Completed yang bisa di-unpost.',
+            ], 422);
+        }
+
+        $po = PurchaseOrder::where('pr_id', $pr->id)->first();
+
+        if ($po) {
+            if ($po->receipts()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tidak bisa unpost — PO ' . $po->po_number . ' sudah memiliki Goods Receipt.',
+                ], 422);
+            }
+
+            $po->update(['status' => 'Cancelled']);
+        }
+
+        $pr->update(['status' => 'draft']);
+
+        return response()->json([
+            'success' => true,
+            'message' => "PR {$pr->pr_number} berhasil di-unpost." . ($po ? " PO {$po->po_number} telah dibatalkan." : ''),
+        ]);
     }
 
     private function generatePrNumber(): string

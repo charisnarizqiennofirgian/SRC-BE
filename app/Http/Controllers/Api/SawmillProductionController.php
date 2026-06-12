@@ -155,6 +155,9 @@ class SawmillProductionController extends Controller
 
     private function processLogToJeblosan(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, ?int $referenceId, string $referenceNumber, string $documentNumber): void
     {
+        $totalLogM3 = 0;
+        $totalJeblosanM3 = 0;
+
         // INPUT: Kurangi stok log
         foreach ($data['logs'] ?? [] as $log) {
             $inv = Inventory::where('item_id', $log['item_log_id'])
@@ -166,6 +169,7 @@ class SawmillProductionController extends Controller
 
             $item       = Item::find($log['item_log_id']);
             $volumeM3   = ($item?->volume_m3 ?? 0) * $log['qty_log_pcs'];
+            $totalLogM3 += $volumeM3;
 
             InventoryLog::create([
                 'date'             => $data['date'],
@@ -194,6 +198,7 @@ class SawmillProductionController extends Controller
         // OUTPUT: Tambah stok jeblosan ke Gudang SAWMILL
         foreach ($data['jeblosans'] as $jeb) {
             $volM3 = $jeb['volume_m3'] ?? 0;
+            $totalJeblosanM3 += $volM3;
 
             $inv = Inventory::where('item_id', $jeb['item_id'])
                 ->where('warehouse_id', $warehouseSawmill->id)
@@ -234,10 +239,20 @@ class SawmillProductionController extends Controller
                 'is_sisa'               => false,
             ]);
         }
+
+        $yieldPercent = $totalLogM3 > 0 ? round($totalJeblosanM3 / $totalLogM3 * 100, 2) : 0;
+        $production->update([
+            'total_log_m3'  => $totalLogM3,
+            'total_rst_m3'  => $totalJeblosanM3,
+            'yield_percent' => $yieldPercent,
+        ]);
     }
 
     private function processJeblosanToRst(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseRstb, ?int $referenceId, string $referenceNumber, string $documentNumber): void
     {
+        $totalInputM3 = 0;
+        $totalRstM3   = 0;
+
         // INPUT: Otomatis ambil SEMUA stok jeblosan dari Gudang SAWMILL
         $allJeblosans = Inventory::where('warehouse_id', $warehouseSawmill->id)
             ->where('qty_pcs', '>', 0)
@@ -254,6 +269,7 @@ class SawmillProductionController extends Controller
         foreach ($allJeblosans as $inv) {
             $qty   = $inv->qty_pcs;
             $volM3 = ($inv->item?->volume_m3 ?? 0) * $qty;
+            $totalInputM3 += $volM3;
 
             $inv->update(['qty_pcs' => 0]);
 
@@ -284,6 +300,7 @@ class SawmillProductionController extends Controller
         // OUTPUT: Tambah stok RST ke Gudang RSTB
         foreach ($data['rsts'] as $rst) {
             $volM3 = $rst['volume_rst_m3'] ?? 0;
+            $totalRstM3 += $volM3;
 
             $inv = Inventory::where('item_id', $rst['item_rst_id'])
                 ->where('warehouse_id', $warehouseRstb->id)
@@ -324,5 +341,12 @@ class SawmillProductionController extends Controller
                 'destination_warehouse_id' => $warehouseRstb->id,
             ]);
         }
+
+        $yieldPercent = $totalInputM3 > 0 ? round($totalRstM3 / $totalInputM3 * 100, 2) : 0;
+        $production->update([
+            'total_log_m3'  => $totalInputM3,
+            'total_rst_m3'  => $totalRstM3,
+            'yield_percent' => $yieldPercent,
+        ]);
     }
 }

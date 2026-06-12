@@ -25,6 +25,7 @@ class PurchaseOrder extends Model
         'grand_total',
         'notes',
         'source_type',
+        'pr_id',
         'currency',
         'exchange_rate',
     ];

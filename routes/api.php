@@ -209,6 +209,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/submit',        [PurchaseRequestController::class, 'submit']);
         Route::post('/{id}/cancel',        [PurchaseRequestController::class, 'cancel']);
         Route::post('/{id}/convert-to-po', [PurchaseRequestController::class, 'convertToPO']);
+        Route::post('/{id}/unpost',        [PurchaseRequestController::class, 'unpost']);
     });
 
     // --- PEMBELIAN ---
