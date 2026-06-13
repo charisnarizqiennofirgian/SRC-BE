@@ -8,6 +8,7 @@ class MouldingProductionInput extends Model
 {
     protected $fillable = [
         'moulding_production_id',
+        'moulding_production_output_id',
         'item_id',
         'qty',
     ];
@@ -22,13 +23,9 @@ class MouldingProductionInput extends Model
         return $this->belongsTo(Item::class);
     }
 
-    public function output()
+    // The output group this input belongs to
+    public function group()
     {
-        return $this->hasOne(MouldingProductionOutput::class, 'moulding_production_input_id');
-    }
-
-    public function reject()
-    {
-        return $this->hasOne(MouldingProductionReject::class, 'moulding_production_input_id');
+        return $this->belongsTo(MouldingProductionOutput::class, 'moulding_production_output_id');
     }
 }

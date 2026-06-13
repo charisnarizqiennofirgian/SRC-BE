@@ -18,13 +18,19 @@ class MouldingProductionOutput extends Model
         return $this->belongsTo(MouldingProduction::class, 'moulding_production_id');
     }
 
-    public function input()
-    {
-        return $this->belongsTo(MouldingProductionInput::class, 'moulding_production_input_id');
-    }
-
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    // N RST inputs that produced this output (group relationship)
+    public function inputs()
+    {
+        return $this->hasMany(MouldingProductionInput::class, 'moulding_production_output_id');
+    }
+
+    public function rejects()
+    {
+        return $this->hasMany(MouldingProductionReject::class, 'moulding_production_output_id');
     }
 }
