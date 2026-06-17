@@ -173,7 +173,7 @@ class StockReportController extends Controller
             }
 
             // Baru paginate untuk display
-            $perPage = min($request->input('per_page', 50), 100);
+            $perPage = min((int) $request->input('per_page', 50), 9999);
             $items = $query->paginate($perPage);
 
             $collection = $items->getCollection()->transform(function ($item) use ($warehouseId) {

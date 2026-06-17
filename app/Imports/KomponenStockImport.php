@@ -112,6 +112,7 @@ class KomponenStockImport implements
                     ['code' => $kode],
                     [
                         'name'           => $nama,
+                        'type'           => Item::TYPE_COMPONENT,
                         'category_id'    => $category->id,
                         'unit_id'        => $unit->id,
                         'specifications' => $specifications,
