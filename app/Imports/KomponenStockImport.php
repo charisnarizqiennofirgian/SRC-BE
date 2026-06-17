@@ -128,29 +128,23 @@ class KomponenStockImport implements
                     ]
                 );
 
-                // 2. Update Inventory
+                // 2. Update Inventory — selalu buat record agar item ter-link ke gudang
+                // meski stok 0, supaya filter warehouse di stock index bisa menemukan item ini
+                Inventory::updateOrCreate(
+                    [
+                        'item_id' => $item->id,
+                        'warehouse_id' => $warehouse->id,
+                    ],
+                    [
+                        'qty_pcs' => $stokAwal,
+                        'qty_m3' => $totalM3,
+                    ]
+                );
+
+                Log::info("✅ Import Komponen: {$nama} - Stok {$stokAwal} pcs di {$warehouse->name}");
+
+                // 3. Catat ke inventory_logs hanya jika ada stok
                 if ($stokAwal > 0) {
-                    // Cek inventory lama
-                    $oldInventory = Inventory::where('item_id', $item->id)
-                        ->where('warehouse_id', $warehouse->id)
-                        ->first();
-                    $oldQty = $oldInventory ? (float) $oldInventory->qty : 0;
-
-                    // Update atau create inventory
-                    Inventory::updateOrCreate(
-                        [
-                            'item_id' => $item->id,
-                            'warehouse_id' => $warehouse->id,
-                        ],
-                        [
-                            'qty_pcs' => $stokAwal,
-                            'qty_m3' => $totalM3,
-                        ]
-                    );
-
-                    Log::info("✅ Import Komponen: {$nama} - Stok {$stokAwal} pcs di {$warehouse->name}");
-
-                    // ✅ 3. Catat ke inventory_logs
                     $existingLog = InventoryLog::where('item_id', $item->id)
                         ->where('warehouse_id', $warehouse->id)
                         ->where('transaction_type', 'INITIAL_STOCK')
