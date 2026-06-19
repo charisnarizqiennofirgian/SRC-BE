@@ -152,6 +152,13 @@ class StockAdjustmentController extends Controller
                 );
                 $newQty = $inventory->qty_pcs + $movementQuantity;
                 $inventory->update(['qty_pcs' => max(0, $newQty)]);
+            } elseif ($request->filled('warehouse_id')) {
+                $inventory = Inventory::firstOrCreate(
+                    ['warehouse_id' => (int) $request->warehouse_id, 'item_id' => $item->id],
+                    ['qty_pcs' => 0, 'qty_m3' => 0]
+                );
+                $newQty = (float) $inventory->qty_pcs + $movementQuantity;
+                $inventory->update(['qty_pcs' => max(0, $newQty)]);
             }
 
             DB::commit();
