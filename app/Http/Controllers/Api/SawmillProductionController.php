@@ -96,6 +96,9 @@ class SawmillProductionController extends Controller
         if ($data['process_type'] === 'log_jeblosan' && empty($data['jeblosans'])) {
             throw ValidationException::withMessages(['jeblosans' => ['Output jeblosan wajib diisi.']]);
         }
+        if ($data['process_type'] === 'jeblosan_rst' && empty($data['jeblosans'])) {
+            throw ValidationException::withMessages(['jeblosans' => ['Input jeblosan wajib diisi.']]);
+        }
         if ($data['process_type'] === 'jeblosan_rst' && empty($data['rsts'])) {
             throw ValidationException::withMessages(['rsts' => ['Output RST wajib diisi.']]);
         }
@@ -253,46 +256,45 @@ class SawmillProductionController extends Controller
         $totalInputM3 = 0;
         $totalRstM3   = 0;
 
-        // INPUT: Otomatis ambil SEMUA stok jeblosan dari Gudang SAWMILL
-        $allJeblosans = Inventory::where('warehouse_id', $warehouseSawmill->id)
-            ->where('qty_pcs', '>', 0)
-            ->with('item')
-            ->lockForUpdate()
-            ->get();
+        // INPUT: Kurangi stok jeblosan sesuai pilihan user (bukan ambil semua otomatis)
+        foreach ($data['jeblosans'] as $jeb) {
+            $inv = Inventory::where('item_id', $jeb['item_id'])
+                ->where('warehouse_id', $warehouseSawmill->id)
+                ->with('item')
+                ->lockForUpdate()
+                ->first();
 
-        if ($allJeblosans->isEmpty()) {
-            throw ValidationException::withMessages([
-                'sawmill_stock' => ['Tidak ada stok jeblosan di Gudang SAWMILL.'],
-            ]);
-        }
+            if (!$inv || $inv->qty_pcs < $jeb['qty_pcs']) {
+                throw ValidationException::withMessages([
+                    'jeblosans' => ['Stok jeblosan tidak mencukupi untuk item yang dipilih.'],
+                ]);
+            }
 
-        foreach ($allJeblosans as $inv) {
-            $qty   = $inv->qty_pcs;
-            $volM3 = ($inv->item?->volume_m3 ?? 0) * $qty;
+            $volM3 = ($inv->item?->volume_m3 ?? 0) * $jeb['qty_pcs'];
             $totalInputM3 += $volM3;
 
-            $inv->update(['qty_pcs' => 0]);
+            $inv->decrement('qty_pcs', $jeb['qty_pcs']);
 
             InventoryLog::create([
                 'date'             => $data['date'],
                 'time'             => now()->toTimeString(),
-                'item_id'          => $inv->item_id,
+                'item_id'          => $jeb['item_id'],
                 'warehouse_id'     => $warehouseSawmill->id,
-                'qty'              => $qty,
+                'qty'              => $jeb['qty_pcs'],
                 'qty_m3'           => $volM3,
                 'direction'        => 'OUT',
                 'transaction_type' => 'SAWMILL',
                 'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
                 'reference_id'     => $referenceId ?? $production->id,
                 'reference_number' => $referenceNumber,
-                'notes'            => "Jeblosan masuk proses RST — otomatis ({$documentNumber})",
+                'notes'            => "Jeblosan masuk proses RST ({$documentNumber})",
                 'user_id'          => Auth::id(),
             ]);
 
             SawmillProductionLog::create([
                 'sawmill_production_id' => $production->id,
-                'item_log_id'           => $inv->item_id,
-                'qty_log_pcs'           => $qty,
+                'item_log_id'           => $jeb['item_id'],
+                'qty_log_pcs'           => $jeb['qty_pcs'],
                 'volume_log_m3'         => $volM3,
             ]);
         }

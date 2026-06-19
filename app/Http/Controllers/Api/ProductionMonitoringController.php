@@ -109,47 +109,45 @@ class ProductionMonitoringController extends Controller
                     ];
 
                     $statusHulu = [];
-                    foreach ($stageTypes as $key => $txType) {
-                        if (empty($poIds)) {
+
+                    if (empty($poIds)) {
+                        foreach ($stageTypes as $key => $_) {
                             $statusHulu[$key] = 'waiting';
-                            continue;
                         }
-
-                        $searchIds = $this->getSearchIds($txType, $poIds);
-
-                        $hasActivity = InventoryLog::where('transaction_type', $txType)
-                            ->whereIn('reference_id', $searchIds)
-                            ->exists();
-
-                        // Cek apakah stage berikutnya sudah ada aktivitas (berarti stage ini done)
-                        $nextStageMap = [
-                            'sanwil'     => 'KD',
-                            'kd'         => 'PEMBAHANAN',
-                            'pembahanan' => 'MOULDING',
-                            'moulding'   => 'MESIN',
-                            'mesin'      => null,
-                        ];
-
-                        $nextTxType = $nextStageMap[$key] ?? null;
-                        $nextHasActivity = false;
-                        if ($nextTxType) {
-                            $nextSearchIds = $this->getSearchIds($nextTxType, $poIds);
-                            $nextHasActivity = InventoryLog::where('transaction_type', $nextTxType)
-                                ->whereIn('reference_id', $nextSearchIds)
+                    } else {
+                        // Pre-compute hasActivity semua stage sekaligus
+                        $activityCache = [];
+                        foreach ($stageTypes as $key => $txType) {
+                            $searchIds = $this->getSearchIds($txType, $poIds);
+                            $activityCache[$key] = InventoryLog::where('transaction_type', $txType)
+                                ->whereIn('reference_id', $searchIds)
                                 ->exists();
                         }
 
-                        if ($nextHasActivity && !$hasActivity) {
-                            // Stage ini di-skip (SO tidak lewat sini)
-                            $statusHulu[$key] = 'skip';
-                        } elseif ($nextHasActivity && $hasActivity) {
-                            // Stage ini sudah selesai
-                            $statusHulu[$key] = 'done';
-                        } elseif ($hasActivity) {
-                            // Stage ini sedang berjalan
-                            $statusHulu[$key] = 'in_progress';
-                        } else {
-                            $statusHulu[$key] = 'waiting';
+                        $stageOrder = array_keys($stageTypes);
+
+                        foreach ($stageTypes as $key => $txType) {
+                            $hasActivity = $activityCache[$key];
+                            $currentIdx  = array_search($key, $stageOrder);
+
+                            // Cek apakah ada stage MANA SAJA yang lebih jauh di chain sudah aktif
+                            $anyLaterActive = false;
+                            for ($i = $currentIdx + 1; $i < count($stageOrder); $i++) {
+                                if ($activityCache[$stageOrder[$i]]) {
+                                    $anyLaterActive = true;
+                                    break;
+                                }
+                            }
+
+                            if ($anyLaterActive && !$hasActivity) {
+                                $statusHulu[$key] = 'skip';
+                            } elseif ($anyLaterActive && $hasActivity) {
+                                $statusHulu[$key] = 'done';
+                            } elseif ($hasActivity) {
+                                $statusHulu[$key] = 'in_progress';
+                            } else {
+                                $statusHulu[$key] = 'waiting';
+                            }
                         }
                     }
 
