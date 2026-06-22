@@ -90,14 +90,25 @@ class PurchaseOrderController extends Controller
 
     public function show(PurchaseOrder $purchaseOrder)
     {
-        $purchaseOrder->load('supplier', 'details.item.unit');
+        $purchaseOrder->load('supplier', 'details.item.unit', 'receipts.details');
 
-        $purchaseOrder->details->each(function ($detail) {
+        // Sum quantity already received per item_id across all goods receipts
+        $receivedPerItem = [];
+        foreach ($purchaseOrder->receipts as $receipt) {
+            foreach ($receipt->details as $rd) {
+                $receivedPerItem[$rd->item_id] = ($receivedPerItem[$rd->item_id] ?? 0) + $rd->quantity_received;
+            }
+        }
+
+        $purchaseOrder->details->each(function ($detail) use ($receivedPerItem) {
             if ($detail->specifications) {
                 $detail->specifications = is_string($detail->specifications)
                     ? json_decode($detail->specifications, true)
                     : $detail->specifications;
             }
+            $received = $receivedPerItem[$detail->item_id] ?? 0;
+            $detail->quantity_received_total = (float) $received;
+            $detail->quantity_remaining      = (float) max(0, $detail->quantity_ordered - $received);
         });
 
         return response()->json(['success' => true, 'data' => $purchaseOrder]);
