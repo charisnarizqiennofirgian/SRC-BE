@@ -305,6 +305,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('produksi/moulding/rst-items', [MouldingController::class, 'getRstItems']);
     Route::get('produksi/moulding/komponen-items', [MouldingController::class, 'getKomponenItems']);
     Route::get('produksi/moulding/available-pos', [MouldingController::class, 'getAvailablePos']);
+    Route::get('produksi/moulding/po-detail-items/{poId}', [MouldingController::class, 'getPoDetailItems']);
     Route::post('produksi/moulding', [MouldingController::class, 'store']);
     Route::post('produksi/moulding/{id}/selesai', [MouldingController::class, 'tandaiSelesai']);
 
@@ -312,6 +313,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/operator-mesin/machines', [OperatorMesinController::class, 'getMachines']);
     Route::get('/operator-mesin/available-pos', [OperatorMesinController::class, 'getAvailablePos']);
     Route::get('/operator-mesin/s4s-items', [OperatorMesinController::class, 'getS4sItems']);
+    Route::get('/operator-mesin/po-detail-items/{poId}', [OperatorMesinController::class, 'getPoDetailItems']);
     Route::post('/operator-mesin/store', [OperatorMesinController::class, 'store']);
     Route::post('/operator-mesin/selesai/{poId}', [OperatorMesinController::class, 'tandaiSelesai']);
 

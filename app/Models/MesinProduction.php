@@ -10,6 +10,7 @@ class MesinProduction extends Model
         'document_number',
         'date',
         'ref_po_id',
+        'production_order_detail_id',
         'machine_id',
         'notes',
         'created_by',
@@ -22,6 +23,11 @@ class MesinProduction extends Model
     public function productionOrder()
     {
         return $this->belongsTo(ProductionOrder::class, 'ref_po_id');
+    }
+
+    public function productionOrderDetail()
+    {
+        return $this->belongsTo(ProductionOrderDetail::class, 'production_order_detail_id');
     }
 
     public function machine()

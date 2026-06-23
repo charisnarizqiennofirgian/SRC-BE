@@ -72,7 +72,7 @@ class ProductionMonitoringController extends Controller
                 'packing'    => $warehouses['PACKING']    ?? null,
             ];
 
-            $query = SalesOrder::with(['buyer', 'details.item', 'productionOrders'])
+            $query = SalesOrder::with(['buyer', 'details.item', 'productionOrders.details'])
                 ->where('status', '!=', 'Draft')
                 ->orderBy('created_at', 'desc');
 
@@ -93,6 +93,9 @@ class ProductionMonitoringController extends Controller
 
             foreach ($salesOrders as $so) {
                 $poIds = $so->productionOrders->pluck('id')->toArray();
+
+                // Semua detail dari semua PO milik SO ini (untuk cek moulding per item)
+                $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
 
                 $items = [];
 
@@ -118,10 +121,24 @@ class ProductionMonitoringController extends Controller
                         // Pre-compute hasActivity semua stage sekaligus
                         $activityCache = [];
                         foreach ($stageTypes as $key => $txType) {
-                            $searchIds = $this->getSearchIds($txType, $poIds);
-                            $activityCache[$key] = InventoryLog::where('transaction_type', $txType)
-                                ->whereIn('reference_id', $searchIds)
-                                ->exists();
+                            if ($key === 'moulding') {
+                                // Moulding: cek per item — done jika current_stage moulding ATAU sudah lebih jauh (mesin)
+                                $activityCache[$key] = $allPoDetails
+                                    ->where('item_id', $itemId)
+                                    ->filter(fn($d) => in_array($d->current_stage, ['moulding', 'mesin']))
+                                    ->isNotEmpty();
+                            } elseif ($key === 'mesin') {
+                                // Mesin: cek per item dari production_order_details.current_stage
+                                $activityCache[$key] = $allPoDetails
+                                    ->where('item_id', $itemId)
+                                    ->where('current_stage', 'mesin')
+                                    ->isNotEmpty();
+                            } else {
+                                $searchIds = $this->getSearchIds($txType, $poIds);
+                                $activityCache[$key] = InventoryLog::where('transaction_type', $txType)
+                                    ->whereIn('reference_id', $searchIds)
+                                    ->exists();
+                            }
                         }
 
                         $stageOrder = array_keys($stageTypes);

@@ -17,6 +17,7 @@ class ProductionOrderDetail extends Model
         'item_id',
         'qty_planned',
         'qty_produced',
+        'current_stage',
     ];
 
     public function productionOrder()

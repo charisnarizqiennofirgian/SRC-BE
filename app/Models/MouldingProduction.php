@@ -10,6 +10,7 @@ class MouldingProduction extends Model
         'document_number',
         'date',
         'ref_po_id',
+        'production_order_detail_id',
         'notes',
         'created_by',
     ];
@@ -21,6 +22,11 @@ class MouldingProduction extends Model
     public function productionOrder()
     {
         return $this->belongsTo(ProductionOrder::class, 'ref_po_id');
+    }
+
+    public function productionOrderDetail()
+    {
+        return $this->belongsTo(ProductionOrderDetail::class, 'production_order_detail_id');
     }
 
     public function creator()

@@ -12,6 +12,7 @@ use App\Models\MesinProductionInput;
 use App\Models\MesinProductionOutput;
 use App\Models\MesinProductionReject;
 use App\Models\ProductionOrder;
+use App\Models\ProductionOrderDetail;
 use App\Models\Warehouse;
 use App\Services\ProductionOrderProgressService;
 use Illuminate\Http\Request;
@@ -40,16 +41,39 @@ class OperatorMesinController extends Controller
     public function getAvailablePos()
     {
         $pos = ProductionOrder::where('status', '!=', 'completed')
-            ->with(['salesOrder.buyer'])
+            ->with(['salesOrder.buyer', 'details'])
             ->get()
             ->map(fn($po) => [
-                'id'         => $po->id,
-                'po_number'  => $po->po_number,
-                'label'      => $po->po_number,
-                'buyer_name' => $po->salesOrder?->buyer?->name ?? '-',
-                'so_number'  => $po->salesOrder?->so_number ?? '-',
+                'id'               => $po->id,
+                'po_number'        => $po->po_number,
+                'label'            => $po->po_number,
+                'buyer_name'       => $po->salesOrder?->buyer?->name ?? '-',
+                'so_number'        => $po->salesOrder?->so_number ?? '-',
+                'total_items'      => $po->details->count(),
+                'mesin_done_count' => $po->details->where('current_stage', 'mesin')->count(),
             ]);
         return response()->json(['success' => true, 'data' => $pos]);
+    }
+
+    // GET /operator-mesin/po-detail-items/{poId}
+    public function getPoDetailItems(Request $request, $poId)
+    {
+        ProductionOrder::findOrFail($poId);
+
+        $details = ProductionOrderDetail::where('production_order_id', $poId)
+            ->with('item')
+            ->get()
+            ->map(fn($d) => [
+                'id'            => $d->id,
+                'item_id'       => $d->item_id,
+                'item_name'     => $d->item?->name ?? '-',
+                'item_code'     => $d->item?->code ?? '-',
+                'qty_planned'   => $d->qty_planned,
+                'current_stage' => $d->current_stage,
+                'mesin_done'    => $d->current_stage === 'mesin',
+            ]);
+
+        return response()->json(['success' => true, 'data' => $details]);
     }
 
     public function getS4sItems(Request $request)
@@ -72,14 +96,15 @@ class OperatorMesinController extends Controller
         return response()->json(['success' => true, 'data' => $inventories]);
     }
 
-    // store() — payload baru: lines[] dengan nested output + reject per Komponen input
+    // store() — payload: production_order_detail_id + lines[]
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'       => ['required', 'date'],
-            'ref_po_id'  => ['required', 'integer', 'exists:production_orders,id'],
-            'machine_id' => ['required', 'integer', 'exists:machines,id'],
-            'notes'      => ['nullable', 'string'],
+            'date'                       => ['required', 'date'],
+            'ref_po_id'                  => ['required', 'integer', 'exists:production_orders,id'],
+            'production_order_detail_id' => ['required', 'integer', 'exists:production_order_details,id'],
+            'machine_id'                 => ['required', 'integer', 'exists:machines,id'],
+            'notes'                      => ['nullable', 'string'],
 
             'lines'                   => ['required', 'array', 'min:1'],
             'lines.*.input_item_id'   => ['required', 'integer', 'exists:items,id'],
@@ -91,7 +116,11 @@ class OperatorMesinController extends Controller
             'lines.*.reject_notes'    => ['nullable', 'string'],
         ]);
 
-        return DB::transaction(function () use ($data) {
+        $detail = ProductionOrderDetail::where('id', $data['production_order_detail_id'])
+            ->where('production_order_id', $data['ref_po_id'])
+            ->firstOrFail();
+
+        return DB::transaction(function () use ($data, $detail) {
 
             $warehouseS4S    = Warehouse::where('code', 'S4S')->first();
             $warehouseMesin  = Warehouse::where('code', 'MESIN')->first();
@@ -112,12 +141,13 @@ class OperatorMesinController extends Controller
             $documentNumber = 'MSN-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             $mesinProduction = MesinProduction::create([
-                'document_number' => $documentNumber,
-                'date'            => $data['date'],
-                'ref_po_id'       => $data['ref_po_id'],
-                'machine_id'      => $data['machine_id'],
-                'notes'           => $data['notes'] ?? null,
-                'created_by'      => Auth::id(),
+                'document_number'            => $documentNumber,
+                'date'                       => $data['date'],
+                'ref_po_id'                  => $data['ref_po_id'],
+                'production_order_detail_id' => $detail->id,
+                'machine_id'                 => $data['machine_id'],
+                'notes'                      => $data['notes'] ?? null,
+                'created_by'                 => Auth::id(),
             ]);
 
             foreach ($data['lines'] as $idx => $line) {
@@ -248,20 +278,22 @@ class OperatorMesinController extends Controller
                 }
             }
 
-            if ($productionOrder) {
-                $productionOrder->current_stage = 'mesin';
-                $productionOrder->status        = 'in_progress';
-                $productionOrder->save();
+            // Update current_stage hanya untuk detail produk yang dipilih
+            $detail->update(['current_stage' => 'mesin']);
+
+            if ($productionOrder && $productionOrder->status !== 'in_progress') {
+                $productionOrder->update(['status' => 'in_progress']);
             }
 
             return response()->json([
                 'success' => true,
-                'message' => "Proses Mesin ({$machineName}) berhasil dicatat ({$documentNumber})",
+                'message' => "Proses Mesin ({$machineName}) berhasil dicatat ({$documentNumber}) untuk produk: {$detail->item?->name}",
                 'data'    => [
                     'id'              => $mesinProduction->id,
                     'document_number' => $documentNumber,
                     'machine'         => $machineName,
                     'total_lines'     => count($data['lines']),
+                    'product_name'    => $detail->item?->name,
                 ],
             ], 201);
         });
@@ -269,11 +301,34 @@ class OperatorMesinController extends Controller
 
     public function tandaiSelesai(Request $request, $poId)
     {
-        $productionOrder = ProductionOrder::findOrFail($poId);
+        $productionOrder = ProductionOrder::with('details.item')->findOrFail($poId);
+
+        $allDetails   = $productionOrder->details;
+        $totalDetails = $allDetails->count();
+        $doneDetails  = $allDetails->where('current_stage', 'mesin')->count();
+
+        if ($totalDetails === 0) {
+            return response()->json(['success' => false, 'message' => 'PO ini tidak memiliki detail produk.'], 422);
+        }
+
+        if ($doneDetails < $totalDetails) {
+            $belumSelesai = $allDetails
+                ->where('current_stage', '!=', 'mesin')
+                ->map(fn($d) => $d->item?->name ?? 'Item #'.$d->item_id)
+                ->values()->all();
+
+            return response()->json([
+                'success' => false,
+                'message' => "Belum semua produk selesai proses Mesin ({$doneDetails}/{$totalDetails}). Produk yang belum: " . implode(', ', $belumSelesai),
+                'pending' => $belumSelesai,
+            ], 422);
+        }
+
         $productionOrder->update(['current_stage' => 'assembly', 'status' => 'in_progress']);
+
         return response()->json([
             'success' => true,
-            'message' => "PO {$productionOrder->po_number} selesai Mesin, lanjut ke Assembling.",
+            'message' => "Semua produk ({$totalDetails}) selesai proses Mesin. PO {$productionOrder->po_number} lanjut ke Assembling.",
         ]);
     }
 }
