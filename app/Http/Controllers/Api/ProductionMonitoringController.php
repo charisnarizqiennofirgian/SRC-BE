@@ -113,58 +113,71 @@ class ProductionMonitoringController extends Controller
 
                     $statusHulu = [];
 
+                    // === QTY MOULDING & MESIN (per item, dari production_order_detail) ===
+                    $detailIds = $allPoDetails->where('item_id', $itemId)->pluck('id')->toArray();
+
+                    // Sum output moulding untuk item ini (via production_order_detail_id)
+                    $qtyMoulding = 0;
+                    if (!empty($detailIds)) {
+                        $qtyMoulding = (float) DB::table('moulding_production_outputs')
+                            ->join('moulding_productions', 'moulding_productions.id', '=', 'moulding_production_outputs.moulding_production_id')
+                            ->whereIn('moulding_productions.production_order_detail_id', $detailIds)
+                            ->sum('moulding_production_outputs.qty');
+                    }
+                    // Fallback: PO-level untuk data lama tanpa detail_id
+                    if ($qtyMoulding == 0 && !empty($poIds)) {
+                        $qtyMoulding = (float) DB::table('moulding_production_outputs')
+                            ->join('moulding_productions', 'moulding_productions.id', '=', 'moulding_production_outputs.moulding_production_id')
+                            ->whereIn('moulding_productions.ref_po_id', $poIds)
+                            ->whereNull('moulding_productions.production_order_detail_id')
+                            ->sum('moulding_production_outputs.qty');
+                    }
+
+                    // Sum output mesin untuk item ini
+                    $qtyMesin = 0;
+                    if (!empty($detailIds)) {
+                        $qtyMesin = (float) DB::table('mesin_production_outputs')
+                            ->join('mesin_productions', 'mesin_productions.id', '=', 'mesin_production_outputs.mesin_production_id')
+                            ->whereIn('mesin_productions.production_order_detail_id', $detailIds)
+                            ->sum('mesin_production_outputs.qty');
+                    }
+                    if ($qtyMesin == 0 && !empty($poIds)) {
+                        $qtyMesin = (float) DB::table('mesin_production_outputs')
+                            ->join('mesin_productions', 'mesin_productions.id', '=', 'mesin_production_outputs.mesin_production_id')
+                            ->whereIn('mesin_productions.ref_po_id', $poIds)
+                            ->whereNull('mesin_productions.production_order_detail_id')
+                            ->sum('mesin_production_outputs.qty');
+                    }
+
                     if (empty($poIds)) {
-                        foreach ($stageTypes as $key => $_) {
+                        foreach (['sanwil', 'kd', 'pembahanan'] as $key) {
                             $statusHulu[$key] = 'waiting';
                         }
                     } else {
-                        // Pre-compute hasActivity semua stage sekaligus
+                        $colorStages = [
+                            'sanwil'     => 'SAWMILL',
+                            'kd'         => 'KD',
+                            'pembahanan' => 'PEMBAHANAN',
+                        ];
                         $activityCache = [];
-                        foreach ($stageTypes as $key => $txType) {
-                            if ($key === 'moulding') {
-                                // Moulding: cek per item — done jika current_stage moulding ATAU sudah lebih jauh (mesin)
-                                $activityCache[$key] = $allPoDetails
-                                    ->where('item_id', $itemId)
-                                    ->filter(fn($d) => in_array($d->current_stage, ['moulding', 'mesin']))
-                                    ->isNotEmpty();
-                            } elseif ($key === 'mesin') {
-                                // Mesin: cek per item dari production_order_details.current_stage
-                                $activityCache[$key] = $allPoDetails
-                                    ->where('item_id', $itemId)
-                                    ->where('current_stage', 'mesin')
-                                    ->isNotEmpty();
-                            } else {
-                                $searchIds = $this->getSearchIds($txType, $poIds);
-                                $activityCache[$key] = InventoryLog::where('transaction_type', $txType)
-                                    ->whereIn('reference_id', $searchIds)
-                                    ->exists();
-                            }
+                        foreach ($colorStages as $key => $txType) {
+                            $searchIds          = $this->getSearchIds($txType, $poIds);
+                            $activityCache[$key] = InventoryLog::where('transaction_type', $txType)
+                                ->whereIn('reference_id', $searchIds)->exists();
                         }
 
-                        $stageOrder = array_keys($stageTypes);
-
-                        foreach ($stageTypes as $key => $txType) {
+                        $stageOrder = array_keys($colorStages);
+                        foreach ($colorStages as $key => $txType) {
                             $hasActivity = $activityCache[$key];
                             $currentIdx  = array_search($key, $stageOrder);
-
-                            // Cek apakah ada stage MANA SAJA yang lebih jauh di chain sudah aktif
                             $anyLaterActive = false;
                             for ($i = $currentIdx + 1; $i < count($stageOrder); $i++) {
-                                if ($activityCache[$stageOrder[$i]]) {
-                                    $anyLaterActive = true;
-                                    break;
-                                }
+                                if ($activityCache[$stageOrder[$i]]) { $anyLaterActive = true; break; }
                             }
-
-                            if ($anyLaterActive && !$hasActivity) {
-                                $statusHulu[$key] = 'skip';
-                            } elseif ($anyLaterActive && $hasActivity) {
-                                $statusHulu[$key] = 'done';
-                            } elseif ($hasActivity) {
-                                $statusHulu[$key] = 'in_progress';
-                            } else {
-                                $statusHulu[$key] = 'waiting';
-                            }
+                            if ($anyLaterActive && !$hasActivity)     $statusHulu[$key] = 'skip';
+                            elseif ($anyLaterActive && $hasActivity)  $statusHulu[$key] = 'done';
+                            elseif ($hasActivity)                     $statusHulu[$key] = 'in_progress';
+                            else                                      $statusHulu[$key] = 'waiting';
                         }
                     }
 
@@ -206,8 +219,8 @@ class ProductionMonitoringController extends Controller
                         'status_sanwil'     => $statusHulu['sanwil'],
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
-                        'status_moulding'   => $statusHulu['moulding'],
-                        'status_mesin'      => $statusHulu['mesin'],
+                        'qty_moulding'      => $qtyMoulding,
+                        'qty_mesin'         => $qtyMesin,
 
                         // Zona Hilir
                         'qty_ruskomp'       => $qtyHilir['ruskomp'],
