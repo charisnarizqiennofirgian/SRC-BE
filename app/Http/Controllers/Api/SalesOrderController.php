@@ -376,12 +376,10 @@ class SalesOrderController extends Controller
 
     private function generateSoNumber()
     {
-        $prefix = 'SO-' . date('Y') . '-' . date('m') . '-';
+        $prefix = 'SO-' . date('Y') . '-';
         $year = date('Y');
-        $month = date('m');
 
         $lastSo = SalesOrder::whereYear('created_at', $year)
-            ->whereMonth('created_at', $month)
             ->orderBy('id', 'desc')
             ->first();
 
@@ -409,10 +407,10 @@ class SalesOrderController extends Controller
                 ]);
             }
 
-            $yymm = date('ym');
+            $year = date('Y');
 
             $last = SalesOrder::whereNotNull('no_pi')
-                ->where('no_pi', 'LIKE', "PI/{$yymm}/%")
+                ->where('no_pi', 'LIKE', "PI/{$year}/%")
                 ->orderByRaw('CAST(SUBSTRING(no_pi, 9) AS UNSIGNED) DESC')
                 ->first();
 
@@ -422,7 +420,7 @@ class SalesOrderController extends Controller
                 $newNumber = $lastSeq + 1;
             }
 
-            $noPi = 'PI/' . $yymm . '/' . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+            $noPi = 'PI/' . $year . '/' . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
 
             $salesOrder->update(['no_pi' => $noPi]);
 

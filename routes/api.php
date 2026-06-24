@@ -400,6 +400,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     // --- MONITORING PRODUKSI ---
     Route::prefix('production-monitoring')->group(function () {
         Route::get('/', [ProductionMonitoringController::class, 'index']);
+        Route::get('/sample', [ProductionMonitoringController::class, 'sampleIndex']);
         Route::get('/detail', [ProductionMonitoringController::class, 'detail']);
         Route::get('/export-excel', [ProductionMonitoringController::class, 'exportExcel']);
     });

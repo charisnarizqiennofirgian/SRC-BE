@@ -72,7 +72,11 @@ class ProductionMonitoringController extends Controller
                 'packing'    => $warehouses['PACKING']    ?? null,
             ];
 
-            $query = SalesOrder::with(['buyer', 'details.item', 'productionOrders.details'])
+            $query = SalesOrder::with([
+                    'buyer',
+                    'details.item',
+                    'productionOrders' => fn($q) => $q->where('type', 'production')->with('details'),
+                ])
                 ->where('status', '!=', 'Draft')
                 ->orderBy('created_at', 'desc');
 
@@ -255,6 +259,124 @@ class ProductionMonitoringController extends Controller
                 'success'  => true,
                 'data'     => $result,
                 'total_so' => $salesOrders->count(),
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function sampleIndex(Request $request)
+    {
+        try {
+            $query = SalesOrder::with([
+                    'buyer',
+                    'details.item',
+                    'productionOrders' => fn($q) => $q->where('type', 'sample')->with('details.item'),
+                ])
+                ->where('status', '!=', 'Draft')
+                ->whereHas('productionOrders', fn($q) => $q->where('type', 'sample'))
+                ->orderBy('created_at', 'desc');
+
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('so_number', 'LIKE', "%{$search}%")
+                      ->orWhereHas('buyer', fn($bq) => $bq->where('name', 'LIKE', "%{$search}%"));
+                });
+            }
+
+            $salesOrders = $query->get();
+            $result = [];
+
+            foreach ($salesOrders as $so) {
+                foreach ($so->productionOrders as $po) {
+                    $poIds = [$po->id];
+
+                    // Sub-table IDs untuk stage yang pakai sub-table
+                    $sawmillIds    = DB::table('sawmill_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
+                    $kdIds         = DB::table('kd_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
+                    $pembahananIds = DB::table('pembahanan_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
+                    $mouldingIds   = DB::table('moulding_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
+
+                    // Cek ada-tidaknya aktivitas per stage
+                    $hasSawmill    = InventoryLog::where('transaction_type', 'SAWMILL')
+                        ->whereIn('reference_id', array_merge($poIds, $sawmillIds))->exists();
+                    $hasKd         = InventoryLog::where('transaction_type', 'KD')
+                        ->whereIn('reference_id', array_merge($poIds, $kdIds))->exists();
+                    $hasPembahanan = InventoryLog::where('transaction_type', 'PEMBAHANAN')
+                        ->whereIn('reference_id', array_merge($poIds, $pembahananIds))->exists();
+
+                    // Qty stages (langsung pakai ref_po_id atau sub-table moulding)
+                    $qtyMoulding = 0;
+                    if (!empty($mouldingIds)) {
+                        $qtyMoulding = (float) DB::table('moulding_production_outputs')
+                            ->whereIn('moulding_production_id', $mouldingIds)
+                            ->sum('qty');
+                    }
+
+                    $qtyPrototype = (float) InventoryLog::where('transaction_type', 'PROTOTYPE')
+                        ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
+
+                    $qtySanding = (float) InventoryLog::where('transaction_type', 'SANDING')
+                        ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
+
+                    $qtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
+                        ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
+
+                    // Status sekuensial untuk hulu stages
+                    $hasLaterThanSawmill    = $hasKd || $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
+                    $hasLaterThanKd         = $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
+                    $hasLaterThanPembahanan = $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
+
+                    $statusSawmill    = $hasLaterThanSawmill && $hasSawmill    ? 'done' : ($hasLaterThanSawmill && !$hasSawmill    ? 'skip' : ($hasSawmill    ? 'in_progress' : 'waiting'));
+                    $statusKd         = $hasLaterThanKd && $hasKd             ? 'done' : ($hasLaterThanKd && !$hasKd             ? 'skip' : ($hasKd         ? 'in_progress' : 'waiting'));
+                    $statusPembahanan = $hasLaterThanPembahanan && $hasPembahanan ? 'done' : ($hasLaterThanPembahanan && !$hasPembahanan ? 'skip' : ($hasPembahanan ? 'in_progress' : 'waiting'));
+
+                    $items = [];
+                    foreach ($po->details as $detail) {
+                        $soDetail     = $so->details->firstWhere('item_id', $detail->item_id);
+                        $deliveryDate = $soDetail?->delivery_date
+                            ? Carbon::parse($soDetail->delivery_date)->format('d/m/Y')
+                            : '-';
+                        $target = (float) $detail->qty_planned;
+
+                        $items[] = [
+                            'item_id'           => $detail->item_id,
+                            'item_name'         => $detail->item?->name ?? '-',
+                            'item_code'         => $detail->item?->code ?? '-',
+                            'target'            => $target,
+                            'delivery_date'     => $deliveryDate,
+                            'status_sanwil'     => $statusSawmill,
+                            'status_kd'         => $statusKd,
+                            'status_pembahanan' => $statusPembahanan,
+                            'qty_moulding'      => $qtyMoulding,
+                            'qty_prototype'     => $qtyPrototype,
+                            'qty_sanding'       => $qtySanding,
+                            'qty_packing'       => $qtyPacking,
+                            'sisa'              => max(0, $target - $qtyPacking),
+                            'is_done'           => ($qtyPacking >= $target && $target > 0) || $po->status === 'completed',
+                        ];
+                    }
+
+                    $result[] = [
+                        'so_id'      => $so->id,
+                        'so_number'  => $so->so_number,
+                        'so_date'    => $so->so_date ? Carbon::parse($so->so_date)->format('d/m/Y') : '-',
+                        'buyer_name' => $so->buyer?->name ?? '-',
+                        'po_id'      => $po->id,
+                        'po_number'  => $po->po_number,
+                        'po_status'  => $po->status,
+                        'is_done'    => $po->status === 'completed',
+                        'items'      => $items,
+                    ];
+                }
+            }
+
+            return response()->json([
+                'success'  => true,
+                'data'     => $result,
+                'total_po' => count($result),
             ]);
 
         } catch (\Exception $e) {
