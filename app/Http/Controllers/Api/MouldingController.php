@@ -87,22 +87,57 @@ class MouldingController extends Controller
     // Return list produk dalam PO beserta status moulding-nya
     public function getPoDetailItems(Request $request, $poId)
     {
-        $po = ProductionOrder::findOrFail($poId);
+        $po = ProductionOrder::with('salesOrder.details')->findOrFail($poId);
 
         $details = ProductionOrderDetail::where('production_order_id', $poId)
             ->with('item')
-            ->get()
-            ->map(fn($d) => [
-                'id'            => $d->id,
-                'item_id'       => $d->item_id,
-                'item_name'     => $d->item?->name ?? '-',
-                'item_code'     => $d->item?->code ?? '-',
-                'qty_planned'   => $d->qty_planned,
-                'current_stage' => $d->current_stage,
-                'moulding_done' => $d->current_stage === 'moulding',
-            ]);
+            ->get();
 
-        return response()->json(['success' => true, 'data' => $details]);
+        // Auto-repair: PO lama mungkin tidak punya production_order_details.
+        // Jika kosong tapi SO masih punya detail items, buat records-nya sekarang.
+        if ($details->isEmpty() && $po->salesOrder && $po->salesOrder->details->isNotEmpty()) {
+            DB::beginTransaction();
+            try {
+                foreach ($po->salesOrder->details as $sd) {
+                    ProductionOrderDetail::create([
+                        'production_order_id'   => $po->id,
+                        'sales_order_detail_id' => $sd->id,
+                        'item_id'               => $sd->item_id,
+                        'qty_planned'           => $sd->quantity,
+                        'qty_produced'          => 0,
+                    ]);
+                }
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::warning("Auto-repair production_order_details gagal untuk PO {$poId}: " . $e->getMessage());
+            }
+
+            $details = ProductionOrderDetail::where('production_order_id', $poId)
+                ->with('item')
+                ->get();
+        }
+
+        // Map SO details by id untuk fallback nama ketika item di-soft-delete
+        $soDetails = $po->salesOrder
+            ? $po->salesOrder->details->keyBy('id')
+            : collect();
+
+        $mapped = $details->map(fn($d) => [
+            'id'            => $d->id,
+            'item_id'       => $d->item_id,
+            'item_name'     => $d->item?->name
+                                ?? $soDetails->get($d->sales_order_detail_id)?->item_name
+                                ?? '-',
+            'item_code'     => $d->item?->code
+                                ?? $soDetails->get($d->sales_order_detail_id)?->item_code
+                                ?? '-',
+            'qty_planned'   => $d->qty_planned,
+            'current_stage' => $d->current_stage,
+            'moulding_done' => $d->current_stage === 'moulding',
+        ]);
+
+        return response()->json(['success' => true, 'data' => $mapped]);
     }
 
     // store() — payload: production_order_detail_id + groups[] dengan inputs[] per group

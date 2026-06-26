@@ -161,11 +161,11 @@ class ProductionOrderController extends Controller
                     return [
                         'id'           => $d->id,
                         'item_id'      => $d->item_id,
-                        'item'         => [
+                        'item'         => $d->item ? [
                             'id'   => $d->item->id,
                             'name' => $d->item->name,
                             'code' => $d->item->code,
-                        ],
+                        ] : null,
                         'qty_planned'  => $d->qty_planned,
                         'qty_produced' => $d->qty_produced,
                     ];
