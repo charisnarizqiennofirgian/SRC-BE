@@ -322,8 +322,11 @@ class GoodsReceiptController extends Controller
     private function generateReceiptNumber()
     {
         $prefix      = 'GR-' . now()->format('Ym');
-        $lastReceipt = GoodsReceipt::where('receipt_number', 'like', $prefix . '%')->latest('id')->first();
-        $number      = 1;
+        $lastReceipt = GoodsReceipt::withTrashed()
+            ->where('receipt_number', 'like', $prefix . '%')
+            ->latest('id')
+            ->first();
+        $number = 1;
         if ($lastReceipt) {
             $number = (int) substr($lastReceipt->receipt_number, -4) + 1;
         }
