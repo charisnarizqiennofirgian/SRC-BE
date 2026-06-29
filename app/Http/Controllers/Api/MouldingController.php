@@ -58,19 +58,25 @@ class MouldingController extends Controller
             ->orderBy('name')
             ->get()
             ->map(fn($i) => [
-                'id'       => $i->id,
-                'code'     => $i->code,
-                'name'     => $i->name,
-                'category' => $i->category?->name,
+                'id'         => $i->id,
+                'code'       => $i->code,
+                'name'       => $i->name,
+                'category'   => $i->category?->name,
+                'nama_produk' => $i->nama_produk,
             ]);
         return response()->json(['success' => true, 'data' => $items]);
     }
 
     public function getAvailablePos(Request $request)
     {
-        $pos = ProductionOrder::where('status', '!=', 'completed')
-            ->with(['salesOrder.buyer', 'details.item'])
-            ->get()
+        $query = ProductionOrder::where('status', '!=', 'completed')
+            ->with(['salesOrder.buyer', 'details.item']);
+
+        if ($request->filled('type') && in_array($request->type, ['production', 'sample'])) {
+            $query->where('type', $request->type);
+        }
+
+        $pos = $query->get()
             ->map(fn($po) => [
                 'id'         => $po->id,
                 'po_number'  => $po->po_number,
