@@ -181,10 +181,12 @@ class MouldingController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            $runningNumber  = MouldingProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
-                ->count() + 1;
-            $documentNumber = 'MLD-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            $prefix = 'MLD-' . now()->format('Ym') . '-';
+            $last   = MouldingProduction::where('document_number', 'like', $prefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             $moulding = MouldingProduction::create([
                 'document_number'            => $documentNumber,

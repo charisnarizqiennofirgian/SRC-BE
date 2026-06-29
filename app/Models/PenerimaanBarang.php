@@ -20,12 +20,12 @@ class PenerimaanBarang extends Model
         'notes',
     ];
 
-    
+
     public function barang()
     {
         return $this->belongsTo(Item::class, 'item_id');
     }
-    
+
     public function pesanan()
     {
         return $this->belongsTo(PesananPembelian::class, 'purchase_order_id');

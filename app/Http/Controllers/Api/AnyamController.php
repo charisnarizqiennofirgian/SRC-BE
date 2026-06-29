@@ -74,7 +74,7 @@ class AnyamController extends Controller
                 ]);
             }
 
-            // Gudang tujuan: AYAM
+            // Gudang tujuan AYAM
             $targetWarehouse = Warehouse::where('code', 'AYAM')->first();
             if (!$targetWarehouse) {
                 throw ValidationException::withMessages([
