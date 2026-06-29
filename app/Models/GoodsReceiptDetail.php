@@ -12,18 +12,21 @@ class GoodsReceiptDetail extends Model
     
     protected $fillable = [
         'goods_receipt_id',
-        'purchase_order_detail_id', 
+        'purchase_order_detail_id',
         'item_id',
         'quantity_ordered',
         'quantity_received',
-        'billed', 
+        'price',
+        'subtotal',
+        'billed',
     ];
 
-    
     protected $casts = [
-        'quantity_ordered' => 'decimal:2',
+        'quantity_ordered'  => 'decimal:2',
         'quantity_received' => 'decimal:2',
-        'billed' => 'boolean', 
+        'price'             => 'decimal:2',
+        'subtotal'          => 'decimal:2',
+        'billed'            => 'boolean',
     ];
 
     

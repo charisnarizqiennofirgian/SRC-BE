@@ -139,10 +139,10 @@ class PurchaseRequestController extends Controller
     {
         $pr = PurchaseRequest::findOrFail($id);
 
-        if (!in_array($pr->status, ['draft'])) {
+        if (!in_array($pr->status, ['draft', 'submitted'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'PR hanya bisa diedit saat status Draft.',
+                'message' => 'PR hanya bisa diedit saat status Draft atau Submitted.',
             ], 422);
         }
 
@@ -162,6 +162,8 @@ class PurchaseRequestController extends Controller
                 'so_id'    => $request->so_id,
                 'deadline' => $request->deadline,
                 'notes'    => $request->notes,
+                // Reset ke draft jika sebelumnya submitted agar harus di-review ulang
+                'status'   => 'draft',
             ]);
 
             // Hapus detail lama, insert baru

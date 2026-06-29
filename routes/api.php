@@ -218,6 +218,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::apiResource('purchase-orders', PurchaseOrderController::class)->except(['show']);
 
     Route::get('goods-receipts/unbilled', [GoodsReceiptController::class, 'getUnbilledReceipts']);
+    Route::post('goods-receipts/{po_id}/tutup', [GoodsReceiptController::class, 'tutup']);
     Route::apiResource('goods-receipts', GoodsReceiptController::class);
     Route::get('purchase-bills/form-data', [PurchaseBillController::class, 'getFormData']);
     Route::apiResource('purchase-bills', PurchaseBillController::class);
