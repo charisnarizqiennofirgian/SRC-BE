@@ -33,26 +33,22 @@ class PrototypeController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // Komponen dari Gudang MESIN — input untuk prototype
+    // Komponen dari semua gudang (Gudang MESIN + stock adjustment komponen)
     public function getSourceItems()
     {
-        $warehouse = Warehouse::where('code', 'MESIN')->first();
-        if (!$warehouse) {
-            return response()->json(['success' => true, 'data' => []]);
-        }
-
-        $items = Inventory::where('warehouse_id', $warehouse->id)
-            ->where('qty_pcs', '>', 0)
-            ->with('item')
+        $items = Inventory::where('qty_pcs', '>', 0)
+            ->whereHas('item', fn($q) => $q->where('type', Item::TYPE_COMPONENT))
+            ->with(['item', 'warehouse'])
             ->get()
             ->map(fn($inv) => [
                 'item_id'        => $inv->item_id,
                 'item_code'      => $inv->item?->code ?? '-',
                 'item_name'      => $inv->item?->name ?? '-',
+                'nama_produk'    => $inv->item?->nama_produk ?? null,
                 'qty_available'  => (float) $inv->qty_pcs,
-                'warehouse_id'   => $warehouse->id,
-                'warehouse_code' => $warehouse->code,
-                'warehouse_name' => $warehouse->name,
+                'warehouse_id'   => $inv->warehouse_id,
+                'warehouse_code' => $inv->warehouse?->code ?? '-',
+                'warehouse_name' => $inv->warehouse?->name ?? '-',
             ]);
 
         return response()->json(['success' => true, 'data' => $items]);
