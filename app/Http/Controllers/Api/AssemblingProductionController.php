@@ -44,11 +44,15 @@ class AssemblingProductionController extends Controller
 
     // =============================================
     // GET: Stok dari gudang sumber
-    // Bisa dari MESIN, RUSKOMP, ASSEMBLING
+    // Bisa dari MESIN, RUSKOMP, ASSEMBLING, PROTOTYPE
     // =============================================
     public function getSourceItems(Request $request)
     {
-        $warehouse = Warehouse::where('code', 'MESIN')->first();
+        if ($request->filled('warehouse_id')) {
+            $warehouse = Warehouse::find($request->warehouse_id);
+        } else {
+            $warehouse = Warehouse::where('code', 'MESIN')->first();
+        }
 
         if (!$warehouse) {
             return response()->json(['success' => true, 'data' => []]);
