@@ -319,7 +319,7 @@ class SalesOrderController extends Controller
                     'item_id' => $item->id,
                     'quantity' => $detail['quantity'],
                     'quantity_shipped' => 0,
-                    'item_name' => $item->name,
+                    'item_name' => $detail['item_name'] ?? $item->name,
                     'item_unit' => $item->unit->name,
                     'item_code' => $item->code ?? null,
                     'unit_price' => $detail['unit_price'],
