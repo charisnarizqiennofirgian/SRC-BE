@@ -18,6 +18,7 @@ class GoodsReceiptDetail extends Model
         'quantity_received',
         'price',
         'subtotal',
+        'grade',
         'billed',
     ];
 

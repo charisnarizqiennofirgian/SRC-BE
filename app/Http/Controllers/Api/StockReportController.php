@@ -71,7 +71,7 @@ class StockReportController extends Controller
                 ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3',
+                    'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,grade',
                     'inventories.warehouse:id,name,code',
                 ])
                 ->whereIn('items.category_id', $categoryIds);
@@ -132,7 +132,7 @@ class StockReportController extends Controller
             // Hitung total kubikasi dari SEMUA data yang ter-filter
             $allItemsForSum = $sumQuery->with([
                 'category:id,name',
-                'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3',
+                'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,grade',
             ])->get();
 
             foreach ($allItemsForSum as $item) {

@@ -22,6 +22,7 @@ class InventoryLog extends Model
         'reference_number',
         'division',
         'notes',
+        'grade',
         'user_id',
     ];
 

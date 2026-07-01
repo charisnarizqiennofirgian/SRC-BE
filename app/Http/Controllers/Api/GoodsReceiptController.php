@@ -73,24 +73,34 @@ class GoodsReceiptController extends Controller
             $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
 
             foreach ($gr->details as $detail) {
+                $warehouseId = $bufferWarehouse->id ?? 1;
+
+                // Reverse inventories table per grade
+                \App\Models\Inventory::decrementGradeStock(
+                    itemId: $detail->item_id,
+                    warehouseId: $warehouseId,
+                    qty: $detail->quantity_received,
+                    grade: $detail->grade,
+                );
+
                 // Reverse stok global item
                 if ($detail->item) {
                     $detail->item->decrement('stock', $detail->quantity_received);
                 }
 
-                // Buat reversal inventory log (audit trail tetap ada)
                 InventoryLog::create([
                     'date'             => now()->toDateString(),
                     'time'             => now()->toTimeString(),
                     'item_id'          => $detail->item_id,
-                    'warehouse_id'     => $bufferWarehouse->id ?? 1,
+                    'warehouse_id'     => $warehouseId,
                     'qty'              => $detail->quantity_received,
                     'direction'        => 'OUT',
                     'transaction_type' => 'PURCHASE_REVERSAL',
                     'reference_type'   => 'GoodsReceipt',
                     'reference_id'     => $gr->id,
                     'reference_number' => $gr->receipt_number,
-                    'notes'            => 'Pembatalan penerimaan ' . $gr->receipt_number,
+                    'notes'            => 'Pembatalan penerimaan ' . $gr->receipt_number . ($detail->grade ? " (Grade {$detail->grade})" : ''),
+                    'grade'            => $detail->grade,
                     'user_id'          => Auth::id(),
                 ]);
             }
@@ -131,6 +141,7 @@ class GoodsReceiptController extends Controller
             'details.*.item_id'                   => 'required|exists:items,id',
             'details.*.quantity_received'         => 'required|numeric|min:0',
             'details.*.price'                     => 'nullable|numeric|min:0',
+            'details.*.grade'                     => 'nullable|string|max:50',
         ]);
 
         if ($validator->fails()) {
@@ -158,6 +169,7 @@ class GoodsReceiptController extends Controller
                     $poDetail = $purchaseOrder->details->firstWhere('item_id', $detail['item_id']);
                     $price    = isset($detail['price']) ? (float) $detail['price'] : null;
                     $subtotal = ($price !== null) ? $detail['quantity_received'] * $price : null;
+                    $grade    = $detail['grade'] ?? null;
 
                     $goodsReceipt->details()->create([
                         'purchase_order_detail_id' => $poDetail->id ?? null,
@@ -166,6 +178,7 @@ class GoodsReceiptController extends Controller
                         'quantity_received'         => $detail['quantity_received'],
                         'price'                    => $price,
                         'subtotal'                 => $subtotal,
+                        'grade'                    => $grade,
                     ]);
 
                     StockMovement::create([
@@ -175,20 +188,31 @@ class GoodsReceiptController extends Controller
                         'notes'    => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
                     ]);
 
+                    $warehouseId = $bufferWarehouse->id ?? 1;
+
                     InventoryLog::create([
                         'date'             => $validatedData['receipt_date'],
                         'time'             => now()->toTimeString(),
                         'item_id'          => $detail['item_id'],
-                        'warehouse_id'     => $bufferWarehouse->id ?? 1,
+                        'warehouse_id'     => $warehouseId,
                         'qty'              => $detail['quantity_received'],
                         'direction'        => 'IN',
                         'transaction_type' => 'PURCHASE',
                         'reference_type'   => 'GoodsReceipt',
                         'reference_id'     => $goodsReceipt->id,
                         'reference_number' => $goodsReceipt->receipt_number,
-                        'notes'            => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
+                        'notes'            => 'Penerimaan dari PO #' . $purchaseOrder->po_number . ($grade ? " (Grade {$grade})" : ''),
+                        'grade'            => $grade,
                         'user_id'          => Auth::id(),
                     ]);
+
+                    // Update inventories table per (item, warehouse, grade)
+                    \App\Models\Inventory::incrementGlobalStock(
+                        warehouseId: $warehouseId,
+                        itemId: $detail['item_id'],
+                        qty: $detail['quantity_received'],
+                        grade: $grade,
+                    );
 
                     $item = Item::find($detail['item_id']);
                     if ($item) {

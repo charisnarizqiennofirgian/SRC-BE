@@ -11,6 +11,7 @@ class Inventory extends Model
         'item_id',
         'qty_pcs',
         'qty_m3',
+        'grade',
         'ref_po_id',
         'ref_product_id',
     ];
@@ -60,17 +61,18 @@ class Inventory extends Model
         }
     }
 
-    public static function incrementGlobalStock($warehouseId, $itemId, $qty, $refPoId = null, $refProductId = null)
+    public static function incrementGlobalStock($warehouseId, $itemId, $qty, $refPoId = null, $refProductId = null, $grade = null)
     {
         $inventory = self::firstOrCreate(
             [
                 'warehouse_id' => $warehouseId,
-                'item_id' => $itemId,
+                'item_id'      => $itemId,
+                'grade'        => $grade,
             ],
             [
-                'qty_pcs' => 0,
-                'qty_m3' => 0,
-                'ref_po_id' => $refPoId,
+                'qty_pcs'        => 0,
+                'qty_m3'         => 0,
+                'ref_po_id'      => $refPoId,
                 'ref_product_id' => $refProductId,
             ]
         );
@@ -78,6 +80,19 @@ class Inventory extends Model
         $inventory->increment('qty_pcs', $qty);
 
         return $inventory;
+    }
+
+    public static function decrementGradeStock($itemId, $warehouseId, $qty, $grade = null)
+    {
+        $inventory = self::where('item_id', $itemId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('grade', $grade)
+            ->lockForUpdate()
+            ->first();
+
+        if ($inventory && (float) $inventory->qty_pcs >= $qty) {
+            $inventory->decrement('qty_pcs', $qty);
+        }
     }
 
     public static function getTotalStock($itemId)
