@@ -23,6 +23,7 @@ class PurchaseBill extends Model
         'status',
         'payment_type',
         'coa_id',
+        'kas_account_id',
         'paid_amount',
         'remaining_amount',
         'journal_entry_id',
@@ -82,10 +83,14 @@ class PurchaseBill extends Model
         return $this->hasMany(PurchaseBillDetail::class);
     }
 
-    // ✅ GANTI: Relationship ke COA
     public function coa()
     {
         return $this->belongsTo(ChartOfAccount::class, 'coa_id');
+    }
+
+    public function kasAccount()
+    {
+        return $this->belongsTo(ChartOfAccount::class, 'kas_account_id');
     }
 
     public function journalEntry()

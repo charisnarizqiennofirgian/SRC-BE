@@ -174,10 +174,12 @@ class JournalService
                     break;
 
                 case PurchaseBill::PAYMENT_TUNAI:
-                    // Credit: Kas/Bank (full) - pakai coa_id yang sama
+                    if (!$bill->kas_account_id) {
+                        throw new \Exception('Akun Kas/Bank pembayaran tidak ditemukan. Pastikan kas_account_id terisi.');
+                    }
                     JournalEntryLine::create([
                         'journal_entry_id' => $journal->id,
-                        'account_id' => $bill->coa_id,
+                        'account_id' => $bill->kas_account_id,
                         'description' => "Pembayaran tunai ke {$bill->supplier->name}",
                         'debit' => 0,
                         'credit' => $bill->total_amount,
@@ -187,11 +189,14 @@ class JournalService
                     break;
 
                 case PurchaseBill::PAYMENT_DP:
-                    // Credit 1: Kas/Bank (DP) - pakai coa_id yang sama
+                    if (!$bill->kas_account_id) {
+                        throw new \Exception('Akun Kas/Bank pembayaran tidak ditemukan. Pastikan kas_account_id terisi.');
+                    }
+                    // Credit 1: Kas/Bank (DP)
                     if ($bill->paid_amount > 0) {
                         JournalEntryLine::create([
                             'journal_entry_id' => $journal->id,
-                            'account_id' => $bill->coa_id,
+                            'account_id' => $bill->kas_account_id,
                             'description' => "Pembayaran DP ke {$bill->supplier->name}",
                             'debit' => 0,
                             'credit' => $bill->paid_amount,
