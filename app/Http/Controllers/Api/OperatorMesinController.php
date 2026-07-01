@@ -91,6 +91,7 @@ class OperatorMesinController extends Controller
                 'item_id'       => $inv->item_id,
                 'item_code'     => $inv->item?->code ?? '-',
                 'item_name'     => $inv->item?->name ?? '-',
+                'nama_produk'   => $inv->item?->nama_produk ?? null,
                 'qty_available' => (float) $inv->qty_pcs,
             ]);
         return response()->json(['success' => true, 'data' => $inventories]);
