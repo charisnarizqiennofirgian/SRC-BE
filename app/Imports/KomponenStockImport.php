@@ -107,6 +107,19 @@ class KomponenStockImport implements
                     'm3_per_pcs' => $m3PerPcs,
                 ];
 
+                // Guard: kalau kode sudah dipakai item LAIN yang bukan Komponen (mis. Produk Jadi),
+                // JANGAN ditimpa — kode bentrok berarti ada kesalahan input di file Excel, bukan
+                // update Komponen yang sama. Overwrite di sini pernah merusak master data Produk Jadi.
+                $existing = Item::where('code', $kode)->first();
+                if ($existing && $existing->type !== Item::TYPE_COMPONENT) {
+                    Log::error(
+                        "Import Komponen dibatalkan untuk baris " . ($index + 2) .
+                        ": kode '{$kode}' sudah dipakai item lain (id={$existing->id}, nama='{$existing->name}', type='{$existing->type}'). " .
+                        "Tidak ditimpa untuk mencegah kerusakan master data."
+                    );
+                    continue;
+                }
+
                 // 1. Master Item
                 $item = Item::updateOrCreate(
                     ['code' => $kode],

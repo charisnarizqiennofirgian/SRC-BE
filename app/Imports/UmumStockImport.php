@@ -122,6 +122,13 @@ class UmumStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                     $item->restore();
                 }
 
+                // Guard: kalau item lama kategorinya beda & bukan tipe 'um' (Umum), jangan diutak-atik —
+                // kode bentrok berarti kesalahan input di Excel, bukan item Umum yang sama.
+                if ($item->category_id && $item->category_id !== $category->id && $item->type && $item->type !== 'um') {
+                    Log::error("ROW #{$index} DITOLAK: kode '{$kode}' sudah dipakai item lain (id={$item->id}, nama='{$item->name}', type='{$item->type}'). Tidak diubah untuk mencegah kerusakan master data.");
+                    continue;
+                }
+
                 $item->stock = $stokAwal;
                 $item->category_id = $category->id;
                 $item->unit_id = $unit->id;

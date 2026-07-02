@@ -114,11 +114,28 @@ class ProdukJadiStockImport implements ToCollection, WithHeadingRow
                 $woodPerPcs = $normalized['wood_consumed_per_pcs'] ?? $normalized['wood consumed per pcs'] ?? null;
                 $m3Carton = $normalized['m3_per_carton'] ?? $normalized['m3 per carton'] ?? null;
 
+                // Guard: kalau kode sudah dipakai item LAIN yang bukan Produk Jadi, JANGAN ditimpa —
+                // kode bentrok berarti ada kesalahan input di file Excel. Overwrite pernah merusak
+                // master data Komponen lewat celah yang sama di KomponenStockImport.
+                $existingItem = $kodeBarang !== '' ? Item::where('code', $kodeBarang)->first() : null;
+                if ($existingItem && $existingItem->type && $existingItem->type !== Item::TYPE_FINISHED_GOOD) {
+                    Log::error(
+                        "ROW #{$index} DITOLAK: kode '{$kodeBarang}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}', type='{$existingItem->type}'). Tidak ditimpa untuk mencegah kerusakan master data."
+                    );
+                    $skippedRows[] = [
+                        'row_number' => $index + 2,
+                        'item_name'  => $namaProduk,
+                        'reason'     => "Kode '{$kodeBarang}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}', type='{$existingItem->type}')",
+                    ];
+                    continue;
+                }
+
                 // 1) Master item
                 $item = Item::updateOrCreate(
                     ['code' => $kodeBarang],
                     [
                         'name' => $namaProduk,
+                        'type' => Item::TYPE_FINISHED_GOOD,
                         'category_id' => $category->id,
                         'unit_id' => $unit->id,
                         'hs_code' => $hsCode,

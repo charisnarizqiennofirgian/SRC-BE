@@ -75,11 +75,24 @@ class ProductsImport implements ToCollection, WithHeadingRow, WithCustomCsvSetti
             $stok = isset($row['stok']) ? (float) $row['stok'] : 0;
 
             try {
+                // Guard: kalau kode sudah dipakai item LAIN dengan kategori beda, JANGAN ditimpa —
+                // kode bentrok berarti kesalahan input di Excel, bukan update produk yang sama.
+                $existingItem = Item::where('code', $row['kode'])->first();
+                if ($existingItem && $existingItem->category_id && $existingItem->category_id !== $this->productCategoryId) {
+                    Log::error("ROW #{$index} DITOLAK: kode '{$row['kode']}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}', category_id={$existingItem->category_id}). Tidak ditimpa untuk mencegah kerusakan master data.");
+                    $skippedRows[] = [
+                        'row_number' => $index + 2,
+                        'reason' => "Kode '{$row['kode']}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}')"
+                    ];
+                    continue;
+                }
+
                 // ✅ 1. CREATE/UPDATE ITEM
                 $item = Item::updateOrCreate(
                     ['code' => $row['kode']],
                     [
                         'name' => $row['nama_produk'],
+                        'type' => Item::TYPE_FINISHED_GOOD,
                         'description' => $row['deskripsi'] ?? null,
                         'stock' => $stok,
                         'category_id' => $this->productCategoryId,

@@ -101,6 +101,13 @@ class KartonBoxStockImport implements ToCollection, WithHeadingRow, WithCustomCs
                     ]
                 );
 
+                // Guard: kalau item lama kategorinya beda, JANGAN diutak-atik — kode bentrok berarti
+                // kesalahan input di Excel, bukan item Karton Box yang sama.
+                if ($item->wasRecentlyCreated === false && $item->category_id && $item->category_id !== $category->id) {
+                    Log::error("ROW #{$index} DITOLAK: kode '{$kode}' sudah dipakai item lain (id={$item->id}, nama='{$item->name}', category_id={$item->category_id}). Tidak diubah untuk mencegah kerusakan master data.");
+                    continue;
+                }
+
                 $item->specifications = $specifications;
                 $item->stock          = $stokAwal;
                 $item->category_id    = $category->id;

@@ -130,6 +130,14 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
                 if ($cutting_p !== null) $itemValues['cutting_p'] = $cutting_p;
                 if ($noRak     !== null) $itemValues['no_rak']    = $noRak;
 
+                // Guard: kalau kode sudah dipakai item LAIN dengan kategori beda, JANGAN ditimpa —
+                // kode bentrok berarti kesalahan input di Excel, bukan update item Kayu RST yang sama.
+                $existingItem = Item::where('code', $kodeBarang)->first();
+                if ($existingItem && $existingItem->category_id && $existingItem->category_id !== $this->categoryKayu->id) {
+                    Log::error("ROW #{$index} DITOLAK: kode '{$kodeBarang}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}', category_id={$existingItem->category_id}). Tidak ditimpa untuk mencegah kerusakan master data.");
+                    continue;
+                }
+
                 $item = Item::updateOrCreate(['code' => $kodeBarang], $itemValues);
 
                 // 2. Stock Movement (legacy)

@@ -120,6 +120,14 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         }
                     }
 
+                    // Guard: kalau item lama sudah ada, punya kategori, dan kategorinya beda dari
+                    // kategori Excel ini, JANGAN ditimpa — kode bentrok berarti kesalahan input,
+                    // bukan update item yang sama. Overwrite di sini pernah merusak master data lain.
+                    if ($item->exists && $item->category_id && $item->category_id !== $category->id) {
+                        Log::error("ROW #{$index} DITOLAK: kode '{$kode}' sudah dipakai item lain (id={$item->id}, nama='{$item->name}', category_id={$item->category_id}). Tidak ditimpa untuk mencegah kerusakan master data.");
+                        continue;
+                    }
+
                     $item->name = trim($row['nama']);
                     $item->category_id = $category->id;
                     $item->unit_id = $unit->id;

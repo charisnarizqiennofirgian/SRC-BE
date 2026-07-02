@@ -211,6 +211,7 @@ class ProductionMonitoringController extends Controller
                     $poCompleted = $so->productionOrders->where('status', 'completed')->count() > 0;
 
                     $items[] = [
+                        'detail_id'         => $detail->id,
                         'item_id'           => $itemId,
                         'item_name'         => $detail->item?->name ?? '-',
                         'item_code'         => $detail->item?->code ?? '-',
@@ -342,6 +343,7 @@ class ProductionMonitoringController extends Controller
                         $target = (float) $detail->qty_planned;
 
                         $items[] = [
+                            'detail_id'         => $detail->id,
                             'item_id'           => $detail->item_id,
                             'item_name'         => $detail->item?->name ?? '-',
                             'item_code'         => $detail->item?->code ?? '-',

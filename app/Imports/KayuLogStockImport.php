@@ -85,6 +85,14 @@ class KayuLogStockImport implements ToCollection, WithHeadingRow, WithCustomCsvS
             ];
 
             try {
+                // Guard: kalau kode sudah dipakai item LAIN dengan kategori beda, JANGAN ditimpa —
+                // kode bentrok berarti kesalahan input di Excel, bukan update item Kayu Log yang sama.
+                $existingItem = Item::where('code', $code)->first();
+                if ($existingItem && $existingItem->category_id && $existingItem->category_id !== $category->id) {
+                    Log::error("Kode '{$code}' sudah dipakai item lain (id={$existingItem->id}, nama='{$existingItem->name}', category_id={$existingItem->category_id}). Baris import Kayu Log ditolak untuk mencegah kerusakan master data.");
+                    continue;
+                }
+
                 $item = Item::updateOrCreate(
                     ['code' => $code],
                     [
