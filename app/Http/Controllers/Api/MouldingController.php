@@ -158,6 +158,7 @@ class MouldingController extends Controller
             'groups'                       => ['required', 'array', 'min:1'],
             'groups.*.output_item_id'      => ['required', 'integer', 'exists:items,id'],
             'groups.*.output_qty'          => ['required', 'numeric', 'min:1'],
+            'groups.*.finishing'           => ['required', 'string', 'in:natural,warna'],
             'groups.*.inputs'              => ['required', 'array', 'min:1'],
             'groups.*.inputs.*.item_id'    => ['required', 'integer', 'exists:items,id'],
             'groups.*.inputs.*.qty'        => ['required', 'numeric', 'min:0.01'],
@@ -209,6 +210,7 @@ class MouldingController extends Controller
                     'moulding_production_input_id' => null,
                     'item_id'                      => $group['output_item_id'],
                     'qty'                          => $group['output_qty'],
+                    'finishing'                    => $group['finishing'],
                 ]);
 
                 foreach ($group['inputs'] as $input) {
@@ -274,6 +276,18 @@ class MouldingController extends Controller
                         'qty_pcs'      => $group['output_qty'],
                         'ref_po_id'    => $data['ref_po_id'],
                     ]);
+                }
+
+                // Komponen: pecah stok ke qty_natural / qty_warna sesuai finishing hasil moulding
+                $outputItem = Item::lockForUpdate()->find($group['output_item_id']);
+                if ($outputItem && $outputItem->type === Item::TYPE_COMPONENT) {
+                    if ($group['finishing'] === 'warna') {
+                        $outputItem->qty_warna = (float) $outputItem->qty_warna + $group['output_qty'];
+                    } else {
+                        $outputItem->qty_natural = (float) $outputItem->qty_natural + $group['output_qty'];
+                    }
+                    $outputItem->stock = (float) $outputItem->qty_natural + (float) $outputItem->qty_warna;
+                    $outputItem->save();
                 }
 
                 InventoryLog::create([

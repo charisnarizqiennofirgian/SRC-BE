@@ -459,9 +459,9 @@ class ProductionMonitoringController extends Controller
                 // Ambil nama mesin jika stage MESIN
                 $machineName = null;
                 if ($type === 'MESIN' && !empty($subIds)) {
-                    $machineName = DB::table('mesin_productions')
-                        ->join('machines', 'machines.id', '=', 'mesin_productions.machine_id')
-                        ->whereIn('mesin_productions.id', $subIds)
+                    $machineName = DB::table('mesin_production_inputs')
+                        ->join('machines', 'machines.id', '=', 'mesin_production_inputs.machine_id')
+                        ->whereIn('mesin_production_inputs.mesin_production_id', $subIds)
                         ->pluck('machines.name')
                         ->unique()
                         ->implode(', ');

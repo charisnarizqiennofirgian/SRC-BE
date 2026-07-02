@@ -9,7 +9,9 @@ class MesinProductionInput extends Model
     protected $fillable = [
         'mesin_production_id',
         'item_id',
+        'machine_id',
         'qty',
+        'finishing',
     ];
 
     public function production()
@@ -20,6 +22,11 @@ class MesinProductionInput extends Model
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function machine()
+    {
+        return $this->belongsTo(Machine::class);
     }
 
     public function output()

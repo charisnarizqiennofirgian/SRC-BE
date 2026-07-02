@@ -104,12 +104,13 @@ class OperatorMesinController extends Controller
             'date'                       => ['required', 'date'],
             'ref_po_id'                  => ['required', 'integer', 'exists:production_orders,id'],
             'production_order_detail_id' => ['required', 'integer', 'exists:production_order_details,id'],
-            'machine_id'                 => ['required', 'integer', 'exists:machines,id'],
             'notes'                      => ['nullable', 'string'],
 
             'lines'                   => ['required', 'array', 'min:1'],
+            'lines.*.machine_id'      => ['required', 'integer', 'exists:machines,id'],
             'lines.*.input_item_id'   => ['required', 'integer', 'exists:items,id'],
             'lines.*.input_qty'       => ['required', 'numeric', 'min:0.01'],
+            'lines.*.finishing'       => ['required', 'string', 'in:natural,warna'],
             'lines.*.output_item_id'  => ['required', 'integer', 'exists:items,id'],
             'lines.*.output_qty'      => ['required', 'numeric', 'min:1'],
             // Reject komponen saja; item = input_item
@@ -133,8 +134,6 @@ class OperatorMesinController extends Controller
 
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
-            $machine         = Machine::find($data['machine_id']);
-            $machineName     = $machine?->name ?? '-';
 
             $runningNumber  = MesinProduction::whereYear('date', now()->year)
                 ->whereMonth('date', now()->month)
@@ -146,15 +145,21 @@ class OperatorMesinController extends Controller
                 'date'                       => $data['date'],
                 'ref_po_id'                  => $data['ref_po_id'],
                 'production_order_detail_id' => $detail->id,
-                'machine_id'                 => $data['machine_id'],
                 'notes'                      => $data['notes'] ?? null,
                 'created_by'                 => Auth::id(),
             ]);
 
+            $usedMachineNames = [];
+
             foreach ($data['lines'] as $idx => $line) {
-                $itemId   = $line['input_item_id'];
-                $inputQty = $line['input_qty'];
-                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+                $itemId      = $line['input_item_id'];
+                $inputQty    = $line['input_qty'];
+                $finishing   = $line['finishing'];
+                $bucket      = $finishing === 'warna' ? 'qty_warna' : 'qty_natural';
+                $itemName    = Item::find($itemId)?->name ?? "ID {$itemId}";
+                $machine     = Machine::find($line['machine_id']);
+                $machineName = $machine?->name ?? '-';
+                $usedMachineNames[$machineName] = true;
 
                 // === INPUT: kurangi Komponen dari S4S ===
                 $sourceInv    = Inventory::where('item_id', $itemId)
@@ -169,6 +174,21 @@ class OperatorMesinController extends Controller
                             "'{$itemName}' stok S4S tidak cukup. Tersedia: {$availableQty}, dibutuhkan: {$inputQty}."
                         ],
                     ]);
+                }
+
+                // Komponen: validasi & kurangi breakdown natural/warna sesuai finishing baris ini
+                $inputItem = Item::lockForUpdate()->find($itemId);
+                if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
+                    $availableFinishing = (float) $inputItem->{$bucket};
+                    if ($availableFinishing < $inputQty) {
+                        $label = $finishing === 'warna' ? 'Warna' : 'Natural';
+                        throw ValidationException::withMessages([
+                            "lines.{$idx}.finishing" => [
+                                "'{$itemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$inputQty}."
+                            ],
+                        ]);
+                    }
+                    $inputItem->{$bucket} = $availableFinishing - $inputQty;
                 }
 
                 $sourceInv->decrement('qty_pcs', $inputQty);
@@ -192,7 +212,9 @@ class OperatorMesinController extends Controller
                 $inputRecord = MesinProductionInput::create([
                     'mesin_production_id' => $mesinProduction->id,
                     'item_id'             => $itemId,
+                    'machine_id'          => $line['machine_id'],
                     'qty'                 => $inputQty,
+                    'finishing'           => $finishing,
                 ]);
 
                 // === OUTPUT: tambah Komponen ke Gudang MESIN, link ke input ===
@@ -235,6 +257,27 @@ class OperatorMesinController extends Controller
                     'qty'                      => $line['output_qty'],
                 ]);
 
+                // Komponen: tambah breakdown natural/warna item hasil (finishing sama dengan input,
+                // karena item hasil mesin tetap item yang sama, cuma pindah gudang S4S → MESIN)
+                if ((int) $line['output_item_id'] === (int) $itemId) {
+                    if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
+                        $inputItem->{$bucket} = (float) $inputItem->{$bucket} + $line['output_qty'];
+                        $inputItem->stock     = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
+                        $inputItem->save();
+                    }
+                } else {
+                    if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
+                        $inputItem->stock = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
+                        $inputItem->save();
+                    }
+                    $outputItem = Item::lockForUpdate()->find($line['output_item_id']);
+                    if ($outputItem && $outputItem->type === Item::TYPE_COMPONENT) {
+                        $outputItem->{$bucket} = (float) $outputItem->{$bucket} + $line['output_qty'];
+                        $outputItem->stock     = (float) $outputItem->qty_natural + (float) $outputItem->qty_warna;
+                        $outputItem->save();
+                    }
+                }
+
                 // === REJECT (opsional): selalu Komponen input yang rusak ===
                 if (!empty($line['reject_qty'])) {
                     $rjInv = Inventory::where('item_id', $itemId)
@@ -273,7 +316,7 @@ class OperatorMesinController extends Controller
                         'mesin_production_input_id' => $inputRecord->id,
                         'item_id'                   => $itemId,
                         'qty'                       => $line['reject_qty'],
-                        'machine_id'                => $data['machine_id'],
+                        'machine_id'                => $line['machine_id'],
                         'keterangan'                => $line['reject_notes'] ?? null,
                     ]);
                 }
@@ -286,13 +329,15 @@ class OperatorMesinController extends Controller
                 $productionOrder->update(['status' => 'in_progress']);
             }
 
+            $machineSummary = implode(', ', array_keys($usedMachineNames));
+
             return response()->json([
                 'success' => true,
-                'message' => "Proses Mesin ({$machineName}) berhasil dicatat ({$documentNumber}) untuk produk: {$detail->item?->name}",
+                'message' => "Proses Mesin ({$machineSummary}) berhasil dicatat ({$documentNumber}) untuk produk: {$detail->item?->name}",
                 'data'    => [
                     'id'              => $mesinProduction->id,
                     'document_number' => $documentNumber,
-                    'machine'         => $machineName,
+                    'machine'         => $machineSummary,
                     'total_lines'     => count($data['lines']),
                     'product_name'    => $detail->item?->name,
                 ],

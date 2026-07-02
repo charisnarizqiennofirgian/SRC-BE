@@ -11,6 +11,7 @@ class AssemblingProductionInput extends Model
         'item_id',
         'warehouse_id',
         'qty',
+        'finishing',
     ];
 
     public function production()

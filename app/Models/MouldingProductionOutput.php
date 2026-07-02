@@ -11,6 +11,7 @@ class MouldingProductionOutput extends Model
         'moulding_production_input_id',
         'item_id',
         'qty',
+        'finishing',
     ];
 
     public function production()

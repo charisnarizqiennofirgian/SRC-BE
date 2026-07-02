@@ -67,6 +67,7 @@ class AssemblingProductionController extends Controller
                 'item_code'      => $inv->item?->code ?? '-',
                 'item_name'      => $inv->item?->name ?? '-',
                 'nama_produk'    => $inv->item?->nama_produk ?? null,
+                'item_type'      => $inv->item?->type ?? null,
                 'qty_available'  => (float) $inv->qty_pcs,
                 'warehouse_id'   => $warehouse->id,
                 'warehouse_code' => $warehouse->code,
@@ -91,6 +92,7 @@ class AssemblingProductionController extends Controller
             'inputs.*.item_id'       => ['required', 'integer', 'exists:items,id'],
             'inputs.*.warehouse_id'  => ['required', 'integer', 'exists:warehouses,id'],
             'inputs.*.qty'           => ['required', 'numeric', 'min:0.01'],
+            'inputs.*.finishing'     => ['nullable', 'string', 'in:natural,warna'],
 
             'outputs'           => ['required', 'array', 'min:1'],
             'outputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
@@ -149,6 +151,7 @@ class AssemblingProductionController extends Controller
                 $itemId      = $input['item_id'];
                 $warehouseId = $input['warehouse_id'];
                 $qty         = $input['qty'];
+                $finishing   = $input['finishing'] ?? null;
                 $itemName    = Item::find($itemId)?->name ?? "ID {$itemId}";
                 $whName      = Warehouse::find($warehouseId)?->name ?? "ID {$warehouseId}";
 
@@ -165,6 +168,30 @@ class AssemblingProductionController extends Controller
                             "'{$itemName}' stok di {$whName} tidak cukup. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."
                         ],
                     ]);
+                }
+
+                // Komponen: kurangi breakdown natural/warna karena stok benar-benar
+                // dipakai habis di sini (bukan sekadar pindah gudang seperti Mesin/Moulding)
+                $inputItem = Item::lockForUpdate()->find($itemId);
+                if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
+                    if (!$finishing) {
+                        throw ValidationException::withMessages([
+                            "inputs.{$index}.finishing" => ["Jenis finishing (Natural/Warna) wajib dipilih untuk '{$itemName}'."],
+                        ]);
+                    }
+                    $bucket = $finishing === 'warna' ? 'qty_warna' : 'qty_natural';
+                    $availableFinishing = (float) $inputItem->{$bucket};
+                    if ($availableFinishing < $qty) {
+                        $label = $finishing === 'warna' ? 'Warna' : 'Natural';
+                        throw ValidationException::withMessages([
+                            "inputs.{$index}.finishing" => [
+                                "'{$itemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$qty}."
+                            ],
+                        ]);
+                    }
+                    $inputItem->{$bucket} = $availableFinishing - $qty;
+                    $inputItem->stock     = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
+                    $inputItem->save();
                 }
 
                 $sourceInv->decrement('qty_pcs', $qty);
@@ -190,6 +217,7 @@ class AssemblingProductionController extends Controller
                     'item_id'                  => $itemId,
                     'warehouse_id'             => $warehouseId,
                     'qty'                      => $qty,
+                    'finishing'                => $finishing,
                 ]);
 
                 Log::info("Input: {$itemName} - {$qty} pcs dari {$whName}");
