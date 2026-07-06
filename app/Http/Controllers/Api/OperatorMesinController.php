@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\InventoryLog;
 use App\Models\Item;
@@ -76,25 +77,41 @@ class OperatorMesinController extends Controller
         return response()->json(['success' => true, 'data' => $details]);
     }
 
+    // Sementara: tampilkan SEMUA item Komponen yang punya stok (sama seperti Stock Index),
+    // bukan cuma yang stoknya ada di gudang S4S. qty_available tetap dihitung khusus dari S4S
+    // (bukan total semua gudang) karena itu yang benar-benar bisa dipakai sebagai input Mesin —
+    // item yang qty_available = 0 di sini artinya stoknya sudah pindah ke gudang lain (mis. sudah
+    // pernah diproses Mesin sebelumnya) dan tidak akan lolos validasi kalau tetap dipaksa input > 0.
     public function getS4sItems(Request $request)
     {
         $warehouseS4S = Warehouse::where('code', 'S4S')->first();
-        if (!$warehouseS4S) {
+        $kategoriKomponen = Category::whereRaw('LOWER(name) LIKE ?', ['%komponen%'])->first();
+
+        if (!$kategoriKomponen) {
             return response()->json(['success' => true, 'data' => []]);
         }
-        $inventories = Inventory::where('warehouse_id', $warehouseS4S->id)
-            ->where('qty_pcs', '>', 0)
-            ->with('item')
+
+        $items = Item::where('category_id', $kategoriKomponen->id)
+            ->whereHas('inventories', fn ($q) => $q->where('qty_pcs', '>', 0))
+            ->with(['inventories' => fn ($q) => $q->where('qty_pcs', '>', 0)])
             ->get()
-            ->map(fn($inv) => [
-                'id'            => $inv->id,
-                'item_id'       => $inv->item_id,
-                'item_code'     => $inv->item?->code ?? '-',
-                'item_name'     => $inv->item?->name ?? '-',
-                'nama_produk'   => $inv->item?->nama_produk ?? null,
-                'qty_available' => (float) $inv->qty_pcs,
-            ]);
-        return response()->json(['success' => true, 'data' => $inventories]);
+            ->map(function ($item) use ($warehouseS4S) {
+                $s4sQty = $warehouseS4S
+                    ? (float) $item->inventories->where('warehouse_id', $warehouseS4S->id)->sum('qty_pcs')
+                    : 0;
+                $totalQty = (float) $item->inventories->sum('qty_pcs');
+
+                return [
+                    'item_id'       => $item->id,
+                    'item_code'     => $item->code,
+                    'item_name'     => $item->name,
+                    'nama_produk'   => $item->nama_produk,
+                    'qty_available' => $s4sQty,
+                    'qty_total'     => $totalQty,
+                ];
+            });
+
+        return response()->json(['success' => true, 'data' => $items]);
     }
 
     // store() — payload: production_order_detail_id + lines[]
