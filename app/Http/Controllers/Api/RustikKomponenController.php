@@ -122,8 +122,8 @@ class RustikKomponenController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = RustikKomponenProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = RustikKomponenProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'RKP-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 

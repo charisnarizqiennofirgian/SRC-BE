@@ -135,8 +135,11 @@ class OperatorMesinController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            $runningNumber  = MesinProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            // Pakai created_at (bukan kolom `date`, yang bisa di-backdate user) supaya konsisten
+            // dengan prefix now()->format('Ym') di bawah — kalau pakai `date`, record dengan
+            // tanggal produksi di bulan lain tidak ikut kehitung padahal prefix-nya sama.
+            $runningNumber  = MesinProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'MSN-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
@@ -177,7 +180,10 @@ class OperatorMesinController extends Controller
                 }
 
                 // Komponen: validasi & kurangi breakdown natural/warna sesuai finishing baris ini
+                // Ditulis ke items (global, kompatibilitas) dan inventories (per gudang, sumber baru
+                // untuk Stock Index yang di-filter gudang)
                 $inputItem = Item::lockForUpdate()->find($itemId);
+                $sourceInvExtra = [];
                 if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
                     $availableFinishing = (float) $inputItem->{$bucket};
                     if ($availableFinishing < $inputQty) {
@@ -189,9 +195,10 @@ class OperatorMesinController extends Controller
                         ]);
                     }
                     $inputItem->{$bucket} = $availableFinishing - $inputQty;
+                    $sourceInvExtra = [$bucket => max(0, (float) $sourceInv->{$bucket} - $inputQty)];
                 }
 
-                $sourceInv->decrement('qty_pcs', $inputQty);
+                $sourceInv->decrement('qty_pcs', $inputQty, $sourceInvExtra);
 
                 InventoryLog::create([
                     'date'             => $data['date'],
@@ -226,7 +233,7 @@ class OperatorMesinController extends Controller
                 if ($outInv) {
                     $outInv->increment('qty_pcs', $line['output_qty']);
                 } else {
-                    Inventory::create([
+                    $outInv = Inventory::create([
                         'item_id'      => $line['output_item_id'],
                         'warehouse_id' => $warehouseMesin->id,
                         'qty_pcs'      => $line['output_qty'],
@@ -264,6 +271,10 @@ class OperatorMesinController extends Controller
                         $inputItem->{$bucket} = (float) $inputItem->{$bucket} + $line['output_qty'];
                         $inputItem->stock     = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
                         $inputItem->save();
+
+                        // Inventories per gudang: item sama, cuma pindah S4S → MESIN
+                        $outInv->{$bucket} = (float) $outInv->{$bucket} + $line['output_qty'];
+                        $outInv->save();
                     }
                 } else {
                     if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
@@ -275,6 +286,9 @@ class OperatorMesinController extends Controller
                         $outputItem->{$bucket} = (float) $outputItem->{$bucket} + $line['output_qty'];
                         $outputItem->stock     = (float) $outputItem->qty_natural + (float) $outputItem->qty_warna;
                         $outputItem->save();
+
+                        $outInv->{$bucket} = (float) $outInv->{$bucket} + $line['output_qty'];
+                        $outInv->save();
                     }
                 }
 

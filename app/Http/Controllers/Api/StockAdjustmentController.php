@@ -94,7 +94,9 @@ class StockAdjustmentController extends Controller
                     $inventory = $invQuery->first();
 
                     if ($inventory) {
-                        $inventory->qty_pcs = max(0, (float) $inventory->qty_pcs + $totalAdj);
+                        $inventory->qty_pcs     = max(0, (float) $inventory->qty_pcs + $totalAdj);
+                        $inventory->qty_natural = max(0, (float) $inventory->qty_natural + $adjNatural);
+                        $inventory->qty_warna   = max(0, (float) $inventory->qty_warna + $adjWarna);
                         $inventory->save();
                     } elseif ($warehouseId && $totalAdj > 0) {
                         // Belum ada entry → buat baru
@@ -103,6 +105,8 @@ class StockAdjustmentController extends Controller
                             'warehouse_id' => $warehouseId,
                             'qty_pcs'      => $totalAdj,
                             'qty_m3'       => 0,
+                            'qty_natural'  => max(0, $adjNatural),
+                            'qty_warna'    => max(0, $adjWarna),
                         ]);
                     }
 

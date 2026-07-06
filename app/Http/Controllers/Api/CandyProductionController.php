@@ -54,8 +54,8 @@ class CandyProductionController extends Controller
             $poNumber        = $productionOrder?->po_number ?? 'TANPA-PO';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = KdProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = KdProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'KD-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 

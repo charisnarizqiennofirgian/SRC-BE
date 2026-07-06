@@ -130,8 +130,8 @@ class AssemblingProductionController extends Controller
 
             // === NOMOR DOKUMEN ===
             $prefix = $data['process_type'] === 'sub_assembling' ? 'SUB' : 'RKT';
-            $runningNumber  = AssemblingProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = AssemblingProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->where('process_type', $data['process_type'])
                 ->count() + 1;
             $documentNumber = "{$prefix}-" . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
@@ -172,7 +172,10 @@ class AssemblingProductionController extends Controller
 
                 // Komponen: kurangi breakdown natural/warna karena stok benar-benar
                 // dipakai habis di sini (bukan sekadar pindah gudang seperti Mesin/Moulding)
+                // Ditulis ke items (global, kompatibilitas) dan inventories (per gudang, sumber baru
+                // untuk Stock Index yang di-filter gudang)
                 $inputItem = Item::lockForUpdate()->find($itemId);
+                $sourceInvExtra = [];
                 if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
                     if (!$finishing) {
                         throw ValidationException::withMessages([
@@ -192,9 +195,11 @@ class AssemblingProductionController extends Controller
                     $inputItem->{$bucket} = $availableFinishing - $qty;
                     $inputItem->stock     = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
                     $inputItem->save();
+
+                    $sourceInvExtra = [$bucket => max(0, (float) $sourceInv->{$bucket} - $qty)];
                 }
 
-                $sourceInv->decrement('qty_pcs', $qty);
+                $sourceInv->decrement('qty_pcs', $qty, $sourceInvExtra);
 
                 InventoryLog::create([
                     'date'             => $data['date'],

@@ -270,7 +270,7 @@ class MouldingController extends Controller
                 if ($outInv) {
                     $outInv->increment('qty_pcs', $group['output_qty']);
                 } else {
-                    Inventory::create([
+                    $outInv = Inventory::create([
                         'item_id'      => $group['output_item_id'],
                         'warehouse_id' => $warehouseS4S->id,
                         'qty_pcs'      => $group['output_qty'],
@@ -279,15 +279,18 @@ class MouldingController extends Controller
                 }
 
                 // Komponen: pecah stok ke qty_natural / qty_warna sesuai finishing hasil moulding
+                // Ditulis ke DUA tempat: items (global, dipertahankan untuk kompatibilitas) dan
+                // inventories (per gudang, sumber data baru untuk Stock Index yang di-filter gudang)
                 $outputItem = Item::lockForUpdate()->find($group['output_item_id']);
                 if ($outputItem && $outputItem->type === Item::TYPE_COMPONENT) {
-                    if ($group['finishing'] === 'warna') {
-                        $outputItem->qty_warna = (float) $outputItem->qty_warna + $group['output_qty'];
-                    } else {
-                        $outputItem->qty_natural = (float) $outputItem->qty_natural + $group['output_qty'];
-                    }
-                    $outputItem->stock = (float) $outputItem->qty_natural + (float) $outputItem->qty_warna;
+                    $bucket = $group['finishing'] === 'warna' ? 'qty_warna' : 'qty_natural';
+
+                    $outputItem->{$bucket} = (float) $outputItem->{$bucket} + $group['output_qty'];
+                    $outputItem->stock     = (float) $outputItem->qty_natural + (float) $outputItem->qty_warna;
                     $outputItem->save();
+
+                    $outInv->{$bucket} = (float) $outInv->{$bucket} + $group['output_qty'];
+                    $outInv->save();
                 }
 
                 InventoryLog::create([

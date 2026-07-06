@@ -113,8 +113,8 @@ class QcFinalController extends Controller
             $sourceName      = $sourceWarehouse?->name ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = QcFinalProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = QcFinalProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'QCF-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 

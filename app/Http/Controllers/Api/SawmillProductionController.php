@@ -106,8 +106,8 @@ class SawmillProductionController extends Controller
         $production = DB::transaction(function () use ($data) {
             $isLogJeblosan  = $data['process_type'] === 'log_jeblosan';
             $prefix         = $isLogJeblosan ? 'SW' : 'RST';
-            $runningNumber  = SawmillProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = SawmillProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->where('process_type', $data['process_type'])
                 ->count() + 1;
             $documentNumber = $prefix . '-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);

@@ -71,7 +71,7 @@ class StockReportController extends Controller
                 ->with([
                     'unit:id,name',
                     'category:id,name',
-                    'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,grade',
+                    'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,qty_natural,qty_warna,grade',
                     'inventories.warehouse:id,name,code',
                 ])
                 ->whereIn('items.category_id', $categoryIds);
@@ -132,7 +132,7 @@ class StockReportController extends Controller
             // Hitung total kubikasi dari SEMUA data yang ter-filter
             $allItemsForSum = $sumQuery->with([
                 'category:id,name',
-                'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,grade',
+                'inventories:id,item_id,warehouse_id,qty_pcs,qty_m3,qty_natural,qty_warna,grade',
             ])->get();
 
             foreach ($allItemsForSum as $item) {
@@ -212,6 +212,20 @@ class StockReportController extends Controller
                 if (str_contains(strtolower($item->category->name ?? ''), 'kayu log')) {
                     $item->total_volume_m3 = (float) ($item->kubikasi ?? 0);
                 }
+
+                // Qty Natural/Warna per gudang (dari inventories) — akurat walau difilter ke 1 gudang.
+                // Fallback ke angka global items kalau baris inventories belum pernah di-backfill
+                // (mis. item baru yang belum tersentuh transaksi Moulding/Mesin/Assembling/Adjustment).
+                $naturalScoped = $inventories->sum(fn ($inv) => (float) ($inv->qty_natural ?? 0));
+                $warnaScoped   = $inventories->sum(fn ($inv) => (float) ($inv->qty_warna ?? 0));
+                if ($naturalScoped == 0 && $warnaScoped == 0) {
+                    $naturalScoped = (float) ($item->qty_natural ?? 0);
+                    $warnaScoped   = (float) ($item->qty_warna ?? 0);
+                }
+                $item->qty_natural_scoped = $naturalScoped;
+                $item->qty_warna_scoped   = $warnaScoped;
+                $item->m3_natural_scoped  = $naturalScoped * $m3PerPcs;
+                $item->m3_warna_scoped    = $warnaScoped * $m3PerPcs;
 
                 return $item;
             });

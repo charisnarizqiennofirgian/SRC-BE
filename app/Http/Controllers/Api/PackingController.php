@@ -79,8 +79,8 @@ class PackingController extends Controller
 
             // === NOMOR DOKUMEN ===
             $runningNumber  = InventoryLog::where('transaction_type', 'PACKING')
-                ->whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+                ->whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->where('direction', 'IN')
                 ->count() + 1;
             $documentNumber = 'PKG-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);

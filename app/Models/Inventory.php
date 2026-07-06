@@ -11,6 +11,8 @@ class Inventory extends Model
         'item_id',
         'qty_pcs',
         'qty_m3',
+        'qty_natural',
+        'qty_warna',
         'grade',
         'ref_po_id',
         'ref_product_id',

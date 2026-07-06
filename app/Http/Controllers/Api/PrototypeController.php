@@ -83,8 +83,8 @@ class PrototypeController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             $runningNumber  = InventoryLog::where('transaction_type', 'PROTOTYPE')
-                ->whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+                ->whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->distinct('reference_number')
                 ->count('reference_number') + 1;
             $documentNumber = 'PROTO-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);

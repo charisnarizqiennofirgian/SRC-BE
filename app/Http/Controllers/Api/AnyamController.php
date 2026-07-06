@@ -86,8 +86,8 @@ class AnyamController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             // Generate nomor dokumen
-            $runningNumber  = AnyamProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = AnyamProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'ANYAM-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 

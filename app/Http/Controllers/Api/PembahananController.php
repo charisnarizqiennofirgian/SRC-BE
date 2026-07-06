@@ -108,8 +108,8 @@ class PembahananController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = PembahananProduction::whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+            $runningNumber  = PembahananProduction::whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->count() + 1;
             $documentNumber = 'PBH-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 

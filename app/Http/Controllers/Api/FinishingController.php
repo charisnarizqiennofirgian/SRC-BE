@@ -67,8 +67,8 @@ class FinishingController extends Controller
             $sourceName      = $sourceWarehouse?->name ?? '-';
 
             $runningNumber  = InventoryLog::where('transaction_type', 'FINISHING')
-                ->whereYear('date', now()->year)
-                ->whereMonth('date', now()->month)
+                ->whereYear('created_at', now()->year)
+                ->whereMonth('created_at', now()->month)
                 ->where('direction', 'OUT')
                 ->count() + 1;
             $documentNumber = 'FNS-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
