@@ -78,6 +78,7 @@ class ProductionMonitoringController extends Controller
                     'productionOrders' => fn($q) => $q->where('type', 'production')->with('details'),
                 ])
                 ->where('status', '!=', 'Draft')
+                ->whereHas('productionOrders', fn($q) => $q->where('type', 'production'))
                 ->orderBy('created_at', 'desc');
 
             if ($request->filled('search')) {
