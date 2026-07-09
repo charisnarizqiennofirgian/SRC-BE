@@ -450,13 +450,21 @@ class StockAdjustmentController extends Controller
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
 
-            Excel::import(new KomponenStockImport, $file, null, $readerType);
+            $import = new KomponenStockImport;
+            Excel::import($import, $file, null, $readerType);
 
             DB::commit();
 
+            $skippedCount = count($import->skipped);
+            $message = $skippedCount > 0
+                ? "Upload selesai: {$import->importedCount} baris berhasil, {$skippedCount} baris dilewati (lihat detail)."
+                : 'Upload saldo awal Komponen berhasil. Master data dan stok telah diperbarui.';
+
             return response()->json([
-                'success' => true,
-                'message' => 'Upload saldo awal Komponen berhasil. Master data dan stok telah diperbarui.'
+                'success'        => true,
+                'message'        => $message,
+                'imported_count' => $import->importedCount,
+                'skipped'        => $import->skipped,
             ], 201);
 
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {

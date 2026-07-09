@@ -24,6 +24,10 @@ class KomponenStockImport implements
 {
     use Importable;
 
+    // Baris yang gagal/di-skip — dikembalikan ke frontend agar user tahu, bukan cuma tercatat di log server
+    public array $skipped = [];
+    public int $importedCount = 0;
+
     public function collection(Collection $rows)
     {
         foreach ($rows as $index => $row) {
@@ -74,6 +78,12 @@ class KomponenStockImport implements
                         'Gudang tidak ditemukan saat import Komponen di baris ' . ($index + 2),
                         ['gudang' => $gudang, 'row' => $row->toArray()]
                     );
+                    $this->skipped[] = [
+                        'baris'  => $index + 2,
+                        'kode'   => $kode,
+                        'nama'   => $nama,
+                        'alasan' => "Gudang '{$gudang}' tidak ditemukan (cek kolom gudang harus persis sama dengan kode/nama gudang di sistem)",
+                    ];
                     continue;
                 }
 
@@ -117,6 +127,12 @@ class KomponenStockImport implements
                         ": kode '{$kode}' sudah dipakai item lain (id={$existing->id}, nama='{$existing->name}', type='{$existing->type}'). " .
                         "Tidak ditimpa untuk mencegah kerusakan master data."
                     );
+                    $this->skipped[] = [
+                        'baris'  => $index + 2,
+                        'kode'   => $kode,
+                        'nama'   => $nama,
+                        'alasan' => "Kode '{$kode}' sudah dipakai item lain ('{$existing->name}', tipe: {$existing->type}) — tidak ditimpa",
+                    ];
                     continue;
                 }
 
@@ -156,6 +172,7 @@ class KomponenStockImport implements
                 );
 
                 Log::info("✅ Import Komponen: {$nama} - Stok {$stokAwal} pcs di {$warehouse->name}");
+                $this->importedCount++;
 
                 // 3. Catat ke inventory_logs hanya jika ada stok
                 if ($stokAwal > 0) {
@@ -195,6 +212,12 @@ class KomponenStockImport implements
                     'Error import Komponen di baris ' . ($index + 2) . ': ' . $e->getMessage(),
                     ['row_data' => $row->toArray()]
                 );
+                $this->skipped[] = [
+                    'baris'  => $index + 2,
+                    'kode'   => $kode ?? '-',
+                    'nama'   => $nama ?? '-',
+                    'alasan' => 'Error: ' . $e->getMessage(),
+                ];
             }
         }
     }

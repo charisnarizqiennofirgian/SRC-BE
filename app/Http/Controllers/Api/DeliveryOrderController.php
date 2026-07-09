@@ -20,25 +20,53 @@ use Illuminate\Support\Facades\Log;
 
 class DeliveryOrderController extends Controller
 {
+    /**
+     * Tempel daftar SO unik yang terlibat di DO ini (via delivery_order_details ->
+     * sales_order_detail -> sales_order) sebagai attribute 'sales_orders' — dipakai frontend
+     * untuk menampilkan badge multi-SO. sales_order_id/salesOrder (tunggal) tetap ada sebagai
+     * SO "utama" untuk kompatibilitas tampilan lama.
+     */
+    private function attachSalesOrdersInfo(DeliveryOrder $deliveryOrder): DeliveryOrder
+    {
+        $deliveryOrder->loadMissing('details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency');
+        $deliveryOrder->setAttribute(
+            'sales_orders',
+            $deliveryOrder->details
+                ->pluck('salesOrderDetail.salesOrder')
+                ->filter()
+                ->unique('id')
+                ->values()
+        );
+        return $deliveryOrder;
+    }
+
     public function index(Request $request)
     {
         try {
             $perPage = $request->get('per_page', 15);
             $search = $request->get('search', '');
 
-            $query = DeliveryOrder::with(['salesOrder', 'buyer', 'user'])
-                ->orderBy('created_at', 'desc');
+            $query = DeliveryOrder::with([
+                'salesOrder',
+                'buyer',
+                'user',
+                'details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency',
+            ])->orderBy('created_at', 'desc');
 
             if ($search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('do_number', 'LIKE', "%{$search}%")
                         ->orWhereHas('salesOrder', function ($sq) use ($search) {
                             $sq->where('so_number', 'LIKE', "%{$search}%");
+                        })
+                        ->orWhereHas('details.salesOrderDetail.salesOrder', function ($sq) use ($search) {
+                            $sq->where('so_number', 'LIKE', "%{$search}%");
                         });
                 });
             }
 
             $deliveryOrders = $query->paginate($perPage);
+            $deliveryOrders->getCollection()->transform(fn ($do) => $this->attachSalesOrdersInfo($do));
 
             return response()->json([
                 'success' => true,
@@ -74,6 +102,31 @@ class DeliveryOrderController extends Controller
                 'shipment_mode' => 'nullable|in:SEA,AIR',
             ]);
 
+            // Pengiriman bisa menggabungkan beberapa SO sekaligus (mis. kirim tablet dari SO-001
+            // + kursi dari SO-005 dalam satu DO). sales_order_ids dikirim sebagai array/JSON;
+            // fallback ke sales_order_id tunggal untuk kompatibilitas kalau ada caller lama.
+            $salesOrderIds = $request->sales_order_ids;
+            if (is_string($salesOrderIds)) {
+                $salesOrderIds = json_decode($salesOrderIds, true);
+            }
+            if (empty($salesOrderIds) || !is_array($salesOrderIds)) {
+                $salesOrderIds = $request->sales_order_id ? [$request->sales_order_id] : [];
+            }
+            if (empty($salesOrderIds)) {
+                throw new \Exception('Minimal pilih 1 Sales Order.');
+            }
+
+            $salesOrders = SalesOrder::whereIn('id', $salesOrderIds)->get();
+            if ($salesOrders->count() !== count(array_unique($salesOrderIds))) {
+                throw new \Exception('Ada Sales Order yang tidak ditemukan.');
+            }
+            if ($salesOrders->pluck('buyer_id')->unique()->count() > 1) {
+                throw new \Exception('Semua Sales Order yang digabung dalam satu pengiriman harus dari buyer yang sama.');
+            }
+            if ($salesOrders->pluck('currency')->unique()->count() > 1) {
+                throw new \Exception('Semua Sales Order yang digabung dalam satu pengiriman harus memakai currency yang sama.');
+            }
+
             $barcodeImagePath = null;
             if ($request->hasFile('barcode_image')) {
                 $barcodeImagePath = $request->file('barcode_image')->store('barcodes', 'public');
@@ -88,8 +141,8 @@ class DeliveryOrderController extends Controller
 
             $deliveryOrder = DeliveryOrder::create([
                 'do_number' => $doNumber,
-                'sales_order_id' => $request->sales_order_id,
-                'buyer_id' => $request->buyer_id,
+                'sales_order_id' => $salesOrders->first()->id,
+                'buyer_id' => $salesOrders->first()->buyer_id,
                 'user_id' => Auth::id(),
                 'delivery_date' => $request->delivery_date,
                 'driver_name' => $request->driver_name,
@@ -132,13 +185,21 @@ class DeliveryOrderController extends Controller
                 throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada.');
             }
 
+            // Mode Air Freight bisa memecah 1 item jadi beberapa baris crate/box berbeda
+            // (lihat FormPengiriman.vue) — jadi stok divalidasi per TOTAL item_id dulu,
+            // bukan per baris, supaya 4+2 pcs di 2 baris terpisah tetap ketahuan kalau
+            // stok cuma 5.
+            $shippedByItem = [];
             foreach ($details as $detail) {
-                $item = Item::with('unit')->find($detail['item_id']);
+                $shippedByItem[$detail['item_id']] = ($shippedByItem[$detail['item_id']] ?? 0) + (float) $detail['quantity_shipped'];
+            }
+            foreach ($shippedByItem as $itemId => $totalShipped) {
+                $item = Item::find($itemId);
                 if (!$item) {
-                    throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
+                    throw new \Exception("Item ID {$itemId} tidak ditemukan");
                 }
 
-                $currentStock = (float) Inventory::where('item_id', $detail['item_id'])
+                $currentStock = (float) Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $packingWarehouseId)
                     ->sum('qty_pcs');
 
@@ -148,8 +209,15 @@ class DeliveryOrderController extends Controller
                     $currentStock = (float) $item->stock;
                 }
 
-                if ($currentStock < $detail['quantity_shipped']) {
-                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$detail['quantity_shipped']}");
+                if ($currentStock < $totalShipped) {
+                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$totalShipped}");
+                }
+            }
+
+            foreach ($details as $detail) {
+                $item = Item::with('unit')->find($detail['item_id']);
+                if (!$item) {
+                    throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
 
                 $nwPerBox = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
@@ -207,6 +275,7 @@ class DeliveryOrderController extends Controller
             $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
                 ? asset('storage/' . $deliveryOrder->barcode_image)
                 : null;
+            $this->attachSalesOrdersInfo($deliveryOrder);
 
             DB::commit();
             return response()->json([
@@ -228,7 +297,7 @@ class DeliveryOrderController extends Controller
     {
         DB::beginTransaction();
         try {
-            $deliveryOrder = DeliveryOrder::with('details')->findOrFail($id);
+            $deliveryOrder = DeliveryOrder::with('details.salesOrderDetail')->findOrFail($id);
 
             if ($deliveryOrder->status !== 'DRAFT') {
                 throw new \Exception("Hanya DO dengan status DRAFT yang bisa dikirim. Status saat ini: {$deliveryOrder->status}");
@@ -320,8 +389,16 @@ class DeliveryOrderController extends Controller
             $deliveryOrder->status = 'SHIPPED';
             $deliveryOrder->save();
 
-            $salesOrder = SalesOrder::with('details')->find($deliveryOrder->sales_order_id);
-            if ($salesOrder) {
+            // DO bisa gabungan beberapa SO — update status TIAP SO yang terlibat berdasarkan
+            // sisa detail SO itu sendiri, bukan cuma satu SO "utama" di header.
+            $salesOrderIds = $deliveryOrder->details
+                ->pluck('salesOrderDetail.sales_order_id')
+                ->filter()
+                ->unique();
+
+            foreach ($salesOrderIds as $soId) {
+                $salesOrder = SalesOrder::with('details')->find($soId);
+                if (!$salesOrder) continue;
                 $allDelivered = true;
                 foreach ($salesOrder->details as $detail) {
                     if ($detail->quantity > $detail->quantity_shipped) {
@@ -335,10 +412,13 @@ class DeliveryOrderController extends Controller
 
             DB::commit();
 
+            $deliveryOrder = $deliveryOrder->fresh(['details', 'salesOrder', 'buyer']);
+            $this->attachSalesOrdersInfo($deliveryOrder);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Barang berhasil dikirim! Status: SHIPPED, Stok telah berkurang.',
-                'data' => $deliveryOrder->fresh(['details', 'salesOrder', 'buyer'])
+                'data' => $deliveryOrder
             ]);
 
         } catch (\Exception $e) {
@@ -354,7 +434,7 @@ class DeliveryOrderController extends Controller
     {
         DB::beginTransaction();
         try {
-            $deliveryOrder = DeliveryOrder::with('salesOrder')->findOrFail($id);
+            $deliveryOrder = DeliveryOrder::with('details.salesOrderDetail')->findOrFail($id);
 
             if ($deliveryOrder->status !== 'SHIPPED') {
                 throw new \Exception("Hanya DO dengan status SHIPPED yang bisa dikonfirmasi terima. Status saat ini: {$deliveryOrder->status}");
@@ -363,8 +443,14 @@ class DeliveryOrderController extends Controller
             $deliveryOrder->status = 'DELIVERED';
             $deliveryOrder->save();
 
-            $salesOrder = SalesOrder::with('details')->find($deliveryOrder->sales_order_id);
-            if ($salesOrder) {
+            $salesOrderIds = $deliveryOrder->details
+                ->pluck('salesOrderDetail.sales_order_id')
+                ->filter()
+                ->unique();
+
+            foreach ($salesOrderIds as $soId) {
+                $salesOrder = SalesOrder::with('details')->find($soId);
+                if (!$salesOrder) continue;
                 $allDelivered = true;
                 foreach ($salesOrder->details as $detail) {
                     if ($detail->quantity > $detail->quantity_shipped) {
@@ -378,10 +464,13 @@ class DeliveryOrderController extends Controller
 
             DB::commit();
 
+            $deliveryOrder = $deliveryOrder->fresh(['details', 'salesOrder', 'buyer']);
+            $this->attachSalesOrdersInfo($deliveryOrder);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Barang berhasil dikonfirmasi diterima customer. Status: DELIVERED. Siap untuk di-invoice!',
-                'data' => $deliveryOrder->fresh(['details', 'salesOrder', 'buyer'])
+                'data' => $deliveryOrder
             ]);
 
         } catch (\Exception $e) {
@@ -398,19 +487,32 @@ class DeliveryOrderController extends Controller
         try {
             $query = DeliveryOrder::with([
                 'salesOrder',
+                'buyer',
                 'details.item',
-                'details.salesOrderDetail'
-            ])
-                ->where('status', 'DELIVERED')
-                ->whereDoesntHave('salesInvoices');
+                'details.salesOrderDetail.salesOrder',
+            ])->where('status', 'DELIVERED');
 
             if ($request->filled('buyer_id')) {
-                $query->whereHas('salesOrder', function ($q) use ($request) {
-                    $q->where('buyer_id', $request->buyer_id);
-                });
+                $query->where('buyer_id', $request->buyer_id);
             }
 
             $deliveryOrders = $query->orderBy('delivery_date', 'desc')->get();
+
+            // DO gabungan bisa hasilkan >1 invoice (1 per SO yang terlibat — lihat
+            // InvoiceService::createInvoicesFromDeliveryOrder), jadi "belum di-invoice" dicek
+            // per baris detail (via delivery_order_detail_id di sales_invoice_details), bukan
+            // per DO — supaya DO yang sebagian SO-nya sudah di-invoice tetap muncul kalau masih
+            // ada SO lain dalam DO yang sama yang belum.
+            $allDetailIds = $deliveryOrders->pluck('details')->flatten()->pluck('id');
+            $invoicedDetailIds = $allDetailIds->isEmpty()
+                ? collect()
+                : \App\Models\SalesInvoiceDetail::whereIn('delivery_order_detail_id', $allDetailIds)
+                    ->pluck('delivery_order_detail_id');
+
+            $deliveryOrders = $deliveryOrders
+                ->filter(fn ($do) => $do->details->contains(fn ($d) => !$invoicedDetailIds->contains($d->id)))
+                ->map(fn ($do) => $this->attachSalesOrdersInfo($do))
+                ->values();
 
             return response()->json($deliveryOrders);
         } catch (\Exception $e) {
@@ -427,7 +529,7 @@ class DeliveryOrderController extends Controller
                 'buyer',
                 'user',
                 'details.item',
-                'details.salesOrderDetail'
+                'details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency'
             ])->findOrFail($id);
 
             $fields = ['consignee_info', 'applicant_info', 'notify_info'];
@@ -439,6 +541,7 @@ class DeliveryOrderController extends Controller
             $deliveryOrder->barcode_image = $deliveryOrder->barcode_image
                 ? asset('storage/' . $deliveryOrder->barcode_image)
                 : null;
+            $this->attachSalesOrdersInfo($deliveryOrder);
 
             return response()->json([
                 'success' => true,

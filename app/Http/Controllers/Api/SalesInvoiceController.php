@@ -102,7 +102,7 @@ class SalesInvoiceController extends Controller
         try {
             DB::beginTransaction();
 
-            $invoice = $this->invoiceService->createInvoiceFromDeliveryOrder(
+            $invoices = $this->invoiceService->createInvoicesFromDeliveryOrder(
                 $request->delivery_order_id,
                 $request->invoice_date,
                 $request->exchange_rate,
@@ -113,9 +113,13 @@ class SalesInvoiceController extends Controller
 
             DB::commit();
 
+            // DO gabungan bisa hasilkan >1 invoice (1 per SO) — 'data' selalu array,
+            // 'invoice count' membantu frontend tahu apakah perlu tampilkan >1 hasil.
             return response()->json([
-                'message' => 'Invoice created successfully',
-                'data' => $invoice->load(['buyer', 'salesOrder', 'deliveryOrder', 'details'])
+                'message' => $invoices->count() > 1
+                    ? "{$invoices->count()} invoice berhasil dibuat (dipisah per Sales Order)"
+                    : 'Invoice created successfully',
+                'data' => $invoices->map(fn ($inv) => $inv->load(['buyer', 'salesOrder', 'deliveryOrder', 'details']))->values(),
             ], 201);
 
         } catch (\Exception $e) {

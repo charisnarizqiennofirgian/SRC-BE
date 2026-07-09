@@ -24,188 +24,165 @@ class InvoiceService
         $this->downPaymentService = $downPaymentService;
     }
 
-    public function createInvoiceFromDeliveryOrder(
+    /**
+     * Satu DO bisa menggabungkan beberapa SO (lihat DeliveryOrderController::store()), tapi
+     * penagihan tetap per-SO (buyer bayar per SO, bukan per pengiriman). Jadi dari satu DO bisa
+     * lahir >1 invoice — satu per SO yang terlibat, masing-masing cuma berisi baris yang
+     * berasal dari SO itu. Kalau sebagian SO dalam DO ini sudah pernah di-invoice sebelumnya
+     * (lihat cek per-detail_id di bawah), SO itu di-skip, cuma SO yang belum yang dibuatkan
+     * invoice baru.
+     *
+     * @return \Illuminate\Support\Collection<int, SalesInvoice>
+     */
+    public function createInvoicesFromDeliveryOrder(
         int $deliveryOrderId,
         string $invoiceDate,
         float $exchangeRate,
         ?string $dueDate = null,
         ?string $notes = null,
         ?int $userId = null
-    ): SalesInvoice {
+    ) {
         $deliveryOrder = DeliveryOrder::with([
-            'salesOrder',
             'buyer',
             'details.item',
-            'details.salesOrderDetail'
+            'details.salesOrderDetail.salesOrder',
         ])->findOrFail($deliveryOrderId);
 
         if ($deliveryOrder->status !== 'DELIVERED') {
             throw new \Exception('Delivery Order belum DELIVERED');
         }
 
-        $existingInvoice = SalesInvoice::where('delivery_order_id', $deliveryOrderId)->first();
-        if ($existingInvoice) {
-            throw new \Exception('Delivery Order sudah memiliki invoice');
+        $alreadyInvoicedDetailIds = SalesInvoiceDetail::whereIn(
+            'delivery_order_detail_id',
+            $deliveryOrder->details->pluck('id')
+        )->pluck('delivery_order_detail_id')->all();
+
+        $pendingDetails = $deliveryOrder->details->reject(
+            fn ($d) => in_array($d->id, $alreadyInvoicedDetailIds)
+        );
+
+        if ($pendingDetails->isEmpty()) {
+            throw new \Exception('Semua barang di Delivery Order ini sudah di-invoice');
         }
 
-        $currency = $deliveryOrder->salesOrder->currency ?? 'IDR';
+        $detailsBySo = $pendingDetails->groupBy(fn ($d) => $d->salesOrderDetail->sales_order_id ?? null);
 
-        $subtotalOriginal = 0;
+        $createdInvoices = collect();
 
-        foreach ($deliveryOrder->details as $detail) {
-            $soDetail = $detail->salesOrderDetail;
-
-            Log::info('Processing DO Detail:', [
-                'item_name' => $detail->item_name,
-                'quantity_shipped' => $detail->quantity_shipped,
-                'unit_price' => $soDetail->unit_price ?? 'NULL',
-                'soDetail_exists' => $soDetail ? 'YES' : 'NO',
-            ]);
-
-            if (!$soDetail) {
-                throw new \Exception("SO Detail tidak ditemukan untuk item: {$detail->item_name}");
+        foreach ($detailsBySo as $salesOrderId => $soDetails) {
+            $salesOrder = $soDetails->first()->salesOrderDetail->salesOrder ?? null;
+            if (!$salesOrderId || !$salesOrder) {
+                throw new \Exception('SO Detail/Sales Order tidak ditemukan untuk sebagian barang di DO ini');
             }
 
-            $lineTotal = $detail->quantity_shipped * $soDetail->unit_price;
-            $subtotalOriginal += $lineTotal;
-        }
+            $currency = $salesOrder->currency ?? 'IDR';
+            $taxRate = floatval($salesOrder->tax_rate ?? 0);
 
-        Log::info('Subtotal Calculation:', [
-            'subtotalOriginal' => $subtotalOriginal,
-            'taxRate' => $deliveryOrder->salesOrder->tax_rate ?? 'NULL',
-        ]);
-
-        $taxRate = floatval($deliveryOrder->salesOrder->tax_rate ?? 0);
-        $taxAmountOriginal = $subtotalOriginal * ($taxRate / 100);
-        $totalOriginal = $subtotalOriginal + $taxAmountOriginal;
-
-        $subtotalIdr = $subtotalOriginal * $exchangeRate;
-        $taxAmountIdr = $taxAmountOriginal * $exchangeRate;
-        $totalIdr = $totalOriginal * $exchangeRate;
-
-        // ✅ CEK DAN APPLY DOWN PAYMENT
-        $availableDownPayments = $this->downPaymentService->getAvailableDownPayments($deliveryOrder->buyer_id);
-
-        $totalDpApplied = 0;
-        $dpAllocations = [];
-
-        foreach ($availableDownPayments as $dp) {
-            $remainingInvoice = $totalIdr - $totalDpApplied;
-
-            if ($remainingInvoice <= 0) {
-                break; // Invoice sudah lunas dari DP
+            $subtotalOriginal = 0;
+            foreach ($soDetails as $detail) {
+                $soDetail = $detail->salesOrderDetail;
+                if (!$soDetail) {
+                    throw new \Exception("SO Detail tidak ditemukan untuk item: {$detail->item_name}");
+                }
+                $subtotalOriginal += $detail->quantity_shipped * $soDetail->unit_price;
             }
 
-            $dpToUse = min($dp->remaining_amount, $remainingInvoice);
+            $taxAmountOriginal = $subtotalOriginal * ($taxRate / 100);
+            $totalOriginal = $subtotalOriginal + $taxAmountOriginal;
 
-            if ($dpToUse > 0) {
-                $dpAllocations[] = [
-                    'down_payment_id' => $dp->id,
-                    'amount_used' => $dpToUse
-                ];
-                $totalDpApplied += $dpToUse;
-            }
-        }
-
-        Log::info('Down Payment Application:', [
-            'totalIdr' => $totalIdr,
-            'totalDpApplied' => $totalDpApplied,
-            'dpAllocations' => $dpAllocations,
-        ]);
-
-        Log::info('Final Calculation:', [
-            'subtotalOriginal' => $subtotalOriginal,
-            'taxRate' => $taxRate,
-            'taxAmountOriginal' => $taxAmountOriginal,
-            'totalOriginal' => $totalOriginal,
-            'exchangeRate' => $exchangeRate,
-            'subtotalIdr' => $subtotalIdr,
-            'taxAmountIdr' => $taxAmountIdr,
-            'totalIdr' => $totalIdr,
-            'totalDpApplied' => $totalDpApplied,
-            'remainingAmount' => $totalIdr - $totalDpApplied,
-        ]);
-
-        $invoiceNumber = SalesInvoice::generateInvoiceNumber();
-
-        $invoice = SalesInvoice::create([
-            'invoice_number' => $invoiceNumber,
-            'sales_order_id' => $deliveryOrder->sales_order_id,
-            'delivery_order_id' => $deliveryOrder->id,
-            'buyer_id' => $deliveryOrder->buyer_id,
-            'user_id' => $userId ?? Auth::id(),
-            'invoice_date' => $invoiceDate,
-            'due_date' => $dueDate,
-            'currency' => $currency,
-            'exchange_rate' => $exchangeRate,
-            'subtotal_currency' => $subtotalOriginal,
-            'tax_amount_currency' => $taxAmountOriginal,
-            'total_currency' => $totalOriginal,
-            'subtotal_idr' => $subtotalIdr,
-            'tax_amount_idr' => $taxAmountIdr,
-            'total_idr' => $totalIdr,
-            'paid_amount' => $totalDpApplied, // ✅ APPLIED DP
-            'remaining_amount' => $totalIdr - $totalDpApplied, // ✅ SISA SETELAH DP
-            'payment_status' => $totalDpApplied >= $totalIdr ? 'PAID' : ($totalDpApplied > 0 ? 'PARTIAL' : 'UNPAID'), // ✅ AUTO STATUS
-            'notes' => $notes,
-            'status' => 'DRAFT',
-        ]);
-
-        // ✅ APPLY DOWN PAYMENT & UPDATE STATUS
-        foreach ($dpAllocations as $allocation) {
-            $dp = DownPayment::find($allocation['down_payment_id']);
-
-            // Update DP using service method
-            $this->downPaymentService->useDownPayment($dp, $allocation['amount_used']);
-
-            // Update status
-            if ($dp->remaining_amount <= 0) {
-                $dp->update(['status' => 'FULLY_USED']);
-            } else {
-                $dp->update(['status' => 'PARTIALLY_USED']);
-            }
-
-            $dp->save();
-
-            Log::info('DP Applied:', [
-                'dp_id' => $dp->id,
-                'dp_number' => $dp->dp_number,
-                'amount_used' => $allocation['amount_used'],
-                'remaining_after' => $dp->remaining_amount,
-                'status' => $dp->status,
-            ]);
-        }
-
-        foreach ($deliveryOrder->details as $detail) {
-            $soDetail = $detail->salesOrderDetail;
-
-            $unitPriceOriginal = $soDetail->unit_price;
-            $subtotalOriginal = $unitPriceOriginal * $detail->quantity_shipped;
-
-            $unitPriceIdr = $unitPriceOriginal * $exchangeRate;
             $subtotalIdr = $subtotalOriginal * $exchangeRate;
+            $taxAmountIdr = $taxAmountOriginal * $exchangeRate;
+            $totalIdr = $totalOriginal * $exchangeRate;
 
-            SalesInvoiceDetail::create([
-                'sales_invoice_id' => $invoice->id,
-                'sales_order_detail_id' => $detail->sales_order_detail_id,
-                'delivery_order_detail_id' => $detail->id,
-                'item_id' => $detail->item_id,
-                'item_name' => $detail->item_name,
-                'item_code' => $soDetail->item_code,
-                'item_unit' => $detail->item_unit,
-                'quantity' => $detail->quantity_shipped,
-                'unit_price_original' => $unitPriceOriginal,
-                'discount_original' => 0,
-                'subtotal_original' => $subtotalOriginal,
-                'unit_price_idr' => $unitPriceIdr,
-                'discount_idr' => 0,
-                'subtotal_idr' => $subtotalIdr,
-                'unit_cost' => null,
-                'total_cost' => null,
+            // ✅ CEK DAN APPLY DOWN PAYMENT (dievaluasi ulang tiap iterasi SO — DP yang sudah
+            // dipakai invoice SO sebelumnya dalam loop ini otomatis berkurang, sisanya baru
+            // dipakai untuk SO berikutnya)
+            $availableDownPayments = $this->downPaymentService->getAvailableDownPayments($deliveryOrder->buyer_id);
+
+            $totalDpApplied = 0;
+            $dpAllocations = [];
+
+            foreach ($availableDownPayments as $dp) {
+                $remainingInvoice = $totalIdr - $totalDpApplied;
+                if ($remainingInvoice <= 0) {
+                    break;
+                }
+                $dpToUse = min($dp->remaining_amount, $remainingInvoice);
+                if ($dpToUse > 0) {
+                    $dpAllocations[] = ['down_payment_id' => $dp->id, 'amount_used' => $dpToUse];
+                    $totalDpApplied += $dpToUse;
+                }
+            }
+
+            Log::info('Invoice dari DO (per-SO):', [
+                'delivery_order_id' => $deliveryOrder->id,
+                'sales_order_id' => $salesOrderId,
+                'subtotalOriginal' => $subtotalOriginal,
+                'taxRate' => $taxRate,
+                'totalIdr' => $totalIdr,
+                'totalDpApplied' => $totalDpApplied,
             ]);
+
+            $invoiceNumber = SalesInvoice::generateInvoiceNumber();
+
+            $invoice = SalesInvoice::create([
+                'invoice_number' => $invoiceNumber,
+                'sales_order_id' => $salesOrderId,
+                'delivery_order_id' => $deliveryOrder->id,
+                'buyer_id' => $deliveryOrder->buyer_id,
+                'user_id' => $userId ?? Auth::id(),
+                'invoice_date' => $invoiceDate,
+                'due_date' => $dueDate,
+                'currency' => $currency,
+                'exchange_rate' => $exchangeRate,
+                'subtotal_currency' => $subtotalOriginal,
+                'tax_amount_currency' => $taxAmountOriginal,
+                'total_currency' => $totalOriginal,
+                'subtotal_idr' => $subtotalIdr,
+                'tax_amount_idr' => $taxAmountIdr,
+                'total_idr' => $totalIdr,
+                'paid_amount' => $totalDpApplied,
+                'remaining_amount' => $totalIdr - $totalDpApplied,
+                'payment_status' => $totalDpApplied >= $totalIdr ? 'PAID' : ($totalDpApplied > 0 ? 'PARTIAL' : 'UNPAID'),
+                'notes' => $notes,
+                'status' => 'DRAFT',
+            ]);
+
+            foreach ($dpAllocations as $allocation) {
+                $dp = DownPayment::find($allocation['down_payment_id']);
+                $this->downPaymentService->useDownPayment($dp, $allocation['amount_used']);
+                $dp->update(['status' => $dp->remaining_amount <= 0 ? 'FULLY_USED' : 'PARTIALLY_USED']);
+            }
+
+            foreach ($soDetails as $detail) {
+                $soDetail = $detail->salesOrderDetail;
+                $unitPriceOriginal = $soDetail->unit_price;
+                $lineSubtotalOriginal = $unitPriceOriginal * $detail->quantity_shipped;
+
+                SalesInvoiceDetail::create([
+                    'sales_invoice_id' => $invoice->id,
+                    'sales_order_detail_id' => $detail->sales_order_detail_id,
+                    'delivery_order_detail_id' => $detail->id,
+                    'item_id' => $detail->item_id,
+                    'item_name' => $detail->item_name,
+                    'item_code' => $soDetail->item_code,
+                    'item_unit' => $detail->item_unit,
+                    'quantity' => $detail->quantity_shipped,
+                    'unit_price_original' => $unitPriceOriginal,
+                    'discount_original' => 0,
+                    'subtotal_original' => $lineSubtotalOriginal,
+                    'unit_price_idr' => $unitPriceOriginal * $exchangeRate,
+                    'discount_idr' => 0,
+                    'subtotal_idr' => $lineSubtotalOriginal * $exchangeRate,
+                    'unit_cost' => null,
+                    'total_cost' => null,
+                ]);
+            }
+
+            $createdInvoices->push($invoice->fresh(['details', 'buyer', 'salesOrder', 'deliveryOrder']));
         }
 
-        return $invoice->fresh(['details', 'buyer', 'salesOrder', 'deliveryOrder']);
+        return $createdInvoices;
     }
 
     public function postInvoice(SalesInvoice $invoice): void
