@@ -3,8 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Inventory;
-use App\Models\Warehouse;
 use App\Models\SalesOrder;
 use App\Models\InventoryLog;
 use Illuminate\Http\Request;
@@ -56,22 +54,19 @@ class ProductionMonitoringController extends Controller
         return array_unique($allIds);
     }
 
+    // Zona hilir — tiap key gudang bisa dipetakan ke >1 transaction_type (mis. assembling: sub_assembling & rakit)
+    private array $hilirStageTypes = [
+        'ruskomp'    => ['RUSTIK_KOMPONEN'],
+        'assembling' => ['SUB_ASSEMBLING', 'RAKIT'],
+        'sanding'    => ['SANDING'],
+        'rustik'     => ['RUSTIK'],
+        'finishing'  => ['FINISHING'],
+        'packing'    => ['PACKING'],
+    ];
+
     public function index(Request $request)
     {
         try {
-            $warehouses = Warehouse::whereIn('code', [
-                'RUSKOMP', 'ASSEMBLING', 'SANDING', 'RUSTIK', 'FINISHING', 'PACKING'
-            ])->pluck('id', 'code');
-
-            $warehouseHilir = [
-                'ruskomp'    => $warehouses['RUSKOMP']    ?? null,
-                'assembling' => $warehouses['ASSEMBLING'] ?? null,
-                'sanding'    => $warehouses['SANDING']    ?? null,
-                'rustik'     => $warehouses['RUSTIK']     ?? null,
-                'finishing'  => $warehouses['FINISHING']  ?? null,
-                'packing'    => $warehouses['PACKING']    ?? null,
-            ];
-
             $query = SalesOrder::with([
                     'buyer',
                     'details.item',
@@ -101,6 +96,14 @@ class ProductionMonitoringController extends Controller
 
                 // Semua detail dari semua PO milik SO ini (untuk cek moulding per item)
                 $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
+
+                // Search IDs zona hilir, di-scope ke PO milik SO ini saja (bukan seluruh gudang)
+                $hilirSearchIds = [];
+                foreach ($this->hilirStageTypes as $txTypes) {
+                    foreach ($txTypes as $txType) {
+                        $hilirSearchIds[$txType] = $this->getSearchIds($txType, $poIds);
+                    }
+                }
 
                 $items = [];
 
@@ -187,11 +190,21 @@ class ProductionMonitoringController extends Controller
                     }
 
                     // === ZONA HILIR ===
+                    // Di-scope ke reference_id milik PO SO ini (via $hilirSearchIds), bukan total stok gudang —
+                    // total stok gudang dipakai bersama semua SO yang order item yang sama, jadi tidak boleh dipakai di sini.
                     $qtyHilir = [];
-                    foreach ($warehouseHilir as $key => $warehouseId) {
-                        if (!$warehouseId) { $qtyHilir[$key] = 0; continue; }
-                        $qtyHilir[$key] = (float) Inventory::where('warehouse_id', $warehouseId)
-                            ->where('item_id', $itemId)->sum('qty_pcs');
+                    foreach ($this->hilirStageTypes as $key => $txTypes) {
+                        $qty = 0;
+                        foreach ($txTypes as $txType) {
+                            $searchIds = $hilirSearchIds[$txType];
+                            if (empty($searchIds)) continue;
+                            $qty += (float) InventoryLog::where('transaction_type', $txType)
+                                ->whereIn('reference_id', $searchIds)
+                                ->where('direction', 'IN')
+                                ->where('item_id', $itemId)
+                                ->sum('qty');
+                        }
+                        $qtyHilir[$key] = $qty;
                     }
 
                     $target = (float) $detail->quantity;
