@@ -84,7 +84,11 @@ class InvoiceService
                 if (!$soDetail) {
                     throw new \Exception("SO Detail tidak ditemukan untuk item: {$detail->item_name}");
                 }
-                $subtotalOriginal += $detail->quantity_shipped * $soDetail->unit_price;
+                // Pakai harga yang AKTIF sekarang (bukan harga beku di $soDetail, yang bisa
+                // usang kalau SO diedit setelah DO dibuat — lihat SalesOrderDetail::resolveCurrent()).
+                $currentSoDetail = \App\Models\SalesOrderDetail::resolveCurrent($salesOrderId, $detail->item_id);
+                $unitPrice = $currentSoDetail->unit_price ?? $soDetail->unit_price;
+                $subtotalOriginal += $detail->quantity_shipped * $unitPrice;
             }
 
             $taxAmountOriginal = $subtotalOriginal * ($taxRate / 100);
@@ -156,7 +160,8 @@ class InvoiceService
 
             foreach ($soDetails as $detail) {
                 $soDetail = $detail->salesOrderDetail;
-                $unitPriceOriginal = $soDetail->unit_price;
+                $currentSoDetail = \App\Models\SalesOrderDetail::resolveCurrent($salesOrderId, $detail->item_id);
+                $unitPriceOriginal = $currentSoDetail->unit_price ?? $soDetail->unit_price;
                 $lineSubtotalOriginal = $unitPriceOriginal * $detail->quantity_shipped;
 
                 SalesInvoiceDetail::create([

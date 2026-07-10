@@ -50,9 +50,12 @@ class DeliveryOrderDetail extends Model
         return $this->belongsTo(DeliveryOrder::class);
     }
 
+    // withTrashed() — sales_order_detail_id bisa nyangkut ke baris SO detail yang sudah
+    // soft-deleted kalau SO diedit setelah DO ini dibuat (lihat SalesOrderDetail::resolveCurrent()
+    // untuk cara mengambil harga yang AKTIF/terbaru, bukan cuma baris beku ini).
     public function salesOrderDetail()
     {
-        return $this->belongsTo(SalesOrderDetail::class);
+        return $this->belongsTo(SalesOrderDetail::class)->withTrashed();
     }
 
     public function item()

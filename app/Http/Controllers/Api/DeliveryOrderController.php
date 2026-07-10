@@ -82,6 +82,66 @@ class DeliveryOrderController extends Controller
         }
     }
 
+    /**
+     * Validasi stok per TOTAL item_id (bukan per baris) — 1 item bisa muncul di beberapa baris
+     * kalau mode Air Freight dipecah per crate/box (lihat FormPengiriman.vue), jadi harus
+     * dijumlah dulu sebelum dibandingkan ke stok tersedia.
+     */
+    private function validateStockForDetails(array $details, int $packingWarehouseId): void
+    {
+        $shippedByItem = [];
+        foreach ($details as $detail) {
+            $shippedByItem[$detail['item_id']] = ($shippedByItem[$detail['item_id']] ?? 0) + (float) ($detail['quantity_shipped'] ?? 0);
+        }
+
+        foreach ($shippedByItem as $itemId => $totalShipped) {
+            $item = Item::find($itemId);
+            if (!$item) {
+                throw new \Exception("Item ID {$itemId} tidak ditemukan");
+            }
+
+            $currentStock = (float) Inventory::where('item_id', $itemId)
+                ->where('warehouse_id', $packingWarehouseId)
+                ->sum('qty_pcs');
+
+            if ($currentStock <= 0) {
+                $currentStock = (float) $item->stock;
+            }
+
+            if ($currentStock < $totalShipped) {
+                throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$totalShipped}");
+            }
+        }
+    }
+
+    /**
+     * Hitung nw/gw/m3/wood per baris (fallback ke master item kalau baris tidak isi sendiri)
+     * beserta total-nya — dipakai bareng oleh store() dan update().
+     */
+    private function calculateDetailTotals(array $detail, Item $item): array
+    {
+        $nwPerBox    = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
+        $gwPerBox    = $detail['gw_per_box'] ?? $item->gw_per_box ?? null;
+        $m3PerCarton = $detail['m3_per_carton'] ?? $item->m3_per_carton ?? null;
+        $woodPerPcs  = $detail['wood_consumed_per_pcs'] ?? $item->wood_consumed_per_pcs ?? null;
+        $quantityBoxes   = $detail['quantity_boxes'] ?? null;
+        $quantityShipped = $detail['quantity_shipped'] ?? 0;
+
+        return [
+            'nw_per_box'             => $nwPerBox,
+            'gw_per_box'             => $gwPerBox,
+            'm3_per_carton'          => $m3PerCarton,
+            'wood_consumed_per_pcs'  => $woodPerPcs,
+            'quantity_boxes'         => $quantityBoxes,
+            'quantity_shipped'       => $quantityShipped,
+            'quantity_crates'        => $detail['quantity_crates'] ?? null,
+            'total_nw'               => ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null,
+            'total_gw'               => ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null,
+            'total_m3'               => ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null,
+            'total_wood_consumed'    => ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null,
+        ];
+    }
+
     public function store(Request $request)
     {
         DB::beginTransaction();
@@ -185,34 +245,7 @@ class DeliveryOrderController extends Controller
                 throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada.');
             }
 
-            // Mode Air Freight bisa memecah 1 item jadi beberapa baris crate/box berbeda
-            // (lihat FormPengiriman.vue) — jadi stok divalidasi per TOTAL item_id dulu,
-            // bukan per baris, supaya 4+2 pcs di 2 baris terpisah tetap ketahuan kalau
-            // stok cuma 5.
-            $shippedByItem = [];
-            foreach ($details as $detail) {
-                $shippedByItem[$detail['item_id']] = ($shippedByItem[$detail['item_id']] ?? 0) + (float) $detail['quantity_shipped'];
-            }
-            foreach ($shippedByItem as $itemId => $totalShipped) {
-                $item = Item::find($itemId);
-                if (!$item) {
-                    throw new \Exception("Item ID {$itemId} tidak ditemukan");
-                }
-
-                $currentStock = (float) Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $packingWarehouseId)
-                    ->sum('qty_pcs');
-
-                // Fallback ke items.stock jika inventories PACKING belum terisi
-                // (konsisten dengan tampilan di Stok Index Barang Jadi)
-                if ($currentStock <= 0) {
-                    $currentStock = (float) $item->stock;
-                }
-
-                if ($currentStock < $totalShipped) {
-                    throw new \Exception("Stock {$item->name} di Gudang Packing tidak cukup. Tersedia: {$currentStock}, Diminta: {$totalShipped}");
-                }
-            }
+            $this->validateStockForDetails($details, $packingWarehouseId);
 
             foreach ($details as $detail) {
                 $item = Item::with('unit')->find($detail['item_id']);
@@ -220,54 +253,17 @@ class DeliveryOrderController extends Controller
                     throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
                 }
 
-                $nwPerBox = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
-                $gwPerBox = $detail['gw_per_box'] ?? $item->gw_per_box ?? null;
-                $m3PerCarton = $detail['m3_per_carton'] ?? $item->m3_per_carton ?? null;
-                $woodPerPcs = $detail['wood_consumed_per_pcs'] ?? $item->wood_consumed_per_pcs ?? null;
-
-                $quantityBoxes = $detail['quantity_boxes'] ?? null;
-                $quantityShipped = $detail['quantity_shipped'];
-
-                $totalNw = null;
-                $totalGw = null;
-                $totalM3 = null;
-                $totalWood = null;
-
-                if ($nwPerBox && $quantityBoxes) {
-                    $totalNw = $nwPerBox * $quantityBoxes;
-                }
-
-                if ($gwPerBox && $quantityBoxes) {
-                    $totalGw = $gwPerBox * $quantityBoxes;
-                }
-
-                if ($m3PerCarton && $quantityBoxes) {
-                    $totalM3 = $m3PerCarton * $quantityBoxes;
-                }
-
-                if ($woodPerPcs && $quantityShipped) {
-                    $totalWood = $woodPerPcs * $quantityShipped;
-                }
-
-                DeliveryOrderDetail::create([
-                    'delivery_order_id' => $deliveryOrder->id,
-                    'sales_order_detail_id' => $detail['sales_order_detail_id'],
-                    'item_id' => $detail['item_id'],
-                    'item_name' => $item->name,
-                    'item_unit' => $item->unit->name ?? 'Pcs',
-                    'hs_code' => $item->hs_code ?? null,
-                    'quantity_shipped' => $quantityShipped,
-                    'quantity_boxes' => $quantityBoxes,
-                    'quantity_crates' => $detail['quantity_crates'] ?? null,
-                    'nw_per_box' => $nwPerBox,
-                    'gw_per_box' => $gwPerBox,
-                    'm3_per_carton' => $m3PerCarton,
-                    'wood_consumed_per_pcs' => $woodPerPcs,
-                    'total_nw' => $totalNw,
-                    'total_gw' => $totalGw,
-                    'total_m3' => $totalM3,
-                    'total_wood_consumed' => $totalWood,
-                ]);
+                DeliveryOrderDetail::create(array_merge(
+                    [
+                        'delivery_order_id' => $deliveryOrder->id,
+                        'sales_order_detail_id' => $detail['sales_order_detail_id'],
+                        'item_id' => $detail['item_id'],
+                        'item_name' => $item->name,
+                        'item_unit' => $item->unit->name ?? 'Pcs',
+                        'hs_code' => $item->hs_code ?? null,
+                    ],
+                    $this->calculateDetailTotals($detail, $item)
+                ));
             }
 
             $deliveryOrder = DeliveryOrder::with(['salesOrder.buyer', 'buyer', 'user', 'details.item'])
@@ -514,6 +510,20 @@ class DeliveryOrderController extends Controller
                 ->map(fn ($do) => $this->attachSalesOrdersInfo($do))
                 ->values();
 
+            // current_unit_price — lihat SalesOrderDetail::resolveCurrent(); dipakai preview
+            // InvoiceCreate.vue supaya tidak menampilkan harga 0/usang sebelum invoice dibuat.
+            $deliveryOrders->each(function ($do) {
+                $do->details->each(function ($detail) {
+                    $frozenSoDetail = $detail->salesOrderDetail;
+                    $currentSoDetail = $frozenSoDetail
+                        ? SalesOrderDetail::resolveCurrent($frozenSoDetail->sales_order_id, $detail->item_id)
+                        : null;
+                    $detail->current_unit_price = (float) (
+                        $currentSoDetail->unit_price ?? $frozenSoDetail->unit_price ?? 0
+                    );
+                });
+            });
+
             return response()->json($deliveryOrders);
         } catch (\Exception $e) {
             Log::error('Error fetching available DOs: ' . $e->getMessage());
@@ -531,6 +541,33 @@ class DeliveryOrderController extends Controller
                 'details.item',
                 'details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency'
             ])->findOrFail($id);
+
+            // current_stock dihitung sama seperti getOpenSalesOrders() — stok gudang PACKING
+            // dulu, fallback ke items.stock. Dipakai frontend (mode edit) untuk validasi qty
+            // kirim; kalau cuma pakai items.stock langsung, item finished_good yang kolom
+            // stock-nya tidak sinkron akan salah tampil "stok 0" padahal barangnya ada di PACKING.
+            $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+            $deliveryOrder->details->each(function ($detail) use ($packingWarehouseId) {
+                $packingStock = (float) Inventory::where('item_id', $detail->item_id)
+                    ->where('warehouse_id', $packingWarehouseId)
+                    ->sum('qty_pcs');
+                $detail->current_stock = $packingStock > 0
+                    ? $packingStock
+                    : (float) ($detail->item->stock ?? 0);
+            });
+
+            // current_unit_price — lihat SalesOrderDetail::resolveCurrent() untuk kenapa ini
+            // perlu (sales_order_detail_id di DO bisa nyangkut ke baris SO detail yang sudah
+            // soft-deleted/usang kalau SO diedit setelah DO dibuat).
+            $deliveryOrder->details->each(function ($detail) {
+                $frozenSoDetail = $detail->salesOrderDetail; // relasi withTrashed()
+                $currentSoDetail = $frozenSoDetail
+                    ? SalesOrderDetail::resolveCurrent($frozenSoDetail->sales_order_id, $detail->item_id)
+                    : null;
+                $detail->current_unit_price = (float) (
+                    $currentSoDetail->unit_price ?? $frozenSoDetail->unit_price ?? 0
+                );
+            });
 
             $fields = ['consignee_info', 'applicant_info', 'notify_info'];
             foreach ($fields as $f) {
@@ -636,38 +673,68 @@ class DeliveryOrderController extends Controller
                     $details = json_decode($details, true);
                 }
 
+                $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+                if ($packingWarehouseId) {
+                    $this->validateStockForDetails($details, $packingWarehouseId);
+                }
+
+                // Sync penuh: baris yang sudah ada di-update, baris baru (tanpa 'id' — mis.
+                // pecahan crate/box baru yang ditambah admin saat edit) dibuat, baris yang
+                // sudah tidak ada lagi di payload (dihapus admin) dihapus dari DB.
+                $keptDetailIds = [];
+
                 foreach ($details as $detail) {
                     if (isset($detail['id'])) {
                         $doDetail = DeliveryOrderDetail::find($detail['id']);
-                        if ($doDetail && $doDetail->delivery_order_id == $do->id) {
-                            $nwPerBox = $detail['nw_per_box'] ?? $doDetail->nw_per_box;
-                            $gwPerBox = $detail['gw_per_box'] ?? $doDetail->gw_per_box;
-                            $m3PerCarton = $detail['m3_per_carton'] ?? $doDetail->m3_per_carton;
-                            $woodPerPcs = $detail['wood_consumed_per_pcs'] ?? $doDetail->wood_consumed_per_pcs;
-                            $quantityBoxes = $detail['quantity_boxes'] ?? $doDetail->quantity_boxes;
-                            $quantityShipped = $detail['quantity_shipped'] ?? $doDetail->quantity_shipped;
-
-                            $totalNw = ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null;
-                            $totalGw = ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null;
-                            $totalM3 = ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null;
-                            $totalWood = ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null;
-
-                            $doDetail->update([
-                                'quantity_shipped' => $quantityShipped,
-                                'quantity_boxes' => $quantityBoxes,
-                                'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
-                                'nw_per_box' => $nwPerBox,
-                                'gw_per_box' => $gwPerBox,
-                                'm3_per_carton' => $m3PerCarton,
-                                'wood_consumed_per_pcs' => $woodPerPcs,
-                                'total_nw' => $totalNw,
-                                'total_gw' => $totalGw,
-                                'total_m3' => $totalM3,
-                                'total_wood_consumed' => $totalWood,
-                            ]);
+                        if (!$doDetail || $doDetail->delivery_order_id != $do->id) {
+                            continue;
                         }
+
+                        $nwPerBox = $detail['nw_per_box'] ?? $doDetail->nw_per_box;
+                        $gwPerBox = $detail['gw_per_box'] ?? $doDetail->gw_per_box;
+                        $m3PerCarton = $detail['m3_per_carton'] ?? $doDetail->m3_per_carton;
+                        $woodPerPcs = $detail['wood_consumed_per_pcs'] ?? $doDetail->wood_consumed_per_pcs;
+                        $quantityBoxes = $detail['quantity_boxes'] ?? $doDetail->quantity_boxes;
+                        $quantityShipped = $detail['quantity_shipped'] ?? $doDetail->quantity_shipped;
+
+                        $doDetail->update([
+                            'quantity_shipped' => $quantityShipped,
+                            'quantity_boxes' => $quantityBoxes,
+                            'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
+                            'nw_per_box' => $nwPerBox,
+                            'gw_per_box' => $gwPerBox,
+                            'm3_per_carton' => $m3PerCarton,
+                            'wood_consumed_per_pcs' => $woodPerPcs,
+                            'total_nw' => ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null,
+                            'total_gw' => ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null,
+                            'total_m3' => ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null,
+                            'total_wood_consumed' => ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null,
+                        ]);
+                        $keptDetailIds[] = $doDetail->id;
+                    } else {
+                        $item = Item::with('unit')->find($detail['item_id']);
+                        if (!$item) {
+                            throw new \Exception("Item ID {$detail['item_id']} tidak ditemukan");
+                        }
+
+                        $newDetail = DeliveryOrderDetail::create(array_merge(
+                            [
+                                'delivery_order_id' => $do->id,
+                                'sales_order_detail_id' => $detail['sales_order_detail_id'],
+                                'item_id' => $detail['item_id'],
+                                'item_name' => $item->name,
+                                'item_unit' => $item->unit->name ?? 'Pcs',
+                                'hs_code' => $item->hs_code ?? null,
+                            ],
+                            $this->calculateDetailTotals($detail, $item)
+                        ));
+                        $keptDetailIds[] = $newDetail->id;
                     }
                 }
+
+                DeliveryOrderDetail::where('delivery_order_id', $do->id)
+                    ->whereNotIn('id', $keptDetailIds)
+                    ->delete();
             }
 
             $do = DeliveryOrder::with(['details.item'])->find($do->id);
