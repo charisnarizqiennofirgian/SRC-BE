@@ -23,11 +23,7 @@ class MaterialController extends Controller
 {
     private function clearMaterialsCache(): void
     {
-        Cache::forget('materials_all');
-        $slugs = Category::pluck('name')->map(fn($name) => Str::slug($name));
-        foreach ($slugs as $slug) {
-            Cache::forget('materials_all_cat_' . $slug);
-        }
+        Item::clearMaterialsCache();
     }
 
     private function calculateVolumeM3(array $itemData): ?float

@@ -355,6 +355,8 @@ class StockAdjustmentController extends Controller
 
             DB::commit();
 
+            \App\Models\Item::clearMaterialsCache();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Upload saldo awal Karton Box berhasil. Master data dan stok telah diperbarui.'
@@ -455,6 +457,8 @@ class StockAdjustmentController extends Controller
 
             DB::commit();
 
+            \App\Models\Item::clearMaterialsCache();
+
             $skippedCount = count($import->skipped);
             $message = $skippedCount > 0
                 ? "Upload selesai: {$import->importedCount} baris berhasil, {$skippedCount} baris dilewati (lihat detail)."
@@ -543,6 +547,8 @@ class StockAdjustmentController extends Controller
             Excel::import(new KayuLogStockImport, $file, null, $readerType);
 
             DB::commit();
+
+            \App\Models\Item::clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
@@ -660,6 +666,8 @@ class StockAdjustmentController extends Controller
 
             DB::commit();
 
+            \App\Models\Item::clearMaterialsCache();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Upload saldo awal kayu RST berhasil. Master data dan stok telah diperbarui.'
@@ -758,6 +766,8 @@ class StockAdjustmentController extends Controller
             Excel::import(new \App\Imports\ProdukJadiStockImport, $file, null, $readerType);
 
             DB::commit();
+
+            \App\Models\Item::clearMaterialsCache();
 
             return response()->json([
                 'success' => true,
@@ -928,6 +938,8 @@ class StockAdjustmentController extends Controller
             Excel::import(new JeblosanStockImport, $file, null, $readerType);
 
             DB::commit();
+
+            \App\Models\Item::clearMaterialsCache();
 
             return response()->json([
                 'success' => true,

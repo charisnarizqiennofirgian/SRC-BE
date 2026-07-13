@@ -66,6 +66,7 @@ class ProductController extends Controller
         $itemData['stock'] = $itemData['stock'] ?? 0;
 
         $item = Item::create($itemData);
+        Item::clearMaterialsCache();
         return response()->json(['success' => true, 'message' => 'Produk Jadi berhasil dibuat.', 'data' => $item], 201);
     }
 
@@ -86,12 +87,14 @@ class ProductController extends Controller
         }
 
         $product->update($validator->validated());
+        Item::clearMaterialsCache();
         return response()->json(['success' => true, 'message' => 'Produk Jadi berhasil diperbarui.', 'data' => $product]);
     }
 
     public function destroy(Item $product) // <-- GANTI: Gunakan model Item
     {
         $product->delete();
+        Item::clearMaterialsCache();
         return response()->json(['success' => true, 'message' => 'Produk Jadi berhasil dihapus.']);
     }
 
@@ -111,6 +114,7 @@ class ProductController extends Controller
             Excel::import(new ProductsImport(), $file, null, $readerType);
 
             Cache::forget('products_all');
+            Item::clearMaterialsCache();
 
             return response()->json([
                 'success' => true,

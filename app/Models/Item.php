@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class Item extends Model
 {
@@ -233,5 +235,18 @@ class Item extends Model
     public function scopeExternal($query)
     {
         return $query->where('production_route', self::ROUTE_EXTERNAL);
+    }
+
+    // Cache 'materials_all*' dibaca oleh MaterialController::index() (dipakai dropdown Nama Barang
+    // di form Sales Order & tempat lain). Item bisa dibuat/diubah lewat controller lain (mis.
+    // ProductController untuk Produk Jadi) yang tidak tahu-menahu soal cache ini — jadi clear-nya
+    // ditaruh di sini (satu tempat) supaya controller manapun yang mengubah Item bisa panggil ini.
+    public static function clearMaterialsCache(): void
+    {
+        Cache::forget('materials_all');
+        $slugs = Category::pluck('name')->map(fn ($name) => Str::slug($name));
+        foreach ($slugs as $slug) {
+            Cache::forget('materials_all_cat_' . $slug);
+        }
     }
 }
