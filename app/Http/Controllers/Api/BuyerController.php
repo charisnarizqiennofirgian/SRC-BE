@@ -46,6 +46,7 @@ class BuyerController extends Controller
             $validatedData = $request->validate([
                 'code' => 'required|string|max:255|unique:buyers',
                 'name' => 'required|string|max:255',
+                'contact_person' => 'nullable|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
                 'receivable_account_id' => 'nullable|exists:chart_of_accounts,id',
@@ -82,6 +83,7 @@ class BuyerController extends Controller
             $validatedData = $request->validate([
                 'code' => 'required|string|max:255|unique:buyers,code,' . $buyer->id,
                 'name' => 'required|string|max:255',
+                'contact_person' => 'nullable|string|max:255',
                 'address' => 'nullable|string',
                 'phone' => 'nullable|string|max:20',
                 'receivable_account_id' => 'nullable|exists:chart_of_accounts,id',

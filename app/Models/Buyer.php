@@ -13,6 +13,7 @@ class Buyer extends Model
     protected $fillable = [
         'code',
         'name',
+        'contact_person',
         'address',
         'phone',
         'receivable_account_id',
