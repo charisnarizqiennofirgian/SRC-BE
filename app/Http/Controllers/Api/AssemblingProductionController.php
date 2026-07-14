@@ -44,23 +44,23 @@ class AssemblingProductionController extends Controller
 
     // =============================================
     // GET: Stok dari gudang sumber
-    // Bisa dari MESIN, RUSKOMP, ASSEMBLING, PROTOTYPE
+    // Default: MESIN + RUSKOMP (bisa dipersempit lewat ?warehouse_id=)
     // =============================================
     public function getSourceItems(Request $request)
     {
         if ($request->filled('warehouse_id')) {
-            $warehouse = Warehouse::find($request->warehouse_id);
+            $warehouses = Warehouse::where('id', $request->warehouse_id)->get();
         } else {
-            $warehouse = Warehouse::where('code', 'MESIN')->first();
+            $warehouses = Warehouse::whereIn('code', ['MESIN', 'RUSKOMP'])->get();
         }
 
-        if (!$warehouse) {
+        if ($warehouses->isEmpty()) {
             return response()->json(['success' => true, 'data' => []]);
         }
 
-        $inventories = Inventory::where('warehouse_id', $warehouse->id)
+        $inventories = Inventory::whereIn('warehouse_id', $warehouses->pluck('id'))
             ->where('qty_pcs', '>', 0)
-            ->with('item')
+            ->with(['item', 'warehouse'])
             ->get()
             ->map(fn($inv) => [
                 'item_id'        => $inv->item_id,
@@ -69,9 +69,9 @@ class AssemblingProductionController extends Controller
                 'nama_produk'    => $inv->item?->nama_produk ?? null,
                 'item_type'      => $inv->item?->type ?? null,
                 'qty_available'  => (float) $inv->qty_pcs,
-                'warehouse_id'   => $warehouse->id,
-                'warehouse_code' => $warehouse->code,
-                'warehouse_name' => $warehouse->name,
+                'warehouse_id'   => $inv->warehouse_id,
+                'warehouse_code' => $inv->warehouse?->code ?? '-',
+                'warehouse_name' => $inv->warehouse?->name ?? '-',
             ]);
 
         return response()->json(['success' => true, 'data' => $inventories]);

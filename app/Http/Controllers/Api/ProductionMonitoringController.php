@@ -20,6 +20,7 @@ class ProductionMonitoringController extends Controller
         'RUSTIK_KOMPONEN' => 'rustik_komponen_productions',
         'SUB_ASSEMBLING'  => 'assembling_productions',
         'RAKIT'           => 'assembling_productions',
+        'QC_FINAL'        => 'qc_final_productions',
     ];
 
     private function getSearchIds(string $txType, array $poIds): array
@@ -209,11 +210,18 @@ class ProductionMonitoringController extends Controller
 
                     $target = (float) $detail->quantity;
 
-                    $qtyQcFinal = InventoryLog::where('transaction_type', 'QC_FINAL')
-                        ->where('item_id', $itemId)
-                        ->where('direction', 'IN')
-                        ->when(!empty($poIds), fn($q) => $q->whereIn('reference_id', $poIds))
-                        ->sum('qty');
+                    // reference_id InventoryLog QC_FINAL = qc_final_productions.id (bukan po_id
+                    // langsung) — harus lewat getSearchIds() sama seperti stage hilir lainnya,
+                    // kalau tidak qty selalu 0 walau QC Final sudah pernah disimpan.
+                    $qcFinalSearchIds = $this->getSearchIds('QC_FINAL', $poIds);
+                    $qtyQcFinal = 0;
+                    if (!empty($qcFinalSearchIds)) {
+                        $qtyQcFinal = InventoryLog::where('transaction_type', 'QC_FINAL')
+                            ->where('item_id', $itemId)
+                            ->where('direction', 'IN')
+                            ->whereIn('reference_id', $qcFinalSearchIds)
+                            ->sum('qty');
+                    }
 
                     $allProductionIds = $this->getAllProductionIds($poIds);
                     $qtyReject = InventoryLog::where('transaction_type', 'LIKE', '%REJECT%')
