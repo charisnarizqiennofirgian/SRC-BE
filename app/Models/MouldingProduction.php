@@ -11,6 +11,7 @@ class MouldingProduction extends Model
         'date',
         'ref_po_id',
         'production_order_detail_id',
+        'qty_produk_jadi',
         'notes',
         'created_by',
     ];

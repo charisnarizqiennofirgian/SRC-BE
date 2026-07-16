@@ -376,6 +376,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::prefix('packing')->group(function () {
         Route::get('/available-pos', [PackingController::class, 'getAvailablePos']);
         Route::get('/packing-items', [PackingController::class, 'getPackingItems']);
+        Route::get('/component-source-items', [PackingController::class, 'getComponentSourceItems']);
         Route::post('/store', [PackingController::class, 'store']);
         Route::post('/selesai/{poId}', [PackingController::class, 'selesaiPacking']);
     });

@@ -153,6 +153,7 @@ class MouldingController extends Controller
             'date'                         => ['required', 'date'],
             'ref_po_id'                    => ['required', 'integer', 'exists:production_orders,id'],
             'production_order_detail_id'   => ['required', 'integer', 'exists:production_order_details,id'],
+            'qty_produk_jadi'              => ['nullable', 'numeric', 'min:0'],
             'notes'                        => ['nullable', 'string'],
 
             'groups'                       => ['required', 'array', 'min:1'],
@@ -200,6 +201,7 @@ class MouldingController extends Controller
                 'date'                       => $data['date'],
                 'ref_po_id'                  => $data['ref_po_id'],
                 'production_order_detail_id' => $detail->id,
+                'qty_produk_jadi'            => $data['qty_produk_jadi'] ?? null,
                 'notes'                      => $data['notes'] ?? null,
                 'created_by'                 => Auth::id(),
             ]);

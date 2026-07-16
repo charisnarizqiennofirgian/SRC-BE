@@ -16,6 +16,11 @@ use Illuminate\Validation\ValidationException;
 
 class PackingController extends Controller
 {
+    // Gudang yang bisa jadi sumber komponen untuk "Rakit dari Komponen" saat packing
+    private const COMPONENT_WAREHOUSE_CODES = [
+        'S4S', 'MESIN', 'RUSKOMP', 'ASSEMBLING', 'SANDING', 'RUSTIK', 'FINISHING', 'QC_FINAL',
+    ];
+
     // =============================================
     // GET: Available POs
     // =============================================
@@ -47,6 +52,37 @@ class PackingController extends Controller
     }
 
     // =============================================
+    // GET: Item komponen yang bisa dipakai untuk "Rakit dari Komponen"
+    // Diambil dari semua gudang tahap produksi (S4S/MESIN/RUSKOMP/ASSEMBLING/dst)
+    // =============================================
+    public function getComponentSourceItems()
+    {
+        $warehouses = Warehouse::whereIn('code', self::COMPONENT_WAREHOUSE_CODES)->get();
+
+        if ($warehouses->isEmpty()) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $inventories = Inventory::whereIn('warehouse_id', $warehouses->pluck('id'))
+            ->where('qty_pcs', '>', 0)
+            ->with(['item', 'warehouse'])
+            ->get()
+            ->map(fn($inv) => [
+                'item_id'        => $inv->item_id,
+                'item_code'      => $inv->item?->code ?? '-',
+                'item_name'      => $inv->item?->name ?? '-',
+                'nama_produk'    => $inv->item?->nama_produk ?? null,
+                'item_type'      => $inv->item?->type ?? null,
+                'qty_available'  => (float) $inv->qty_pcs,
+                'warehouse_id'   => $inv->warehouse_id,
+                'warehouse_code' => $inv->warehouse?->code ?? '-',
+                'warehouse_name' => $inv->warehouse?->name ?? '-',
+            ]);
+
+        return response()->json(['success' => true, 'data' => $inventories]);
+    }
+
+    // =============================================
     // POST: Simpan proses packing
     // Output: stok keluar dari gudang sumber → masuk Gudang Packing
     // =============================================
@@ -60,6 +96,13 @@ class PackingController extends Controller
             'items'               => ['required', 'array', 'min:1'],
             'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
             'items.*.qty'         => ['required', 'numeric', 'min:1'],
+
+            // Opsional: rakit dari komponen langsung saat packing (skip input manual di menu Assembling)
+            'items.*.components'                => ['nullable', 'array'],
+            'items.*.components.*.item_id'      => ['required_with:items.*.components', 'integer', 'exists:items,id'],
+            'items.*.components.*.warehouse_id' => ['required_with:items.*.components', 'integer', 'exists:warehouses,id'],
+            'items.*.components.*.qty'          => ['required_with:items.*.components', 'numeric', 'min:0.01'],
+            'items.*.components.*.finishing'    => ['nullable', 'string', 'in:natural,warna'],
         ]);
 
         return DB::transaction(function () use ($data) {
@@ -90,39 +133,117 @@ class PackingController extends Controller
                 $qty      = $item['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // === KURANGI STOK GUDANG SUMBER ===
-                $sourceInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $sourceWarehouse->id)
-                    ->lockForUpdate()
-                    ->first();
+                // === RAKIT DARI KOMPONEN (opsional) ===
+                // Kalau item ini diisi komponen, komponen langsung dikonsumsi (dikurangi dari
+                // gudang masing-masing) sebagai BAGIAN dari transaksi packing ini — TIDAK dibuatkan
+                // record AssemblingProduction terpisah, supaya tidak ikut kehitung di kolom
+                // "Assembling" Dashboard Monitoring (produk ini memang tidak lewat proses Assembling
+                // manual). Jejak pemakaian komponennya tetap tercatat di InventoryLog (transaction_type
+                // PACKING), cuma atribusinya langsung ke Packing, bukan Assembling.
+                if (!empty($item['components'])) {
+                    foreach ($item['components'] as $cIndex => $component) {
+                        $cItemId      = $component['item_id'];
+                        $cWarehouseId = $component['warehouse_id'];
+                        $cQty         = $component['qty'];
+                        $cFinishing   = $component['finishing'] ?? null;
+                        $cItemName    = Item::find($cItemId)?->name ?? "ID {$cItemId}";
+                        $cWhName      = Warehouse::find($cWarehouseId)?->name ?? "ID {$cWarehouseId}";
 
-                $availableQty = $sourceInv?->qty_pcs ?? 0;
-                if ($availableQty < $qty) {
-                    throw ValidationException::withMessages([
-                        'items' => [
-                            "Stok '{$itemName}' di gudang {$sourceWarehouse->name} tidak cukup. " .
-                            "Tersedia: {$availableQty} pcs, diminta: {$qty} pcs."
-                        ],
+                        $cSourceInv = Inventory::where('item_id', $cItemId)
+                            ->where('warehouse_id', $cWarehouseId)
+                            ->lockForUpdate()
+                            ->first();
+
+                        $cAvailableQty = $cSourceInv?->qty_pcs ?? 0;
+                        if ($cAvailableQty < $cQty) {
+                            throw ValidationException::withMessages([
+                                "items.components.{$cIndex}.qty" => [
+                                    "Komponen '{$cItemName}' stok di {$cWhName} tidak cukup. " .
+                                    "Tersedia: {$cAvailableQty} pcs, dibutuhkan: {$cQty} pcs."
+                                ],
+                            ]);
+                        }
+
+                        $cInputItem     = Item::lockForUpdate()->find($cItemId);
+                        $cSourceInvExtra = [];
+                        if ($cInputItem && $cInputItem->type === Item::TYPE_COMPONENT) {
+                            if (!$cFinishing) {
+                                throw ValidationException::withMessages([
+                                    "items.components.{$cIndex}.finishing" => ["Jenis finishing (Natural/Warna) wajib dipilih untuk '{$cItemName}'."],
+                                ]);
+                            }
+                            $bucket = $cFinishing === 'warna' ? 'qty_warna' : 'qty_natural';
+                            $availableFinishing = (float) $cInputItem->{$bucket};
+                            if ($availableFinishing < $cQty) {
+                                $label = $cFinishing === 'warna' ? 'Warna' : 'Natural';
+                                throw ValidationException::withMessages([
+                                    "items.components.{$cIndex}.finishing" => [
+                                        "'{$cItemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$cQty}."
+                                    ],
+                                ]);
+                            }
+                            $cInputItem->{$bucket} = $availableFinishing - $cQty;
+                            $cInputItem->stock     = (float) $cInputItem->qty_natural + (float) $cInputItem->qty_warna;
+                            $cInputItem->save();
+
+                            $cSourceInvExtra = [$bucket => max(0, (float) $cSourceInv->{$bucket} - $cQty)];
+                        }
+
+                        $cSourceInv->decrement('qty_pcs', $cQty, $cSourceInvExtra);
+
+                        InventoryLog::create([
+                            'date'             => $data['date'],
+                            'time'             => now()->toTimeString(),
+                            'item_id'          => $cItemId,
+                            'warehouse_id'     => $cWarehouseId,
+                            'qty'              => $cQty,
+                            'qty_m3'           => 0,
+                            'direction'        => 'OUT',
+                            'transaction_type' => 'PACKING',
+                            'reference_type'   => 'ProductionOrder',
+                            'reference_id'     => $data['ref_po_id'],
+                            'reference_number' => $documentNumber,
+                            'notes'            => "Komponen dipakai untuk merakit & mengemas '{$itemName}' ({$documentNumber}) - PO: {$poNumber}",
+                            'user_id'          => Auth::id(),
+                        ]);
+                    }
+
+                    Log::info("Rakit dari komponen (packing): {$itemName} - {$qty} pcs dari " . count($item['components']) . ' komponen');
+                } else {
+                    // === ALUR BIASA: KURANGI STOK GUDANG SUMBER ===
+                    $sourceInv = Inventory::where('item_id', $itemId)
+                        ->where('warehouse_id', $sourceWarehouse->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    $availableQty = $sourceInv?->qty_pcs ?? 0;
+                    if ($availableQty < $qty) {
+                        throw ValidationException::withMessages([
+                            'items' => [
+                                "Stok '{$itemName}' di gudang {$sourceWarehouse->name} tidak cukup. " .
+                                "Tersedia: {$availableQty} pcs, diminta: {$qty} pcs."
+                            ],
+                        ]);
+                    }
+
+                    $sourceInv->decrement('qty_pcs', $qty);
+
+                    InventoryLog::create([
+                        'date'             => $data['date'],
+                        'time'             => now()->toTimeString(),
+                        'item_id'          => $itemId,
+                        'warehouse_id'     => $sourceWarehouse->id,
+                        'qty'              => $qty,
+                        'qty_m3'           => 0,
+                        'direction'        => 'OUT',
+                        'transaction_type' => 'PACKING',
+                        'reference_type'   => 'ProductionOrder',
+                        'reference_id'     => $data['ref_po_id'],
+                        'reference_number' => $documentNumber,
+                        'notes'            => "Keluar dari {$sourceWarehouse->name} untuk dikemas ({$documentNumber}) - PO: {$poNumber}",
+                        'user_id'          => Auth::id(),
                     ]);
                 }
-
-                $sourceInv->decrement('qty_pcs', $qty);
-
-                InventoryLog::create([
-                    'date'             => $data['date'],
-                    'time'             => now()->toTimeString(),
-                    'item_id'          => $itemId,
-                    'warehouse_id'     => $sourceWarehouse->id,
-                    'qty'              => $qty,
-                    'qty_m3'           => 0,
-                    'direction'        => 'OUT',
-                    'transaction_type' => 'PACKING',
-                    'reference_type'   => 'ProductionOrder',
-                    'reference_id'     => $data['ref_po_id'],
-                    'reference_number' => $documentNumber,
-                    'notes'            => "Keluar dari {$sourceWarehouse->name} untuk dikemas ({$documentNumber}) - PO: {$poNumber}",
-                    'user_id'          => Auth::id(),
-                ]);
 
                 // === TAMBAH STOK GUDANG PACKING ===
                 $packingInv = Inventory::where('item_id', $itemId)
@@ -157,7 +278,8 @@ class PackingController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                Log::info("Packing: {$itemName} - {$qty} pcs | {$sourceWarehouse->name} → Gudang Packing");
+                $sourceLabel = !empty($item['components']) ? 'Rakit Komponen' : $sourceWarehouse->name;
+                Log::info("Packing: {$itemName} - {$qty} pcs | {$sourceLabel} → Gudang Packing");
             }
 
             // Update stage PO

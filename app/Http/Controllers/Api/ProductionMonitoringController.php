@@ -109,6 +109,15 @@ class ProductionMonitoringController extends Controller
                 $items = [];
 
                 foreach ($so->details as $detail) {
+                    // Item yang sudah terkirim penuh (quantity_shipped >= quantity) tidak perlu
+                    // diprioritaskan lagi di dashboard produksi — sudah tidak ada kerjaan produksi
+                    // yang tersisa untuk item ini, terlepas dari status current_stage/PO.
+                    $qtyOrderedCheck = (float) $detail->quantity;
+                    $qtyShippedCheck = (float) ($detail->quantity_shipped ?? 0);
+                    if ($qtyOrderedCheck > 0 && $qtyShippedCheck >= $qtyOrderedCheck) {
+                        continue;
+                    }
+
                     $itemId = $detail->item_id;
 
                     // === ZONA HULU ===
@@ -123,39 +132,24 @@ class ProductionMonitoringController extends Controller
                     $statusHulu = [];
 
                     // === QTY MOULDING & MESIN (per item, dari production_order_detail) ===
+                    // Sumber angka ini adalah `qty_produk_jadi` yang diisi MANUAL oleh operator
+                    // di header transaksi Moulding/Mesin (bukan lagi qty komponen mentah dari
+                    // moulding_production_outputs/mesin_production_outputs) — operator langsung
+                    // menyatakan "batch ini setara N unit produk jadi", mirip pola output di Assembling.
                     $detailIds = $allPoDetails->where('item_id', $itemId)->pluck('id')->toArray();
 
-                    // Sum output moulding untuk item ini (via production_order_detail_id)
                     $qtyMoulding = 0;
                     if (!empty($detailIds)) {
-                        $qtyMoulding = (float) DB::table('moulding_production_outputs')
-                            ->join('moulding_productions', 'moulding_productions.id', '=', 'moulding_production_outputs.moulding_production_id')
-                            ->whereIn('moulding_productions.production_order_detail_id', $detailIds)
-                            ->sum('moulding_production_outputs.qty');
-                    }
-                    // Fallback: PO-level untuk data lama tanpa detail_id
-                    if ($qtyMoulding == 0 && !empty($poIds)) {
-                        $qtyMoulding = (float) DB::table('moulding_production_outputs')
-                            ->join('moulding_productions', 'moulding_productions.id', '=', 'moulding_production_outputs.moulding_production_id')
-                            ->whereIn('moulding_productions.ref_po_id', $poIds)
-                            ->whereNull('moulding_productions.production_order_detail_id')
-                            ->sum('moulding_production_outputs.qty');
+                        $qtyMoulding = (float) DB::table('moulding_productions')
+                            ->whereIn('production_order_detail_id', $detailIds)
+                            ->sum('qty_produk_jadi');
                     }
 
-                    // Sum output mesin untuk item ini
                     $qtyMesin = 0;
                     if (!empty($detailIds)) {
-                        $qtyMesin = (float) DB::table('mesin_production_outputs')
-                            ->join('mesin_productions', 'mesin_productions.id', '=', 'mesin_production_outputs.mesin_production_id')
-                            ->whereIn('mesin_productions.production_order_detail_id', $detailIds)
-                            ->sum('mesin_production_outputs.qty');
-                    }
-                    if ($qtyMesin == 0 && !empty($poIds)) {
-                        $qtyMesin = (float) DB::table('mesin_production_outputs')
-                            ->join('mesin_productions', 'mesin_productions.id', '=', 'mesin_production_outputs.mesin_production_id')
-                            ->whereIn('mesin_productions.ref_po_id', $poIds)
-                            ->whereNull('mesin_productions.production_order_detail_id')
-                            ->sum('mesin_production_outputs.qty');
+                        $qtyMesin = (float) DB::table('mesin_productions')
+                            ->whereIn('production_order_detail_id', $detailIds)
+                            ->sum('qty_produk_jadi');
                     }
 
                     if (empty($poIds)) {
@@ -263,6 +257,12 @@ class ProductionMonitoringController extends Controller
                         'sisa'              => max(0, $target - $qtyPacking),
                         'is_done'           => ($qtyPacking >= $target && $target > 0) || $poCompleted,
                     ];
+                }
+
+                // Semua item SO ini sudah terkirim penuh (difilter di atas) — SO tidak perlu
+                // muncul lagi di dashboard prioritas produksi.
+                if (empty($items)) {
+                    continue;
                 }
 
                 // Group per SO

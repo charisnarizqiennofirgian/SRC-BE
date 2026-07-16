@@ -7,6 +7,7 @@ use App\Models\SalesOrder;
 use App\Models\Item;
 use App\Models\Inventory;
 use App\Models\Warehouse;
+use App\Models\DeliveryOrderDetail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -309,16 +310,29 @@ class SalesOrderController extends Controller
 
             $salesOrder->update($soData);
 
+            // Ambil detail LAMA dulu sebelum dihapus — supaya quantity_shipped yang sudah
+            // terkirim tidak hilang, dan referensi delivery_order_details.sales_order_detail_id
+            // yang sudah dibuat sebelumnya (dari DO yang mereferensikan detail lama) bisa
+            // di-repoint ke detail baru, bukan jadi basi/patah.
+            $oldDetailsByItem = $salesOrder->details()->get()->groupBy('item_id');
+
             $salesOrder->details()->delete();
 
             foreach ($request->details as $detail) {
                 $item = Item::with('unit')->findOrFail($detail['item_id']);
                 $lineTotal = ($detail['quantity'] * $detail['unit_price']) - ($detail['discount'] ?? 0);
 
-                $salesOrder->details()->create([
+                // Cocokkan ke detail lama dengan item_id yang sama (kalau ada) — carry-over
+                // quantity_shipped & repoint FK DO supaya tidak jadi basi.
+                $oldMatch = null;
+                if (!empty($oldDetailsByItem[$detail['item_id']])) {
+                    $oldMatch = $oldDetailsByItem[$detail['item_id']]->shift();
+                }
+
+                $newDetail = $salesOrder->details()->create([
                     'item_id' => $item->id,
                     'quantity' => $detail['quantity'],
-                    'quantity_shipped' => 0,
+                    'quantity_shipped' => $oldMatch->quantity_shipped ?? 0,
                     'item_name' => $detail['item_name'] ?? $item->name,
                     'item_unit' => $item->unit->name,
                     'item_code' => $item->code ?? null,
@@ -329,6 +343,11 @@ class SalesOrderController extends Controller
                     'delivery_date' => $detail['delivery_date'] ?? null,
                     'keterangan' => $detail['keterangan'] ?? null,
                 ]);
+
+                if ($oldMatch) {
+                    DeliveryOrderDetail::where('sales_order_detail_id', $oldMatch->id)
+                        ->update(['sales_order_detail_id' => $newDetail->id]);
+                }
             }
 
             DB::commit();
