@@ -10,6 +10,7 @@ class RustikKomponenInput extends Model
         'rustik_komponen_production_id',
         'item_id',
         'qty',
+        'finishing',
     ];
 
     public function production()

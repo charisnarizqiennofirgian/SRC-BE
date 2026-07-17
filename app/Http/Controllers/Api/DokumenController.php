@@ -13,11 +13,15 @@ class DokumenController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Dokumen::with('uploader:id,name')
+        $query = Dokumen::with(['uploader:id,name', 'buyer:id,name'])
             ->orderByDesc('created_at');
 
         if ($request->filled('kategori')) {
             $query->where('kategori', $request->kategori);
+        }
+
+        if ($request->filled('buyer_id')) {
+            $query->where('buyer_id', $request->buyer_id);
         }
 
         if ($request->filled('search')) {
@@ -37,11 +41,15 @@ class DokumenController extends Controller
 
     public function upload(Request $request)
     {
+        // File Buyer wajib PDF & wajib pilih buyer — kategori lain tetap bebas semua tipe file seperti semula
+        $isFileBuyer = $request->input('kategori') === 'File Buyer';
+
         $request->validate([
-            'file'       => 'required|file|max:51200|mimes:jpg,jpeg,png,pdf,xlsx,xls,dwg,dxf,doc,docx',
+            'file'       => ['required', 'file', 'max:51200', $isFileBuyer ? 'mimes:pdf' : 'mimes:jpg,jpeg,png,pdf,xlsx,xls,dwg,dxf,doc,docx'],
             'nama_file'  => 'required|string|max:255',
-            'kategori'   => 'required|in:Gambar Produk,Daftar Bahan,Gambar Teknik,Lainnya',
+            'kategori'   => 'required|in:Gambar Produk,Daftar Bahan,Gambar Teknik,File Buyer,Lainnya',
             'keterangan' => 'nullable|string|max:500',
+            'buyer_id'   => 'nullable|integer|exists:buyers,id|required_if:kategori,File Buyer',
         ]);
 
         $file      = $request->file('file');
@@ -57,6 +65,7 @@ class DokumenController extends Controller
             'tipe_file'    => $file->getMimeType(),
             'ukuran_file'  => $file->getSize(),
             'kategori'     => $request->kategori,
+            'buyer_id'     => $request->buyer_id ?: null,
             'keterangan'   => $request->keterangan,
             'diupload_oleh'=> Auth::id(),
         ]);
@@ -64,16 +73,17 @@ class DokumenController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'File berhasil diupload!',
-            'data'    => $dokumen->load('uploader:id,name'),
+            'data'    => $dokumen->load(['uploader:id,name', 'buyer:id,name']),
         ], 201);
     }
 
     public function revisi(Request $request, $id)
     {
         $dokumen = Dokumen::findOrFail($id);
+        $isFileBuyer = $dokumen->kategori === 'File Buyer';
 
         $request->validate([
-            'file'       => 'required|file|max:51200|mimes:jpg,jpeg,png,pdf,xlsx,xls,dwg,dxf,doc,docx',
+            'file'       => ['required', 'file', 'max:51200', $isFileBuyer ? 'mimes:pdf' : 'mimes:jpg,jpeg,png,pdf,xlsx,xls,dwg,dxf,doc,docx'],
             'keterangan' => 'nullable|string|max:500',
         ]);
 
@@ -101,7 +111,7 @@ class DokumenController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Dokumen berhasil direvisi!',
-            'data'    => $dokumen->fresh()->load('uploader:id,name'),
+            'data'    => $dokumen->fresh()->load(['uploader:id,name', 'buyer:id,name']),
         ]);
     }
 

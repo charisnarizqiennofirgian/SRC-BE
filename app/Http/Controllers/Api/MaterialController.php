@@ -990,4 +990,53 @@ class MaterialController extends Controller
             ],
         ], 201);
     }
+
+    /**
+     * Quick store Produk Jadi baru dari form Sales Order (Rincian Barang) —
+     * dipakai saat produk yang buyer pesan belum ada di Master Data.
+     */
+    public function quickStoreProduk(Request $request)
+    {
+        $data = $request->validate([
+            'name'    => ['required', 'string', 'max:255'],
+            'code'    => ['nullable', 'string', 'max:100', 'unique:items,code'],
+            'unit_id' => ['required', 'integer', 'exists:units,id'],
+            'price'   => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $categoryProdukJadi = \App\Models\Category::firstOrCreate(
+            ['name' => 'Produk Jadi'],
+            ['description' => 'Produk jadi siap jual']
+        );
+
+        $namaProduk = trim($data['name']);
+        $kode       = $data['code'] ?? 'PRD-' . strtoupper(substr(md5($namaProduk . now()), 0, 8));
+
+        $item = \App\Models\Item::create([
+            'name'        => $namaProduk,
+            'code'        => $kode,
+            'category_id' => $categoryProdukJadi->id,
+            'unit_id'     => $data['unit_id'],
+            'type'        => \App\Models\Item::TYPE_FINISHED_GOOD,
+            'price'       => $data['price'] ?? 0,
+            'stock'       => 0,
+        ]);
+
+        $this->clearMaterialsCache();
+        $item->load('unit:id,name,short_name');
+
+        return response()->json([
+            'success' => true,
+            'message' => "Produk '{$item->name}' berhasil ditambahkan.",
+            'data' => [
+                'id'    => $item->id,
+                'code'  => $item->code,
+                'name'  => $item->name,
+                'label' => "{$item->code} - {$item->name}",
+                'stock' => 0,
+                'price' => $item->price,
+                'unit'  => $item->unit,
+            ],
+        ], 201);
+    }
 }

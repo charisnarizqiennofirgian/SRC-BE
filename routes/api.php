@@ -18,7 +18,6 @@ use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
 use App\Http\Controllers\Api\DeliveryOrderController;
-use App\Http\Controllers\Api\BomController;
 use App\Http\Controllers\Api\ProductionController;
 use App\Http\Controllers\Api\WarehouseController;
 use App\Http\Controllers\Api\SawmillProductionController;
@@ -159,6 +158,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/materials/import', [MaterialController::class, 'import']);
     Route::post('/materials/quick-store-rst', [MaterialController::class, 'quickStoreRst']);
     Route::post('/materials/quick-store-jeblosan', [MaterialController::class, 'quickStoreJeblosan']);
+    Route::post('/materials/quick-store-produk', [MaterialController::class, 'quickStoreProduk']);
     Route::get('/materials/template', [MaterialController::class, 'downloadTemplate']);
     Route::apiResource('materials', MaterialController::class);
 
@@ -280,7 +280,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // --- PRODUKSI / BOM ---
-    Route::post('/boms/{bom}/execute-production', [BomController::class, 'executeProduction']);
     Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']);
     Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
     Route::post('/candy-productions', [CandyProductionController::class, 'store']);
@@ -294,7 +293,11 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     // PRODUCTION BOM
     Route::prefix('production')->group(function () {
         Route::get('/bom', [ProductBomController::class, 'index']);
+        Route::get('/bom/search-items', [ProductBomController::class, 'searchItems']);
         Route::post('/bom/import', [ProductBomController::class, 'import']);
+        Route::get('/bom/{itemId}', [ProductBomController::class, 'show']);
+        Route::post('/bom', [ProductBomController::class, 'store']);
+        Route::delete('/bom/{itemId}', [ProductBomController::class, 'destroy']);
     });
 
     // --- PROSES PEMBAHANAN ---

@@ -80,13 +80,15 @@ class RustikKomponenController extends Controller
             'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
             'notes'     => ['nullable', 'string'],
 
-            'inputs'           => ['required', 'array', 'min:1'],
-            'inputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'inputs.*.qty'     => ['required', 'numeric', 'min:0.01'],
+            'inputs'             => ['required', 'array', 'min:1'],
+            'inputs.*.item_id'   => ['required', 'integer', 'exists:items,id'],
+            'inputs.*.qty'       => ['required', 'numeric', 'min:0.01'],
+            'inputs.*.finishing' => ['required', 'string', 'in:natural,warna'],
 
-            'outputs'           => ['required', 'array', 'min:1'],
-            'outputs.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'outputs.*.qty'     => ['required', 'numeric', 'min:1'],
+            'outputs'             => ['required', 'array', 'min:1'],
+            'outputs.*.item_id'   => ['required', 'integer', 'exists:items,id'],
+            'outputs.*.qty'       => ['required', 'numeric', 'min:1'],
+            'outputs.*.finishing' => ['required', 'string', 'in:natural,warna'],
 
             'rejects'                => ['nullable', 'array'],
             'rejects.*.item_id'      => ['required_with:rejects', 'integer', 'exists:items,id'],
@@ -138,9 +140,11 @@ class RustikKomponenController extends Controller
 
             // === INPUT: Kurangi stok Gudang Mesin ===
             foreach ($data['inputs'] as $index => $input) {
-                $itemId   = $input['item_id'];
-                $qty      = $input['qty'];
-                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+                $itemId    = $input['item_id'];
+                $qty       = $input['qty'];
+                $finishing = $input['finishing'];
+                $bucket    = $finishing === 'warna' ? 'qty_warna' : 'qty_natural';
+                $itemName  = Item::find($itemId)?->name ?? "ID {$itemId}";
 
                 $sourceInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehouseMesin->id)
@@ -157,7 +161,28 @@ class RustikKomponenController extends Controller
                     ]);
                 }
 
-                $sourceInv->decrement('qty_pcs', $qty);
+                // Komponen: validasi & kurangi breakdown natural/warna sesuai finishing baris ini
+                // Ditulis ke items (global, kompatibilitas) dan inventories (per gudang, sumber baru
+                // untuk Stock Index yang di-filter gudang)
+                $inputItemModel = Item::lockForUpdate()->find($itemId);
+                $sourceInvExtra = [];
+                if ($inputItemModel && $inputItemModel->type === Item::TYPE_COMPONENT) {
+                    $availableFinishing = (float) $inputItemModel->{$bucket};
+                    if ($availableFinishing < $qty) {
+                        $label = $finishing === 'warna' ? 'Warna' : 'Natural';
+                        throw ValidationException::withMessages([
+                            "inputs.{$index}.finishing" => [
+                                "'{$itemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$qty}."
+                            ],
+                        ]);
+                    }
+                    $inputItemModel->{$bucket} = $availableFinishing - $qty;
+                    $inputItemModel->stock     = (float) $inputItemModel->qty_natural + (float) $inputItemModel->qty_warna;
+                    $inputItemModel->save();
+                    $sourceInvExtra = [$bucket => max(0, (float) $sourceInv->{$bucket} - $qty)];
+                }
+
+                $sourceInv->decrement('qty_pcs', $qty, $sourceInvExtra);
 
                 InventoryLog::create([
                     'date'             => $data['date'],
@@ -179,6 +204,7 @@ class RustikKomponenController extends Controller
                     'rustik_komponen_production_id' => $production->id,
                     'item_id'                       => $itemId,
                     'qty'                           => $qty,
+                    'finishing'                     => $finishing,
                 ]);
 
                 Log::info("Input: {$itemName} - {$qty} pcs dari Gudang Mesin");
@@ -186,9 +212,11 @@ class RustikKomponenController extends Controller
 
             // === OUTPUT: Tambah stok Gudang Rustik Komponen ===
             foreach ($data['outputs'] as $output) {
-                $itemId   = $output['item_id'];
-                $qty      = $output['qty'];
-                $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
+                $itemId    = $output['item_id'];
+                $qty       = $output['qty'];
+                $finishing = $output['finishing'];
+                $bucket    = $finishing === 'warna' ? 'qty_warna' : 'qty_natural';
+                $itemName  = Item::find($itemId)?->name ?? "ID {$itemId}";
 
                 $targetInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehouseRuskomp->id)
@@ -198,12 +226,25 @@ class RustikKomponenController extends Controller
                 if ($targetInv) {
                     $targetInv->increment('qty_pcs', $qty);
                 } else {
-                    Inventory::create([
+                    $targetInv = Inventory::create([
                         'item_id'      => $itemId,
                         'warehouse_id' => $warehouseRuskomp->id,
                         'qty_pcs'      => $qty,
                         'ref_po_id'    => $data['ref_po_id'],
                     ]);
+                }
+
+                // Komponen: pecah stok ke qty_natural / qty_warna sesuai finishing hasil rustik komponen
+                // Ditulis ke DUA tempat: items (global, dipertahankan untuk kompatibilitas) dan
+                // inventories (per gudang, sumber data baru untuk Stock Index yang di-filter gudang)
+                $outputItemModel = Item::lockForUpdate()->find($itemId);
+                if ($outputItemModel && $outputItemModel->type === Item::TYPE_COMPONENT) {
+                    $outputItemModel->{$bucket} = (float) $outputItemModel->{$bucket} + $qty;
+                    $outputItemModel->stock     = (float) $outputItemModel->qty_natural + (float) $outputItemModel->qty_warna;
+                    $outputItemModel->save();
+
+                    $targetInv->{$bucket} = (float) $targetInv->{$bucket} + $qty;
+                    $targetInv->save();
                 }
 
                 InventoryLog::create([
@@ -226,6 +267,7 @@ class RustikKomponenController extends Controller
                     'rustik_komponen_production_id' => $production->id,
                     'item_id'                       => $itemId,
                     'qty'                           => $qty,
+                    'finishing'                     => $finishing,
                 ]);
 
                 Log::info("Output: {$itemName} - {$qty} pcs ke Gudang Rustik Komponen");

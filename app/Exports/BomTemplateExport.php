@@ -15,7 +15,9 @@ class BomTemplateExport implements FromCollection, WithHeadings, WithStyles
         return new Collection([
             [
                 'Kode Produk Utama' => 'PROD-001',
+                'Nama Produk Utama' => 'Contoh: Bella Modular Chair',
                 'Kode Komponen'     => 'COMP-001',
+                'Nama Komponen'     => 'Contoh: Kaki Depan',
                 'Jumlah per Produk' => 2,
             ],
         ]);
@@ -25,7 +27,9 @@ class BomTemplateExport implements FromCollection, WithHeadings, WithStyles
     {
         return [
             'Kode Produk Utama',   // parent
+            'Nama Produk Utama',   // parent (referensi saja, matching tetap pakai kode)
             'Kode Komponen',       // child
+            'Nama Komponen',       // child (referensi saja, matching tetap pakai kode)
             'Jumlah per Produk',   // qty_per_induk
         ];
     }

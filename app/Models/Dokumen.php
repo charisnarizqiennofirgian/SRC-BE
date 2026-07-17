@@ -15,6 +15,7 @@ class Dokumen extends Model
         'tipe_file',
         'ukuran_file',
         'kategori',
+        'buyer_id',
         'keterangan',
         'diupload_oleh',
     ];
@@ -22,6 +23,11 @@ class Dokumen extends Model
     public function uploader()
     {
         return $this->belongsTo(User::class, 'diupload_oleh');
+    }
+
+    public function buyer()
+    {
+        return $this->belongsTo(Buyer::class);
     }
 
     public function getUkuranFormatAttribute(): string
