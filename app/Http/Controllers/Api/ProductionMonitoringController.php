@@ -358,7 +358,18 @@ class ProductionMonitoringController extends Controller
 
                     $items = [];
                     foreach ($po->details as $detail) {
-                        $soDetail     = $so->details->firstWhere('item_id', $detail->item_id);
+                        $soDetail = $so->details->firstWhere('item_id', $detail->item_id);
+
+                        // Item yang sudah terkirim penuh (quantity_shipped >= quantity) tidak perlu
+                        // tampil lagi di monitoring produksi sampel — sama seperti fix di index()
+                        // reguler (lihat "Dashboard Monitoring — Item/SO yang Sudah Terkirim Penuh
+                        // Otomatis Hilang"), belum dulu ikut diterapkan di sini sampai sekarang.
+                        $qtyOrderedCheck = (float) ($soDetail?->quantity ?? 0);
+                        $qtyShippedCheck = (float) ($soDetail?->quantity_shipped ?? 0);
+                        if ($qtyOrderedCheck > 0 && $qtyShippedCheck >= $qtyOrderedCheck) {
+                            continue;
+                        }
+
                         $deliveryDate = $soDetail?->delivery_date
                             ? Carbon::parse($soDetail->delivery_date)->format('d/m/Y')
                             : '-';
@@ -381,6 +392,12 @@ class ProductionMonitoringController extends Controller
                             'sisa'              => max(0, $target - $qtyPacking),
                             'is_done'           => ($qtyPacking >= $target && $target > 0) || $po->status === 'completed',
                         ];
+                    }
+
+                    // Semua item PO sampel ini sudah terkirim penuh → tidak ada lagi yang perlu
+                    // dimonitor untuk PO ini, sembunyikan dari daftar
+                    if (empty($items)) {
+                        continue;
                     }
 
                     $result[] = [
