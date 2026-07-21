@@ -64,6 +64,7 @@ class ProductController extends Controller
 
         $itemData = $validator->validated();
         $itemData['stock'] = $itemData['stock'] ?? 0;
+        $itemData['type'] = Item::TYPE_FINISHED_GOOD;
 
         $item = Item::create($itemData);
         Item::clearMaterialsCache();
@@ -86,7 +87,9 @@ class ProductController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        $product->update($validator->validated());
+        $data = $validator->validated();
+        $data['type'] = Item::TYPE_FINISHED_GOOD;
+        $product->update($data);
         Item::clearMaterialsCache();
         return response()->json(['success' => true, 'message' => 'Produk Jadi berhasil diperbarui.', 'data' => $product]);
     }

@@ -38,9 +38,11 @@ class ProductBomController extends Controller
 
     // =============================================
     // GET: Cari item untuk dropdown form BOM
-    // role=parent → hanya produk jadi/WIP, role=child → item kategori Komponen (sama seperti tab
-    // "Komponen" di Stock Index — filter by kategori, bukan items.type, karena banyak item Komponen
-    // lama belum konsisten diisi items.type-nya)
+    // role=parent → item kategori Produk Jadi, role=child → item kategori Komponen (keduanya
+    // filter by kategori, bukan items.type — banyak item lama, dan item baru yang dibuat lewat
+    // form Master Barang biasa (ProductController::store()), tidak konsisten diisi items.type-nya.
+    // items.type tetap dicek via orWhereIn sebagai fallback untuk item yang sudah benar ke-tag
+    // tapi kebetulan ada di kategori lain)
     // =============================================
     public function searchItems(Request $request)
     {
@@ -52,7 +54,11 @@ class ProductBomController extends Controller
         $query = Item::query();
 
         if ($request->role === 'parent') {
-            $query->whereIn('type', [Item::TYPE_FINISHED_GOOD, Item::TYPE_WIP]);
+            $categoryIds = Category::whereRaw('LOWER(name) LIKE ?', ['%produk jadi%'])->pluck('id');
+            $query->where(function ($q) use ($categoryIds) {
+                $q->whereIn('category_id', $categoryIds)
+                  ->orWhereIn('type', [Item::TYPE_FINISHED_GOOD, Item::TYPE_WIP]);
+            });
         } elseif ($request->role === 'child') {
             $categoryIds = Category::whereRaw('LOWER(name) LIKE ?', ['%komponen%'])->pluck('id');
             $query->whereIn('category_id', $categoryIds);
