@@ -374,10 +374,37 @@ class ProductionMonitoringController extends Controller
                             ? Carbon::parse($soDetail->delivery_date)->format('d/m/Y')
                             : '-';
                         $target = (float) $detail->qty_planned;
+                        $itemId = $detail->item_id;
+
+                        // Qty hilir sampel (Moulding/Prototype/Sanding/Packing) HARUS discope per
+                        // item_id — 1 PO sampel bisa punya banyak produk berbeda sekaligus (mis.
+                        // Sakala Club Chair, Dining Table, Sun Bed dalam 1 PO yang sama). $qtyMoulding
+                        // dkk di atas sengaja dibiarkan PO-level (dipakai buat status hulu sekuensial
+                        // yang memang PO-wide by design), tapi utk angka yang ditampilkan per baris
+                        // item harus dihitung ulang khusus item ini, supaya progress Sofa A tidak ikut
+                        // "menempel" ke baris Meja B padahal keduanya beda produk sama sekali.
+                        $itemQtyMoulding = !empty($mouldingIds)
+                            ? (float) DB::table('moulding_production_outputs')
+                                ->whereIn('moulding_production_id', $mouldingIds)
+                                ->where('item_id', $itemId)
+                                ->sum('qty')
+                            : 0;
+
+                        $itemQtyPrototype = (float) InventoryLog::where('transaction_type', 'PROTOTYPE')
+                            ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                            ->where('item_id', $itemId)->sum('qty');
+
+                        $itemQtySanding = (float) InventoryLog::where('transaction_type', 'SANDING')
+                            ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                            ->where('item_id', $itemId)->sum('qty');
+
+                        $itemQtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
+                            ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                            ->where('item_id', $itemId)->sum('qty');
 
                         $items[] = [
                             'detail_id'         => $detail->id,
-                            'item_id'           => $detail->item_id,
+                            'item_id'           => $itemId,
                             'item_name'         => $detail->item?->name ?? '-',
                             'item_code'         => $detail->item?->code ?? '-',
                             'target'            => $target,
@@ -385,12 +412,12 @@ class ProductionMonitoringController extends Controller
                             'status_sanwil'     => $statusSawmill,
                             'status_kd'         => $statusKd,
                             'status_pembahanan' => $statusPembahanan,
-                            'qty_moulding'      => $qtyMoulding,
-                            'qty_prototype'     => $qtyPrototype,
-                            'qty_sanding'       => $qtySanding,
-                            'qty_packing'       => $qtyPacking,
-                            'sisa'              => max(0, $target - $qtyPacking),
-                            'is_done'           => ($qtyPacking >= $target && $target > 0) || $po->status === 'completed',
+                            'qty_moulding'      => $itemQtyMoulding,
+                            'qty_prototype'     => $itemQtyPrototype,
+                            'qty_sanding'       => $itemQtySanding,
+                            'qty_packing'       => $itemQtyPacking,
+                            'sisa'              => max(0, $target - $itemQtyPacking),
+                            'is_done'           => ($itemQtyPacking >= $target && $target > 0) || $po->status === 'completed',
                         ];
                     }
 
