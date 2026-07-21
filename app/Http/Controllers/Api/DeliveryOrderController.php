@@ -376,7 +376,23 @@ class DeliveryOrderController extends Controller
                     'user_id' => Auth::id(),
                 ]);
 
-                $soDetail = SalesOrderDetail::find($detail->sales_order_detail_id);
+                // withTrashed() penting: kalau SO diedit setelah DO ini dibuat (sebelum ship()
+                // dipanggil), baris sales_order_details lama sudah soft-deleted dan find() biasa
+                // akan selalu balik null — quantity_shipped jadi tidak pernah ke-increment sama
+                // sekali tanpa ada error yang kelihatan. Self-heal: kalau ternyata trashed, cari
+                // padanan aktif (sales_order_id + item_id sama) dan repoint FK di baris ini juga,
+                // supaya ship() berikutnya tidak kena masalah yang sama lagi.
+                $soDetail = SalesOrderDetail::withTrashed()->find($detail->sales_order_detail_id);
+                if ($soDetail && $soDetail->trashed()) {
+                    $activeSibling = SalesOrderDetail::where('sales_order_id', $soDetail->sales_order_id)
+                        ->where('item_id', $soDetail->item_id)
+                        ->first();
+                    if ($activeSibling) {
+                        $detail->sales_order_detail_id = $activeSibling->id;
+                        $detail->save();
+                        $soDetail = $activeSibling;
+                    }
+                }
                 if ($soDetail) {
                     $soDetail->increment('quantity_shipped', $detail->quantity_shipped);
                 }
