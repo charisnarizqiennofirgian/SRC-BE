@@ -132,24 +132,158 @@ class ProductionMonitoringController extends Controller
                     $statusHulu = [];
 
                     // === QTY MOULDING & MESIN (per item, dari production_order_detail) ===
-                    // Sumber angka ini adalah `qty_produk_jadi` yang diisi MANUAL oleh operator
-                    // di header transaksi Moulding/Mesin (bukan lagi qty komponen mentah dari
+                    // Sumber utama angka ini adalah `qty_produk_jadi` yang diisi MANUAL oleh operator
+                    // di header transaksi Moulding/Mesin (bukan qty komponen mentah dari
                     // moulding_production_outputs/mesin_production_outputs) — operator langsung
                     // menyatakan "batch ini setara N unit produk jadi", mirip pola output di Assembling.
+                    // Transaksi LAMA (dibuat sebelum field ini ada) punya qty_produk_jadi = NULL — supaya
+                    // histori itu tidak "hilang" dari Dashboard cuma karena flow-nya berubah, baris yang
+                    // NULL di-fallback ke cara lama (SUM qty output komponen mentah). Transaksi baru yang
+                    // sudah mengisi qty_produk_jadi tetap pakai angka manual itu, tidak dicampur/fallback.
                     $detailIds = $allPoDetails->where('item_id', $itemId)->pluck('id')->toArray();
 
                     $qtyMoulding = 0;
+                    $mouldingComponents = [];
                     if (!empty($detailIds)) {
-                        $qtyMoulding = (float) DB::table('moulding_productions')
+                        $mouldingRows = DB::table('moulding_productions')
                             ->whereIn('production_order_detail_id', $detailIds)
-                            ->sum('qty_produk_jadi');
+                            ->select('id', 'qty_produk_jadi')
+                            ->get();
+                        $legacyMouldingIds = [];
+                        foreach ($mouldingRows as $mr) {
+                            if ($mr->qty_produk_jadi !== null) {
+                                $qtyMoulding += (float) $mr->qty_produk_jadi;
+                            } else {
+                                $legacyMouldingIds[] = $mr->id;
+                            }
+                        }
+                        if (!empty($legacyMouldingIds)) {
+                            $qtyMoulding += (float) DB::table('moulding_production_outputs')
+                                ->whereIn('moulding_production_id', $legacyMouldingIds)
+                                ->sum('qty');
+                        }
+
+                        // Breakdown komponen yang sudah di-input di Moulding untuk produk ini (mis.
+                        // "Kaki 2, Atas 2") — dihitung terpisah dari qty_moulding di atas, selalu dari
+                        // moulding_production_outputs (data komponen granular), berlaku untuk semua
+                        // transaksi (lama maupun baru), tidak bergantung terisi/tidaknya qty_produk_jadi.
+                        $allMouldingIds = $mouldingRows->pluck('id')->toArray();
+                        if (!empty($allMouldingIds)) {
+                            $componentSums = DB::table('moulding_production_outputs')
+                                ->whereIn('moulding_production_id', $allMouldingIds)
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+
+                            $componentItemIds = $componentSums->pluck('item_id')->toArray();
+                            $componentItemsById = \App\Models\Item::whereIn('id', $componentItemIds)
+                                ->get(['id', 'name', 'code'])
+                                ->keyBy('id');
+
+                            foreach ($componentSums as $cs) {
+                                $compItem = $componentItemsById->get($cs->item_id);
+                                $mouldingComponents[] = [
+                                    'item_id'   => $cs->item_id,
+                                    'item_name' => $compItem->name ?? '(item tidak ditemukan)',
+                                    'item_code' => $compItem->code ?? '',
+                                    'qty'       => (float) $cs->total_qty,
+                                ];
+                            }
+                        }
                     }
 
                     $qtyMesin = 0;
+                    $mesinComponents = [];
                     if (!empty($detailIds)) {
-                        $qtyMesin = (float) DB::table('mesin_productions')
+                        $mesinRows = DB::table('mesin_productions')
                             ->whereIn('production_order_detail_id', $detailIds)
-                            ->sum('qty_produk_jadi');
+                            ->select('id', 'qty_produk_jadi')
+                            ->get();
+                        $legacyMesinIds = [];
+                        foreach ($mesinRows as $mr) {
+                            if ($mr->qty_produk_jadi !== null) {
+                                $qtyMesin += (float) $mr->qty_produk_jadi;
+                            } else {
+                                $legacyMesinIds[] = $mr->id;
+                            }
+                        }
+                        if (!empty($legacyMesinIds)) {
+                            $qtyMesin += (float) DB::table('mesin_production_outputs')
+                                ->whereIn('mesin_production_id', $legacyMesinIds)
+                                ->sum('qty');
+                        }
+
+                        // Breakdown komponen yang sudah di-input/dikerjakan di Mesin untuk produk ini —
+                        // pola sama seperti moulding_components di atas: selalu dari mesin_production_outputs
+                        // (data komponen granular, karena Mesin BOM-filtered sejak input), berlaku untuk
+                        // semua transaksi (lama maupun baru), tidak bergantung terisi/tidaknya qty_produk_jadi.
+                        $allMesinIds = $mesinRows->pluck('id')->toArray();
+                        if (!empty($allMesinIds)) {
+                            $mesinComponentSums = DB::table('mesin_production_outputs')
+                                ->whereIn('mesin_production_id', $allMesinIds)
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+
+                            $mesinComponentItemIds = $mesinComponentSums->pluck('item_id')->toArray();
+                            $mesinComponentItemsById = \App\Models\Item::whereIn('id', $mesinComponentItemIds)
+                                ->get(['id', 'name', 'code'])
+                                ->keyBy('id');
+
+                            foreach ($mesinComponentSums as $cs) {
+                                $compItem = $mesinComponentItemsById->get($cs->item_id);
+                                $mesinComponents[] = [
+                                    'item_id'   => $cs->item_id,
+                                    'item_name' => $compItem->name ?? '(item tidak ditemukan)',
+                                    'item_code' => $compItem->code ?? '',
+                                    'qty'       => (float) $cs->total_qty,
+                                ];
+                            }
+                        }
+                    }
+
+                    // === CHECKLIST KOMPONEN vs RESEP MASTER BOM (Moulding & Mesin) ===
+                    // Referensi "komponen apa saja yang seharusnya ada" diambil dari resep di Master
+                    // BOM (product_boms) produk ini — bukan dari data produksi. Qty aktualnya dicocokkan
+                    // dari breakdown moulding_components/mesin_components yang sudah dihitung di atas.
+                    // Kalau produk belum punya resep BOM sama sekali, checklist dibiarkan KOSONG (tidak
+                    // ada fallback/tebakan) — frontend akan otomatis balik ke tampilan list biasa.
+                    $mouldingBomChecklist = [];
+                    $mesinBomChecklist    = [];
+                    $bomRecipe = DB::table('product_boms')
+                        ->where('parent_item_id', $itemId)
+                        ->get(['child_item_id', 'qty']);
+
+                    if ($bomRecipe->isNotEmpty()) {
+                        $bomChildIds = $bomRecipe->pluck('child_item_id')->toArray();
+                        $bomItemsById = \App\Models\Item::whereIn('id', $bomChildIds)
+                            ->get(['id', 'name', 'code'])
+                            ->keyBy('id');
+
+                        $mouldingActualByItem = collect($mouldingComponents)->keyBy('item_id');
+                        $mesinActualByItem    = collect($mesinComponents)->keyBy('item_id');
+
+                        foreach ($bomRecipe as $bc) {
+                            $bomItem        = $bomItemsById->get($bc->child_item_id);
+                            $mouldingActual = $mouldingActualByItem->get($bc->child_item_id);
+                            $mesinActual    = $mesinActualByItem->get($bc->child_item_id);
+
+                            $mouldingBomChecklist[] = [
+                                'item_id'    => $bc->child_item_id,
+                                'item_name'  => $bomItem->name ?? '(item tidak ditemukan)',
+                                'item_code'  => $bomItem->code ?? '',
+                                'qty_actual' => $mouldingActual ? (float) $mouldingActual['qty'] : 0,
+                                'done'       => (bool) $mouldingActual,
+                            ];
+
+                            $mesinBomChecklist[] = [
+                                'item_id'    => $bc->child_item_id,
+                                'item_name'  => $bomItem->name ?? '(item tidak ditemukan)',
+                                'item_code'  => $bomItem->code ?? '',
+                                'qty_actual' => $mesinActual ? (float) $mesinActual['qty'] : 0,
+                                'done'       => (bool) $mesinActual,
+                            ];
+                        }
                     }
 
                     if (empty($poIds)) {
@@ -241,7 +375,11 @@ class ProductionMonitoringController extends Controller
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
                         'qty_moulding'      => $qtyMoulding,
+                        'moulding_components' => $mouldingComponents,
+                        'moulding_bom_checklist' => $mouldingBomChecklist,
                         'qty_mesin'         => $qtyMesin,
+                        'mesin_components'  => $mesinComponents,
+                        'mesin_bom_checklist' => $mesinBomChecklist,
 
                         // Zona Hilir
                         'qty_ruskomp'       => $qtyHilir['ruskomp'],
@@ -376,17 +514,25 @@ class ProductionMonitoringController extends Controller
                         $target = (float) $detail->qty_planned;
                         $itemId = $detail->item_id;
 
-                        // Qty hilir sampel (Moulding/Prototype/Sanding/Packing) HARUS discope per
-                        // item_id — 1 PO sampel bisa punya banyak produk berbeda sekaligus (mis.
-                        // Sakala Club Chair, Dining Table, Sun Bed dalam 1 PO yang sama). $qtyMoulding
-                        // dkk di atas sengaja dibiarkan PO-level (dipakai buat status hulu sekuensial
-                        // yang memang PO-wide by design), tapi utk angka yang ditampilkan per baris
-                        // item harus dihitung ulang khusus item ini, supaya progress Sofa A tidak ikut
-                        // "menempel" ke baris Meja B padahal keduanya beda produk sama sekali.
-                        $itemQtyMoulding = !empty($mouldingIds)
+                        // Qty Moulding untuk item ini di-scope via production_order_detail_id, BUKAN
+                        // via filter output.item_id = $itemId seperti sebelumnya — filter itu SELALU
+                        // menghasilkan 0 karena item di moulding_production_outputs adalah KOMPONEN
+                        // mentah (mis. "BINGKAI DEPAN"), bukan item produk jadi ($itemId) — dua ID yang
+                        // memang berbeda di hampir semua kasus nyata. Ini akar penyebab kolom Moulding
+                        // di Dashboard/Monitoring Sampel tampil kosong padahal transaksinya nyata ada.
+                        // Fix berlaku merata untuk data lama maupun baru (bukan soal flow lama/baru —
+                        // murni salah filter di query, jadi begitu diperbaiki, data lama otomatis ikut
+                        // benar tanpa perlu backfill apapun).
+                        $detailIdsForItem = $po->details->where('item_id', $itemId)->pluck('id')->toArray();
+                        $itemMouldingIds  = !empty($detailIdsForItem)
+                            ? DB::table('moulding_productions')
+                                ->whereIn('production_order_detail_id', $detailIdsForItem)
+                                ->pluck('id')
+                                ->toArray()
+                            : [];
+                        $itemQtyMoulding = !empty($itemMouldingIds)
                             ? (float) DB::table('moulding_production_outputs')
-                                ->whereIn('moulding_production_id', $mouldingIds)
-                                ->where('item_id', $itemId)
+                                ->whereIn('moulding_production_id', $itemMouldingIds)
                                 ->sum('qty')
                             : 0;
 
@@ -402,6 +548,56 @@ class ProductionMonitoringController extends Controller
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
+                        // Breakdown komponen Moulding + checklist vs Master BOM untuk produk sampel ini
+                        // — reuse $itemMouldingIds di atas, tidak query ulang.
+                        $itemMouldingComponents = [];
+                        if (!empty($itemMouldingIds)) {
+                            $componentSums = DB::table('moulding_production_outputs')
+                                ->whereIn('moulding_production_id', $itemMouldingIds)
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+
+                            $componentItemIds = $componentSums->pluck('item_id')->toArray();
+                            $componentItemsById = \App\Models\Item::whereIn('id', $componentItemIds)
+                                ->get(['id', 'name', 'code'])
+                                ->keyBy('id');
+
+                            foreach ($componentSums as $cs) {
+                                $compItem = $componentItemsById->get($cs->item_id);
+                                $itemMouldingComponents[] = [
+                                    'item_id'   => $cs->item_id,
+                                    'item_name' => $compItem->name ?? '(item tidak ditemukan)',
+                                    'item_code' => $compItem->code ?? '',
+                                    'qty'       => (float) $cs->total_qty,
+                                ];
+                            }
+                        }
+
+                        $itemMouldingBomChecklist = [];
+                        $bomRecipeSample = DB::table('product_boms')
+                            ->where('parent_item_id', $itemId)
+                            ->get(['child_item_id', 'qty']);
+                        if ($bomRecipeSample->isNotEmpty()) {
+                            $bomChildIdsSample  = $bomRecipeSample->pluck('child_item_id')->toArray();
+                            $bomItemsByIdSample = \App\Models\Item::whereIn('id', $bomChildIdsSample)
+                                ->get(['id', 'name', 'code'])
+                                ->keyBy('id');
+                            $mouldingActualByItemSample = collect($itemMouldingComponents)->keyBy('item_id');
+
+                            foreach ($bomRecipeSample as $bc) {
+                                $bomItem = $bomItemsByIdSample->get($bc->child_item_id);
+                                $actual  = $mouldingActualByItemSample->get($bc->child_item_id);
+                                $itemMouldingBomChecklist[] = [
+                                    'item_id'    => $bc->child_item_id,
+                                    'item_name'  => $bomItem->name ?? '(item tidak ditemukan)',
+                                    'item_code'  => $bomItem->code ?? '',
+                                    'qty_actual' => $actual ? (float) $actual['qty'] : 0,
+                                    'done'       => (bool) $actual,
+                                ];
+                            }
+                        }
+
                         $items[] = [
                             'detail_id'         => $detail->id,
                             'item_id'           => $itemId,
@@ -413,6 +609,8 @@ class ProductionMonitoringController extends Controller
                             'status_kd'         => $statusKd,
                             'status_pembahanan' => $statusPembahanan,
                             'qty_moulding'      => $itemQtyMoulding,
+                            'moulding_components' => $itemMouldingComponents,
+                            'moulding_bom_checklist' => $itemMouldingBomChecklist,
                             'qty_prototype'     => $itemQtyPrototype,
                             'qty_sanding'       => $itemQtySanding,
                             'qty_packing'       => $itemQtyPacking,

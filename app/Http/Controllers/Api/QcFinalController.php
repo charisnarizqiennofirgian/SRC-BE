@@ -93,13 +93,20 @@ class QcFinalController extends Controller
             Log::info('=== QC FINAL START ===', ['po_id' => $data['ref_po_id']]);
 
             // === GUDANG ===
-            $warehousePacking = Warehouse::where('code', 'PACKING')->first();
+            // Item lolos QC ditaruh dulu di Gudang QC Final (transit) — BUKAN langsung ke Gudang
+            // Packing. Menu Packing (source_warehouse_id=QC_FINAL) yang nanti benar-benar
+            // memindahkan ke Gudang Packing sambil mencatat progress "qty_packing" di dashboard.
+            // Sebelumnya kode ini salah taruh langsung ke Packing, membuat Gudang QC Final (yang
+            // memang ada & selalu jadi opsi "Gudang Sumber" di form Packing) tidak pernah kebagian
+            // stok — siapapun yang pilih QC Final sebagai sumber di Packing selalu dapat error
+            // "stok 0" walau dashboard bilang QC Final sudah lolos sekian pcs.
+            $warehouseQcFinal = Warehouse::where('code', 'QC_FINAL')->first();
             $warehouseReject  = Warehouse::where('code', 'REJECT')->first();
             $sourceWarehouse  = Warehouse::find($data['source_warehouse_id']);
 
-            if (!$warehousePacking) {
+            if (!$warehouseQcFinal) {
                 throw ValidationException::withMessages([
-                    'warehouse' => ['Gudang Packing tidak ditemukan.'],
+                    'warehouse' => ['Gudang QC Final tidak ditemukan.'],
                 ]);
             }
             if (!$warehouseReject) {
@@ -175,18 +182,18 @@ class QcFinalController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Tambah stok Gudang Packing
-                $packingInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $warehousePacking->id)
+                // Tambah stok Gudang QC Final (transit, menunggu di-Packing)
+                $qcFinalInv = Inventory::where('item_id', $itemId)
+                    ->where('warehouse_id', $warehouseQcFinal->id)
                     ->lockForUpdate()
                     ->first();
 
-                if ($packingInv) {
-                    $packingInv->increment('qty_pcs', $qty);
+                if ($qcFinalInv) {
+                    $qcFinalInv->increment('qty_pcs', $qty);
                 } else {
                     Inventory::create([
                         'item_id'      => $itemId,
-                        'warehouse_id' => $warehousePacking->id,
+                        'warehouse_id' => $warehouseQcFinal->id,
                         'qty_pcs'      => $qty,
                     ]);
                 }
@@ -195,7 +202,7 @@ class QcFinalController extends Controller
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
                     'item_id'          => $itemId,
-                    'warehouse_id'     => $warehousePacking->id,
+                    'warehouse_id'     => $warehouseQcFinal->id,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
                     'direction'        => 'IN',
@@ -203,7 +210,7 @@ class QcFinalController extends Controller
                     'reference_type'   => 'QcFinalProduction',
                     'reference_id'     => $qcFinal->id,
                     'reference_number' => $documentNumber,
-                    'notes'            => "Lolos QC Final ({$documentNumber}) masuk Gudang Packing - PO: {$poNumber}",
+                    'notes'            => "Lolos QC Final ({$documentNumber}) masuk Gudang QC Final - PO: {$poNumber}",
                     'user_id'          => Auth::id(),
                 ]);
 
