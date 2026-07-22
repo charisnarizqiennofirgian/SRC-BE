@@ -93,6 +93,19 @@ class KayuStockImport implements ToCollection, WithHeadingRow, WithCustomCsvSett
             Log::info("ROW #{$index} - CUTTING READ: CT={$rawCT}, CL={$rawCL}, CP={$rawCP} → parsed: {$cutting_t}/{$cutting_l}/{$cutting_p}");
             $stokAwal = (float) $row['stok_awal'];
 
+            // Guard: stok_awal negatif = kemungkinan besar typo tanda minus di Excel — kalau lolos
+            // masuk, item langsung punya inventories/items.stock minus sejak awal tanpa transaksi
+            // apapun (insiden nyata: 2 item Kayu RST ke-import -149 & -6 pada 5 Mei 2026, ketahuan
+            // baru 22 Juli 2026 lewat Stock Index tampil minus). Baris ditolak, bukan di-force ke 0,
+            // supaya admin sadar & isi ulang nilai yang benar.
+            if ($stokAwal < 0) {
+                $skippedRows[] = [
+                    'row_number' => $index + 2,
+                    'reason' => "stok_awal negatif ({$stokAwal}) — kemungkinan typo tanda minus, baris ditolak",
+                ];
+                continue;
+            }
+
             $uniqueName = "{$namaDasar} ({$t}x{$l}x{$p})";
 
             // m3 per pcs

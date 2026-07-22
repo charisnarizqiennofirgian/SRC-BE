@@ -351,8 +351,11 @@ class DeliveryOrderController extends Controller
                     $inv->update(['qty_pcs' => max(0, (float) $item->stock - $detail->quantity_shipped)]);
                 }
 
-                // Selalu kurangi items.stock agar tetap sinkron
-                $item->decrement('stock', $detail->quantity_shipped);
+                // Selalu kurangi items.stock agar tetap sinkron — di-floor ke 0 (bukan decrement()
+                // polos) supaya kalau items.stock kebetulan sudah desync/tertinggal dari inventories
+                // riil (mis. dari insiden lama), field ini tidak ikut minus. decrement() polos di sini
+                // sebelumnya bisa bikin items.stock negatif walau stok fisik di gudang sudah benar 0.
+                $item->update(['stock' => max(0, (float) $item->stock - $detail->quantity_shipped)]);
 
                 StockMovement::create([
                     'item_id' => $detail->item_id,

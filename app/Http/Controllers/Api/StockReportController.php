@@ -151,7 +151,13 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0) {
+                // Fallback ke items.stock HANYA kalau item belum punya baris inventories sama sekali
+                // (stok lama yang belum pernah di-assign ke gudang manapun) — bukan setiap kali
+                // jumlahnya kebetulan 0. Sebelumnya pakai `== 0`, yang keliru menganggap "stok
+                // fisik 0 di semua gudang" (kondisi normal & valid) sama dengan "belum ada data
+                // inventories" — akibatnya kalau items.stock kebetulan basi/negatif (desync lama),
+                // angka basi itu malah ditampilkan menggantikan 0 yang sebenarnya benar.
+                if ($inventories->isEmpty()) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 
@@ -196,7 +202,9 @@ class StockReportController extends Controller
                     return (float) ($inv->qty_pcs ?? 0);
                 });
 
-                if ($totalFromStocks == 0) {
+                // Sama seperti fix di atas (hitung total sebelum paginate) — fallback cuma kalau
+                // benar-benar tidak ada baris inventories, bukan setiap totalnya kebetulan 0.
+                if ($inventories->isEmpty()) {
                     $totalFromStocks = (float) ($item->stock ?? 0);
                 }
 
