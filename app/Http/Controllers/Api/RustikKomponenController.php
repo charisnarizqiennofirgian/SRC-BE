@@ -7,6 +7,7 @@ use App\Models\Inventory;
 use App\Models\InventoryLog;
 use App\Models\Item;
 use App\Models\ProductionOrder;
+use App\Models\ProductionOrderDetail;
 use App\Models\RustikKomponenProduction;
 use App\Models\RustikKomponenInput;
 use App\Models\RustikKomponenOutput;
@@ -70,15 +71,37 @@ class RustikKomponenController extends Controller
         return response()->json(['success' => true, 'data' => $inventories]);
     }
 
+    // GET /rustik-komponen/po-detail-items/{poId}
+    // Return list produk dalam PO -- dipakai dropdown "Produk yang Dikerjakan"
+    public function getPoDetailItems(Request $request, $poId)
+    {
+        ProductionOrder::findOrFail($poId);
+
+        $details = ProductionOrderDetail::where('production_order_id', $poId)
+            ->with('item')
+            ->get()
+            ->map(fn($d) => [
+                'id'          => $d->id,
+                'item_id'     => $d->item_id,
+                'item_name'   => $d->item?->name ?? '-',
+                'item_code'   => $d->item?->code ?? '-',
+                'qty_planned' => $d->qty_planned,
+            ]);
+
+        return response()->json(['success' => true, 'data' => $details]);
+    }
+
     // =============================================
     // POST: Simpan proses rustik komponen
     // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'      => ['required', 'date'],
-            'ref_po_id' => ['required', 'integer', 'exists:production_orders,id'],
-            'notes'     => ['nullable', 'string'],
+            'date'                        => ['required', 'date'],
+            'ref_po_id'                   => ['required', 'integer', 'exists:production_orders,id'],
+            'production_order_detail_id'  => ['required', 'integer', 'exists:production_order_details,id'],
+            'qty_produk_jadi'             => ['nullable', 'numeric', 'min:0'],
+            'notes'                       => ['nullable', 'string'],
 
             'inputs'             => ['required', 'array', 'min:1'],
             'inputs.*.item_id'   => ['required', 'integer', 'exists:items,id'],
@@ -131,11 +154,13 @@ class RustikKomponenController extends Controller
 
             // === SIMPAN HEADER ===
             $production = RustikKomponenProduction::create([
-                'document_number' => $documentNumber,
-                'date'            => $data['date'],
-                'ref_po_id'       => $data['ref_po_id'],
-                'notes'           => $data['notes'] ?? null,
-                'created_by'      => Auth::id(),
+                'document_number'            => $documentNumber,
+                'date'                       => $data['date'],
+                'ref_po_id'                  => $data['ref_po_id'],
+                'production_order_detail_id' => $data['production_order_detail_id'],
+                'qty_produk_jadi'            => $data['qty_produk_jadi'] ?? null,
+                'notes'                      => $data['notes'] ?? null,
+                'created_by'                 => Auth::id(),
             ]);
 
             // === INPUT: Kurangi stok Gudang Mesin ===

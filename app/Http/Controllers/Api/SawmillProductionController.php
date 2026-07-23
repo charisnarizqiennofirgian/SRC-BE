@@ -96,9 +96,12 @@ class SawmillProductionController extends Controller
         if ($data['process_type'] === 'log_jeblosan' && empty($data['jeblosans'])) {
             throw ValidationException::withMessages(['jeblosans' => ['Output jeblosan wajib diisi.']]);
         }
-        if ($data['process_type'] === 'jeblosan_rst' && empty($data['jeblosans'])) {
-            throw ValidationException::withMessages(['jeblosans' => ['Input jeblosan wajib diisi.']]);
-        }
+        // Input jeblosan di proses jeblosan_rst SENGAJA tidak diwajibkan (beda dari log_jeblosan) --
+        // di lapangan admin sering tidak tau jeblosan SKU spesifik mana yang jadi RST mana (tidak ada
+        // pakem/atribusi 1:1), cuma tau total RST yang keluar. Kalau tetap diwajibkan, admin terpaksa
+        // menebak/asal pilih SKU jeblosan cuma buat lolos validasi -- itu data palsu, bukan data riil.
+        // Kalau memang tau, tetap boleh diisi (opsional) supaya stok jeblosan berkurang otomatis;
+        // kalau tidak, stok jeblosan Gudang SAWMILL perlu dikoreksi berkala lewat Stock Adjustment.
         if ($data['process_type'] === 'jeblosan_rst' && empty($data['rsts'])) {
             throw ValidationException::withMessages(['rsts' => ['Output RST wajib diisi.']]);
         }
@@ -256,8 +259,9 @@ class SawmillProductionController extends Controller
         $totalInputM3 = 0;
         $totalRstM3   = 0;
 
-        // INPUT: Kurangi stok jeblosan sesuai pilihan user (bukan ambil semua otomatis)
-        foreach ($data['jeblosans'] as $jeb) {
+        // INPUT: Kurangi stok jeblosan sesuai pilihan user (opsional -- lihat catatan validasi di
+        // store(); array bisa kosong/tidak dikirim kalau admin tidak tau SKU jeblosan spesifiknya)
+        foreach ($data['jeblosans'] ?? [] as $jeb) {
             $inv = Inventory::where('item_id', $jeb['item_id'])
                 ->where('warehouse_id', $warehouseSawmill->id)
                 ->with('item')

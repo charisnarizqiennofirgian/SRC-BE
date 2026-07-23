@@ -242,6 +242,25 @@ class ProductionMonitoringController extends Controller
                         }
                     }
 
+                    // === QTY RUSTIK KOMPONEN (per item, dari qty_produk_jadi manual) ===
+                    // Sama pola dengan Moulding/Mesin di atas -- Rustik Komponen mengonversi komponen
+                    // mentah jadi komponen lain (item_id di rustik_komponen_outputs SELALU komponen,
+                    // bukan produk jadi), jadi tidak bisa dicocokkan langsung ke $itemId produk jadi.
+                    // Sebelum fix ini (23 Juli 2026), qty_ruskomp SELALU 0 di seluruh dashboard karena
+                    // ProductionMonitoringController mencocokkan InventoryLog.item_id = produk jadi
+                    // secara langsung -- data itu tidak pernah ada utk transaksi RUSTIK_KOMPONEN.
+                    // Transaksi LAMA (sebelum kolom qty_produk_jadi ada) punya nilai NULL -- tetap
+                    // tampil 0 di kolom ini (tidak ada fallback qty komponen mentah seperti Moulding/
+                    // Mesin, karena breakdown komponennya juga tidak bisa dicocokkan ke produk jadi
+                    // manapun secara otomatis) sampai transaksi baru mengisi field ini.
+                    $qtyRuskomp = 0;
+                    if (!empty($detailIds)) {
+                        $qtyRuskomp = (float) DB::table('rustik_komponen_productions')
+                            ->whereIn('production_order_detail_id', $detailIds)
+                            ->whereNotNull('qty_produk_jadi')
+                            ->sum('qty_produk_jadi');
+                    }
+
                     // === CHECKLIST KOMPONEN vs RESEP MASTER BOM (Moulding & Mesin) ===
                     // Referensi "komponen apa saja yang seharusnya ada" diambil dari resep di Master
                     // BOM (product_boms) produk ini — bukan dari data produksi. Qty aktualnya dicocokkan
@@ -311,6 +330,39 @@ class ProductionMonitoringController extends Controller
                             for ($i = $currentIdx + 1; $i < count($stageOrder); $i++) {
                                 if ($activityCache[$stageOrder[$i]]) { $anyLaterActive = true; break; }
                             }
+
+                            if ($key === 'sanwil') {
+                                // Sawmill (Log->Jeblosan & Jeblosan->RST) hampir tidak pernah ditag
+                                // ref_po_id di lapangan -- admin belum tau PO-nya saat proses ini
+                                // (beda dari KD/Pembahanan yang ref_po_id-nya wajib diisi). Kalau cuma
+                                // andalkan $hasActivity (tag eksplisit), status ini akan SELALU
+                                // 'skip'/'waiting' walau secara fisik sudah dikerjakan. Fix: anggap
+                                // sawmill 'done' begitu ada bukti downstream (KD/Pembahanan/Moulding/
+                                // Mesin) untuk PO ini.
+                                //
+                                // Sengaja TIDAK dicoba pakai items.production_route/needsSawmill() untuk
+                                // membedakan 'done' vs 'skip' di sini -- dicek waktu perbaikan ini dibuat
+                                // (23 Juli 2026): SEMUA 10.955 item di database punya production_route =
+                                // 'sanding', bukan salah satu dari 4 nilai valid (from_log/from_rst/
+                                // direct/external). Kolom itu rusak/tidak pernah terisi benar di seluruh
+                                // data, jadi needsSawmill() akan SELALU false kalau dipakai -- bakal
+                                // mengulang bug yang sama (semua item salah label 'skip'). Sampai data
+                                // itu diperbaiki terpisah, status 'skip' utk sanwil TIDAK dipakai lagi di
+                                // sini -- untagged + ada progress hilir selalu dianggap 'done' (baik itu
+                                // beneran lewat sawmill maupun rute yang skip sawmill, dua-duanya sama-
+                                // sama "sudah tidak menghalangi" dari sisi status).
+                                $anyLaterActiveSanwil = $anyLaterActive || $qtyMoulding > 0 || $qtyMesin > 0;
+
+                                if ($hasActivity) {
+                                    $statusHulu[$key] = $anyLaterActiveSanwil ? 'done' : 'in_progress';
+                                } elseif ($anyLaterActiveSanwil) {
+                                    $statusHulu[$key] = 'done';
+                                } else {
+                                    $statusHulu[$key] = 'waiting';
+                                }
+                                continue;
+                            }
+
                             if ($anyLaterActive && !$hasActivity)     $statusHulu[$key] = 'skip';
                             elseif ($anyLaterActive && $hasActivity)  $statusHulu[$key] = 'done';
                             elseif ($hasActivity)                     $statusHulu[$key] = 'in_progress';
@@ -335,6 +387,9 @@ class ProductionMonitoringController extends Controller
                         }
                         $qtyHilir[$key] = $qty;
                     }
+                    // 'ruskomp' dihitung dari $qtyRuskomp (qty_produk_jadi manual, per item), bukan dari
+                    // InventoryLog.item_id -- lihat catatan di atas kenapa itu tidak pernah bisa cocok.
+                    $qtyHilir['ruskomp'] = $qtyRuskomp;
 
                     $target = (float) $detail->quantity;
 
@@ -486,11 +541,11 @@ class ProductionMonitoringController extends Controller
                         ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
 
                     // Status sekuensial untuk hulu stages
-                    $hasLaterThanSawmill    = $hasKd || $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
+                    // 'sanwil' dipindah jadi per-item (dihitung di dalam loop $po->details di bawah)
+                    // karena butuh production_route item -- lihat penjelasan root cause di index().
                     $hasLaterThanKd         = $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
                     $hasLaterThanPembahanan = $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
 
-                    $statusSawmill    = $hasLaterThanSawmill && $hasSawmill    ? 'done' : ($hasLaterThanSawmill && !$hasSawmill    ? 'skip' : ($hasSawmill    ? 'in_progress' : 'waiting'));
                     $statusKd         = $hasLaterThanKd && $hasKd             ? 'done' : ($hasLaterThanKd && !$hasKd             ? 'skip' : ($hasKd         ? 'in_progress' : 'waiting'));
                     $statusPembahanan = $hasLaterThanPembahanan && $hasPembahanan ? 'done' : ($hasLaterThanPembahanan && !$hasPembahanan ? 'skip' : ($hasPembahanan ? 'in_progress' : 'waiting'));
 
@@ -547,6 +602,26 @@ class ProductionMonitoringController extends Controller
                         $itemQtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
+
+                        // Status Sawmill per item (bukan PO-level lagi) -- sama seperti index(), karena
+                        // Sawmill (Log->Jeblosan & Jeblosan->RST) hampir tidak pernah ditag ref_po_id di
+                        // lapangan. Anggap 'done' begitu ada bukti downstream utk item ini (Moulding/
+                        // Prototype/Sanding/Packing) atau utk PO ini (KD/Pembahanan, level PO).
+                        //
+                        // Sengaja TIDAK pakai items.production_route/needsSawmill() -- dicek 23 Juli
+                        // 2026, SEMUA item di database punya production_route = 'sanding' (bukan salah
+                        // satu dari 4 nilai valid), jadi needsSawmill() akan SELALU false dan bakal
+                        // membuat SEMUA item selalu 'skip'. Lihat catatan lebih lengkap di index().
+                        $itemHasLaterThanSawmill = $hasKd || $hasPembahanan
+                            || $itemQtyMoulding > 0 || $itemQtyPrototype > 0 || $itemQtySanding > 0 || $itemQtyPacking > 0;
+
+                        if ($hasSawmill) {
+                            $itemStatusSawmill = $itemHasLaterThanSawmill ? 'done' : 'in_progress';
+                        } elseif ($itemHasLaterThanSawmill) {
+                            $itemStatusSawmill = 'done';
+                        } else {
+                            $itemStatusSawmill = 'waiting';
+                        }
 
                         // Breakdown komponen Moulding + checklist vs Master BOM untuk produk sampel ini
                         // — reuse $itemMouldingIds di atas, tidak query ulang.
@@ -605,7 +680,7 @@ class ProductionMonitoringController extends Controller
                             'item_code'         => $detail->item?->code ?? '-',
                             'target'            => $target,
                             'delivery_date'     => $deliveryDate,
-                            'status_sanwil'     => $statusSawmill,
+                            'status_sanwil'     => $itemStatusSawmill,
                             'status_kd'         => $statusKd,
                             'status_pembahanan' => $statusPembahanan,
                             'qty_moulding'      => $itemQtyMoulding,

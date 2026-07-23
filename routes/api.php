@@ -333,6 +333,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::prefix('rustik-komponen')->group(function () {
         Route::get('/available-pos', [RustikKomponenController::class, 'getAvailablePos']);
         Route::get('/mesin-items', [RustikKomponenController::class, 'getMesinItems']);
+        Route::get('/po-detail-items/{poId}', [RustikKomponenController::class, 'getPoDetailItems']);
         Route::post('/store', [RustikKomponenController::class, 'store']);
     });
 
