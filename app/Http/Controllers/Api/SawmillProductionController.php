@@ -123,6 +123,7 @@ class SawmillProductionController extends Controller
 
             $warehouseSawmill = Warehouse::where('code', 'SAWMILL')->firstOrFail();
             $warehouseRstb    = Warehouse::where('code', 'RSTB')->firstOrFail();
+            $warehouseLog     = Warehouse::where('code', 'LOG')->firstOrFail();
 
             $production = SawmillProduction::create([
                 'document_number'       => $documentNumber,
@@ -136,7 +137,7 @@ class SawmillProductionController extends Controller
             ]);
 
             if ($isLogJeblosan) {
-                $this->processLogToJeblosan($data, $production, $warehouseSawmill, $referenceId, $referenceNumber, $documentNumber);
+                $this->processLogToJeblosan($data, $production, $warehouseSawmill, $warehouseLog, $referenceId, $referenceNumber, $documentNumber);
             } else {
                 $this->processJeblosanToRst($data, $production, $warehouseSawmill, $warehouseRstb, $referenceId, $referenceNumber, $documentNumber);
             }
@@ -159,14 +160,14 @@ class SawmillProductionController extends Controller
         ], 201);
     }
 
-    private function processLogToJeblosan(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, ?int $referenceId, string $referenceNumber, string $documentNumber): void
+    private function processLogToJeblosan(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseLog, ?int $referenceId, string $referenceNumber, string $documentNumber): void
     {
         $totalLogM3 = 0;
         $totalJeblosanM3 = 0;
 
-        // INPUT: Kurangi stok log
         foreach ($data['logs'] ?? [] as $log) {
             $inv = Inventory::where('item_id', $log['item_log_id'])
+                ->where('warehouse_id', $warehouseLog->id)
                 ->lockForUpdate()->first();
 
             if ($inv && $inv->qty_pcs >= $log['qty_log_pcs']) {
@@ -181,7 +182,7 @@ class SawmillProductionController extends Controller
                 'date'             => $data['date'],
                 'time'             => now()->toTimeString(),
                 'item_id'          => $log['item_log_id'],
-                'warehouse_id'     => $inv?->warehouse_id ?? $warehouseSawmill->id,
+                'warehouse_id'     => $warehouseLog->id,
                 'qty'              => $log['qty_log_pcs'],
                 'qty_m3'           => $volumeM3,
                 'direction'        => 'OUT',

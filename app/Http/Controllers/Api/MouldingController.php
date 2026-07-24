@@ -160,7 +160,7 @@ class MouldingController extends Controller
             'groups.*.output_item_id'      => ['required', 'integer', 'exists:items,id'],
             'groups.*.output_qty'          => ['required', 'numeric', 'min:1'],
             'groups.*.finishing'           => ['required', 'string', 'in:natural,warna'],
-            'groups.*.inputs'              => ['required', 'array', 'min:1'],
+            'groups.*.inputs'              => ['nullable', 'array'],
             'groups.*.inputs.*.item_id'    => ['required', 'integer', 'exists:items,id'],
             'groups.*.inputs.*.qty'        => ['required', 'numeric', 'min:0.01'],
             'groups.*.reject_item_id'      => ['nullable', 'integer', 'exists:items,id'],
@@ -215,7 +215,7 @@ class MouldingController extends Controller
                     'finishing'                    => $group['finishing'],
                 ]);
 
-                foreach ($group['inputs'] as $input) {
+                foreach ($group['inputs'] ?? [] as $input) {
                     $gudangUrutan    = ['BUFFER', 'RSTK', 'RSTB'];
                     $sourceWarehouse = null;
                     $sourceInventory = null;
