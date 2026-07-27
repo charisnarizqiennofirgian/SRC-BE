@@ -129,12 +129,15 @@ class AssemblingProductionController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $prefix = $data['process_type'] === 'sub_assembling' ? 'SUB' : 'RKT';
-            $runningNumber  = AssemblingProduction::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->where('process_type', $data['process_type'])
-                ->count() + 1;
-            $documentNumber = "{$prefix}-" . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
+            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $docPrefix = ($data['process_type'] === 'sub_assembling' ? 'SUB' : 'RKT') . '-' . now()->format('Ym') . '-';
+            $last = AssemblingProduction::where('process_type', $data['process_type'])
+                ->where('document_number', 'like', $docPrefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($docPrefix))) + 1 : 1;
+            $documentNumber = $docPrefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             // === SIMPAN HEADER ===
             $assembling = AssemblingProduction::create([

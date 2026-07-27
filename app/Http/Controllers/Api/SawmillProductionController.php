@@ -108,12 +108,15 @@ class SawmillProductionController extends Controller
 
         $production = DB::transaction(function () use ($data) {
             $isLogJeblosan  = $data['process_type'] === 'log_jeblosan';
-            $prefix         = $isLogJeblosan ? 'SW' : 'RST';
-            $runningNumber  = SawmillProduction::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->where('process_type', $data['process_type'])
-                ->count() + 1;
-            $documentNumber = $prefix . '-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
+            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $docPrefix = ($isLogJeblosan ? 'SW' : 'RST') . '-' . now()->format('Ym') . '-';
+            $last = SawmillProduction::where('process_type', $data['process_type'])
+                ->where('document_number', 'like', $docPrefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($docPrefix))) + 1 : 1;
+            $documentNumber = $docPrefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             $productionOrder = !empty($data['ref_po_id'])
                 ? ProductionOrder::find($data['ref_po_id'])

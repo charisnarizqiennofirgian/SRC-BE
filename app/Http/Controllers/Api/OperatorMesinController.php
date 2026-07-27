@@ -153,13 +153,16 @@ class OperatorMesinController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // Pakai created_at (bukan kolom `date`, yang bisa di-backdate user) supaya konsisten
-            // dengan prefix now()->format('Ym') di bawah — kalau pakai `date`, record dengan
-            // tanggal produksi di bulan lain tidak ikut kehitung padahal prefix-nya sama.
-            $runningNumber  = MesinProduction::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->count() + 1;
-            $documentNumber = 'MSN-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris) — COUNT meleset kalau ada
+            // baris di bulan ini yang sudah dihapus (mis. revert Moulding/Mesin), karena total baris
+            // berkurang padahal nomor tertinggi yang pernah dipakai tetap sama, jadi COUNT+1 bisa
+            // menghasilkan nomor yang sudah pernah dipakai sebelumnya.
+            $prefix = 'MSN-' . now()->format('Ym') . '-';
+            $last   = MesinProduction::where('document_number', 'like', $prefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             $mesinProduction = MesinProduction::create([
                 'document_number'            => $documentNumber,

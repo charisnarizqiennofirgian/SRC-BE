@@ -85,11 +85,15 @@ class AnyamController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // Generate nomor dokumen
-            $runningNumber  = AnyamProduction::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->count() + 1;
-            $documentNumber = 'ANYAM-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            // Generate nomor dokumen — pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris),
+            // supaya tidak bentrok kalau ada baris bulan ini yang sudah dihapus (lihat insiden serupa
+            // di OperatorMesinController).
+            $prefix = 'ANYAM-' . now()->format('Ym') . '-';
+            $last   = AnyamProduction::where('document_number', 'like', $prefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             // Simpan header
             $anyam = AnyamProduction::create([

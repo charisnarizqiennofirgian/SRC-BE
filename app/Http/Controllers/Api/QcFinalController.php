@@ -125,10 +125,14 @@ class QcFinalController extends Controller
             $sourceName      = $sourceWarehouse?->name ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = QcFinalProduction::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->count() + 1;
-            $documentNumber = 'QCF-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
+            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $prefix = 'QCF-' . now()->format('Ym') . '-';
+            $last   = QcFinalProduction::where('document_number', 'like', $prefix . '%')
+                ->orderByDesc('document_number')
+                ->value('document_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             // === SIMPAN HEADER ===
             $qcFinal = QcFinalProduction::create([

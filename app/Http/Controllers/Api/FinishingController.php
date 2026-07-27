@@ -66,12 +66,16 @@ class FinishingController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
             $sourceName      = $sourceWarehouse?->name ?? '-';
 
-            $runningNumber  = InventoryLog::where('transaction_type', 'FINISHING')
-                ->whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
+            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $prefix = 'FNS-' . now()->format('Ym') . '-';
+            $last   = InventoryLog::where('transaction_type', 'FINISHING')
                 ->where('direction', 'OUT')
-                ->count() + 1;
-            $documentNumber = 'FNS-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+                ->where('reference_number', 'like', $prefix . '%')
+                ->orderByDesc('reference_number')
+                ->value('reference_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             foreach ($data['items'] as $index => $item) {
                 $itemId   = $item['item_id'];

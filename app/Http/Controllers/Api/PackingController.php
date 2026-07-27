@@ -121,12 +121,16 @@ class PackingController extends Controller
             $poNumber        = $productionOrder?->po_number ?? '-';
 
             // === NOMOR DOKUMEN ===
-            $runningNumber  = InventoryLog::where('transaction_type', 'PACKING')
-                ->whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
+            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
+            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $prefix = 'PKG-' . now()->format('Ym') . '-';
+            $last   = InventoryLog::where('transaction_type', 'PACKING')
                 ->where('direction', 'IN')
-                ->count() + 1;
-            $documentNumber = 'PKG-' . now()->format('Ym') . '-' . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+                ->where('reference_number', 'like', $prefix . '%')
+                ->orderByDesc('reference_number')
+                ->value('reference_number');
+            $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+            $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
             foreach ($data['items'] as $item) {
                 $itemId   = $item['item_id'];
