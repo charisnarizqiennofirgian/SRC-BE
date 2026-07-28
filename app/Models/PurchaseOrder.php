@@ -22,6 +22,8 @@ class PurchaseOrder extends Model
         'delivery_date',
         'ppn_percentage',
         'ppn_amount',
+        'other_cost',
+        'other_cost_description',
         'grand_total',
         'notes',
         'source_type',
@@ -34,6 +36,7 @@ class PurchaseOrder extends Model
         'exchange_rate' => 'decimal:4',
         'subtotal'      => 'decimal:2',
         'ppn_amount'    => 'decimal:2',
+        'other_cost'    => 'decimal:2',
         'grand_total'   => 'decimal:2',
     ];
 

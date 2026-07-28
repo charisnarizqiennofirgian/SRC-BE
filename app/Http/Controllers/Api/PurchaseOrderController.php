@@ -52,7 +52,8 @@ class PurchaseOrderController extends Controller
 
             $currency     = $validatedData['currency'] ?? 'IDR';
             $exchangeRate = (float) ($validatedData['exchange_rate'] ?? 1);
-            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate);
+            $otherCost    = (float) ($validatedData['other_cost'] ?? 0);
+            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate, $otherCost);
 
             $order = PurchaseOrder::create([
                 'po_number'       => $this->generatePoNumber(),
@@ -69,6 +70,8 @@ class PurchaseOrderController extends Controller
                 'subtotal'        => $totals['subtotal'],
                 'ppn_percentage'  => $totals['ppn_percentage'],
                 'ppn_amount'      => $totals['ppn_amount'],
+                'other_cost'      => $totals['other_cost'],
+                'other_cost_description' => $validatedData['other_cost_description'] ?? null,
                 'grand_total'     => $totals['grand_total'],
             ]);
 
@@ -131,7 +134,8 @@ class PurchaseOrderController extends Controller
 
             $currency     = $validatedData['currency'] ?? 'IDR';
             $exchangeRate = (float) ($validatedData['exchange_rate'] ?? 1);
-            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate);
+            $otherCost    = (float) ($validatedData['other_cost'] ?? 0);
+            $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate, $otherCost);
 
             $purchaseOrder->update([
                 'supplier_id'   => $validatedData['supplier_id'],
@@ -144,6 +148,8 @@ class PurchaseOrderController extends Controller
                 'subtotal'      => $totals['subtotal'],
                 'ppn_percentage'=> $totals['ppn_percentage'],
                 'ppn_amount'    => $totals['ppn_amount'],
+                'other_cost'    => $totals['other_cost'],
+                'other_cost_description' => $validatedData['other_cost_description'] ?? null,
                 'grand_total'   => $totals['grand_total'],
             ]);
 
@@ -274,6 +280,8 @@ class PurchaseOrderController extends Controller
             'ppn_percentage'            => 'required|numeric|in:0,11,11.12,12',
             'currency'                  => 'nullable|string|in:IDR,USD,EUR',
             'exchange_rate'             => 'nullable|numeric|min:1',
+            'other_cost'                => 'nullable|numeric|min:0',
+            'other_cost_description'    => 'nullable|string|max:255',
             'details'                   => 'required|array|min:1',
             'details.*.item_id'         => 'required|exists:items,id',
             'details.*.quantity'        => 'required|numeric|min:0.01',
@@ -285,7 +293,8 @@ class PurchaseOrderController extends Controller
     }
 
     // price per detail adalah harga dalam currency PO. subtotal selalu IDR.
-    private function calculateTotals(array $details, float $ppnPercentage, float $exchangeRate = 1): array
+    // other_cost (biaya lain-lain, mis. ongkir) selalu IDR — ditambahkan setelah PPN.
+    private function calculateTotals(array $details, float $ppnPercentage, float $exchangeRate = 1, float $otherCost = 0): array
     {
         $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price'] * $exchangeRate);
 
@@ -293,12 +302,13 @@ class PurchaseOrderController extends Controller
         $actualPpnRate = ($ppnPercentage == 11.12) ? 11 : $ppnPercentage;
 
         $ppnAmount  = $subtotal * ($actualPpnRate / 100);
-        $grandTotal = $subtotal + $ppnAmount;
+        $grandTotal = $subtotal + $ppnAmount + $otherCost;
 
         return [
             'subtotal'       => $subtotal,
             'ppn_percentage' => $ppnPercentage,
             'ppn_amount'     => $ppnAmount,
+            'other_cost'     => $otherCost,
             'grand_total'    => $grandTotal,
         ];
     }
