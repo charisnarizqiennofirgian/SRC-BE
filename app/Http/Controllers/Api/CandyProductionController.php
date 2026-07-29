@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Inventory;
+use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\InventoryLog;
 use App\Models\KdProduction;
@@ -34,7 +35,6 @@ class CandyProductionController extends Controller
             'items'                 => ['required', 'array', 'min:1'],
             'items.*.warehouse_id'  => ['required', 'integer', 'exists:warehouses,id'],
             'items.*.item_id'       => ['required', 'integer', 'exists:items,id'],
-            'items.*.target_item_id'=> ['required', 'integer', 'exists:items,id'],
             'items.*.qty'           => ['required', 'integer', 'min:1'],
         ]);
 
@@ -74,16 +74,17 @@ class CandyProductionController extends Controller
             ]);
 
             // === PROSES SETIAP ITEM ===
+            // KD cuma memindahkan RST dari Gudang Sanwil (basah) ke Gudang KD (kering) — item-nya
+            // SAMA PERSIS, gak ada transformasi ke item lain (pola sama seperti Mesin S4S->MESIN).
             foreach ($data['items'] as $index => $itemData) {
                 $sourceWarehouseId = $itemData['warehouse_id'];
-                $sourceItemId      = $itemData['item_id'];
-                $targetItemId      = $itemData['target_item_id'];
-                $qty               = $itemData['qty'];
+                $itemId            = $itemData['item_id'];
+                $qty                = $itemData['qty'];
 
-                Log::info("Item #{$index}: source={$sourceItemId}, target={$targetItemId}, qty={$qty}");
+                Log::info("Item #{$index}: item={$itemId}, qty={$qty}");
 
                 // Cek stok di gudang asal
-                $sourceInventory = Inventory::where('item_id', $sourceItemId)
+                $sourceInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $sourceWarehouseId)
                     ->lockForUpdate()
                     ->first();
@@ -91,7 +92,7 @@ class CandyProductionController extends Controller
                 $availableQty = $sourceInventory?->qty_pcs ?? 0;
 
                 if ($availableQty < $qty) {
-                    $itemName = \App\Models\Item::find($sourceItemId)?->name ?? "ID {$sourceItemId}";
+                    $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
                     throw ValidationException::withMessages([
                         'items' => ["Stok '{$itemName}' tidak mencukupi. Tersedia: {$availableQty} pcs, dibutuhkan: {$qty} pcs."],
                     ]);
@@ -103,7 +104,7 @@ class CandyProductionController extends Controller
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
-                    'item_id'          => $sourceItemId,
+                    'item_id'          => $itemId,
                     'warehouse_id'     => $sourceWarehouseId,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
@@ -116,8 +117,8 @@ class CandyProductionController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Tambah stok di Gudang KD (IN)
-                $targetInventory = Inventory::where('item_id', $targetItemId)
+                // Tambah stok di Gudang KD (IN) — item yang sama
+                $targetInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $kdWarehouse->id)
                     ->lockForUpdate()
                     ->first();
@@ -126,7 +127,7 @@ class CandyProductionController extends Controller
                     $targetInventory->increment('qty_pcs', $qty);
                 } else {
                     Inventory::create([
-                        'item_id'      => $targetItemId,
+                        'item_id'      => $itemId,
                         'warehouse_id' => $kdWarehouse->id,
                         'qty_pcs'      => $qty,
                     ]);
@@ -135,7 +136,7 @@ class CandyProductionController extends Controller
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
-                    'item_id'          => $targetItemId,
+                    'item_id'          => $itemId,
                     'warehouse_id'     => $kdWarehouse->id,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
