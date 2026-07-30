@@ -105,29 +105,31 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // --- PENGATURAN ---
-    // Roles Management
-    Route::prefix('roles')->group(function () {
-        Route::get('/', [RoleController::class, 'index']);
-        Route::post('/', [RoleController::class, 'store']);
-        Route::get('/{id}', [RoleController::class, 'show']);
-        Route::put('/{id}', [RoleController::class, 'update']);
-        Route::delete('/{id}', [RoleController::class, 'destroy']);
+    // Roles & Permissions Management (permission: manage-roles)
+    Route::middleware('permission:manage-roles')->group(function () {
+        Route::prefix('roles')->group(function () {
+            Route::get('/', [RoleController::class, 'index']);
+            Route::post('/', [RoleController::class, 'store']);
+            Route::get('/{id}', [RoleController::class, 'show']);
+            Route::put('/{id}', [RoleController::class, 'update']);
+            Route::delete('/{id}', [RoleController::class, 'destroy']);
+        });
+
+        // Permissions Management
+        Route::prefix('permissions')->group(function () {
+            Route::get('/', [PermissionController::class, 'index']);
+            Route::post('/', [PermissionController::class, 'store']);
+            Route::get('/{id}', [PermissionController::class, 'show']);
+            Route::put('/{id}', [PermissionController::class, 'update']);
+            Route::delete('/{id}', [PermissionController::class, 'destroy']);
+        });
+
+        // Get all permissions for role form
+        Route::get('/roles-permissions', [RoleController::class, 'getPermissions']);
     });
 
-    // Permissions Management
-    Route::prefix('permissions')->group(function () {
-        Route::get('/', [PermissionController::class, 'index']);
-        Route::post('/', [PermissionController::class, 'store']);
-        Route::get('/{id}', [PermissionController::class, 'show']);
-        Route::put('/{id}', [PermissionController::class, 'update']);
-        Route::delete('/{id}', [PermissionController::class, 'destroy']);
-    });
-
-    // Get all permissions for role form
-    Route::get('/roles-permissions', [RoleController::class, 'getPermissions']);
-
-    // Users Management
-    Route::prefix('users')->group(function () {
+    // Users Management (permission: manage-users)
+    Route::middleware('permission:manage-users')->prefix('users')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::post('/', [UserController::class, 'store']);
         Route::get('/{id}', [UserController::class, 'show']);
@@ -418,18 +420,26 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/ap-aging', [ApAgingController::class, 'index']);
 
     // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
+    // Baca (dropdown akun) dipakai lintas modul (Pembelian/Penjualan/Keuangan) - tetap terbuka utk semua user login.
+    // Cuma aksi kelola master data COA yang dikunci ke permission master-coa.
     Route::prefix('coa')->group(function () {
         Route::get('/all', [ChartOfAccountController::class, 'all']);
         Route::get('/', [ChartOfAccountController::class, 'index']);
-        Route::post('/', [ChartOfAccountController::class, 'store']);
         Route::get('/types', [ChartOfAccountController::class, 'getTypes']);
         Route::get('/by-type/{type}', [ChartOfAccountController::class, 'getByType']);
-        Route::get('/template', [ChartOfAccountController::class, 'downloadTemplate']);
-        Route::post('/import', [ChartOfAccountController::class, 'import']);
         Route::get('/export', [ChartOfAccountController::class, 'export']);
+
+        Route::middleware('permission:master-coa')->group(function () {
+            Route::post('/', [ChartOfAccountController::class, 'store']);
+            Route::get('/template', [ChartOfAccountController::class, 'downloadTemplate']);
+            Route::post('/import', [ChartOfAccountController::class, 'import']);
+            Route::put('/{id}', [ChartOfAccountController::class, 'update']);
+            Route::delete('/{id}', [ChartOfAccountController::class, 'destroy']);
+        });
+
+        // '/{id}' harus terdaftar PALING TERAKHIR di antara route GET prefix ini,
+        // supaya tidak menelan path literal seperti '/template' di atas.
         Route::get('/{id}', [ChartOfAccountController::class, 'show']);
-        Route::put('/{id}', [ChartOfAccountController::class, 'update']);
-        Route::delete('/{id}', [ChartOfAccountController::class, 'destroy']);
     });
 
     // --- METODE PEMBAYARAN ---
@@ -444,14 +454,16 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // --- JURNAL UMUM ---
-    // Opening Balance
-    Route::get('/journal-entries/opening-balance/check',    [JournalEntryController::class, 'checkOpeningBalance']);
-    Route::get('/journal-entries/opening-balance/template', [JournalEntryController::class, 'downloadTemplate']);
-    Route::post('/journal-entries/opening-balance',         [JournalEntryController::class, 'storeOpeningBalance']);
-    Route::delete('/journal-entries/opening-balance',       [JournalEntryController::class, 'destroyOpeningBalance']);
-    Route::post('/journal-entries/opening-balance/import',  [JournalEntryController::class, 'importOpeningBalance']);
+    // Opening Balance (permission: keuangan-opening-balance)
+    Route::middleware('permission:keuangan-opening-balance')->group(function () {
+        Route::get('/journal-entries/opening-balance/check',    [JournalEntryController::class, 'checkOpeningBalance']);
+        Route::get('/journal-entries/opening-balance/template', [JournalEntryController::class, 'downloadTemplate']);
+        Route::post('/journal-entries/opening-balance',         [JournalEntryController::class, 'storeOpeningBalance']);
+        Route::delete('/journal-entries/opening-balance',       [JournalEntryController::class, 'destroyOpeningBalance']);
+        Route::post('/journal-entries/opening-balance/import',  [JournalEntryController::class, 'importOpeningBalance']);
+    });
 
-    Route::prefix('journal-entries')->group(function () {
+    Route::middleware('permission:keuangan-jurnal-umum')->prefix('journal-entries')->group(function () {
         Route::get('/', [JournalEntryController::class, 'index']);
         Route::post('/manual', [JournalEntryController::class, 'storeManual']);
         Route::get('/{id}', [JournalEntryController::class, 'show']);
