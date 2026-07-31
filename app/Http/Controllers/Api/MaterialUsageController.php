@@ -157,29 +157,40 @@ class MaterialUsageController extends Controller
 
             $item->decrement('stock', $request->qty);
 
-            $warehouseId = 1;
+            try {
+                $deductedByWarehouse = $this->decrementInventoryFifo($item->id, $request->qty);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
 
-            $log = InventoryLog::create([
-                'date' => $request->date ?? now()->toDateString(),
-                'time' => now()->toTimeString(),
-                'item_id' => $item->id,
-                'warehouse_id' => $warehouseId,
-                'qty' => $request->qty,
-                'direction' => 'OUT',
-                'transaction_type' => InventoryLog::TYPE_USAGE,
-                'division' => $request->division,
-                'notes' => $request->notes ?? "Dipakai divisi {$request->division}",
-                'user_id' => Auth::id(),
-            ]);
+            $logs = [];
+            foreach ($deductedByWarehouse as $warehouseId => $qtyDeducted) {
+                $logs[] = InventoryLog::create([
+                    'date' => $request->date ?? now()->toDateString(),
+                    'time' => now()->toTimeString(),
+                    'item_id' => $item->id,
+                    'warehouse_id' => $warehouseId,
+                    'qty' => $qtyDeducted,
+                    'direction' => 'OUT',
+                    'transaction_type' => InventoryLog::TYPE_USAGE,
+                    'division' => $request->division,
+                    'notes' => $request->notes ?? "Dipakai divisi {$request->division}",
+                    'user_id' => Auth::id(),
+                ]);
+            }
 
             DB::commit();
 
-            $log->load(['item:id,name,code', 'user:id,name']);
+            $primaryLog = $logs[0]->load(['item:id,name,code', 'user:id,name']);
 
             return response()->json([
                 'success' => true,
                 'message' => "Berhasil mencatat pemakaian {$request->qty} {$item->unit->name} {$item->name} untuk divisi {$request->division}.",
-                'data' => $log
+                'data' => $primaryLog
             ], 201);
 
         } catch (\Exception $e) {
@@ -233,16 +244,27 @@ class MaterialUsageController extends Controller
         }
     }
 
-    private function decrementInventory(int $itemId, int $warehouseId, float $qty): void
+    /**
+     * Kurangi qty_pcs FIFO lintas SEMUA gudang tempat item ini benar-benar
+     * punya stok (bukan gudang divisi pemakai - divisi cuma label pelapor,
+     * bukan lokasi fisik barang). Return [warehouse_id => qty_deducted]
+     * supaya InventoryLog dicatat ke gudang yang benar-benar berkurang.
+     */
+    private function decrementInventoryFifo(int $itemId, float $qty): array
     {
         $inventories = Inventory::where('item_id', $itemId)
-            ->where('warehouse_id', $warehouseId)
             ->where('qty_pcs', '>', 0)
             ->orderBy('created_at', 'asc')
             ->lockForUpdate()
             ->get();
 
+        $totalAvailable = $inventories->sum('qty_pcs');
+        if ($totalAvailable < $qty) {
+            throw new \Exception("Stok fisik per-gudang tidak cukup (tersedia: {$totalAvailable}, diminta: {$qty}).");
+        }
+
         $remaining = $qty;
+        $deductedByWarehouse = [];
 
         /** @var Inventory $inventory */
         foreach ($inventories as $inventory) {
@@ -251,6 +273,10 @@ class MaterialUsageController extends Controller
             $toDeduct = min($remaining, $inventory->qty_pcs);
             $inventory->decrement('qty_pcs', $toDeduct);
             $remaining -= $toDeduct;
+
+            $deductedByWarehouse[$inventory->warehouse_id] = ($deductedByWarehouse[$inventory->warehouse_id] ?? 0) + $toDeduct;
         }
+
+        return $deductedByWarehouse;
     }
 }
