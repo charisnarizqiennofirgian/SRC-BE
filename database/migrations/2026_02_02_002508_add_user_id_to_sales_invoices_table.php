@@ -8,21 +8,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('sales_invoices', function (Blueprint $table) {
-            $table->unsignedBigInteger('user_id')->nullable()->after('buyer_id');
+        // Idempotent guard -- lihat catatan di add_qty_m3_to_inventories_table.php.
+        if (!Schema::hasColumn('sales_invoices', 'user_id')) {
+            Schema::table('sales_invoices', function (Blueprint $table) {
+                $table->unsignedBigInteger('user_id')->nullable()->after('buyer_id');
 
-            $table->foreign('user_id')
-                  ->references('id')
-                  ->on('users')
-                  ->onDelete('set null');
-        });
+                $table->foreign('user_id')
+                      ->references('id')
+                      ->on('users')
+                      ->onDelete('set null');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('sales_invoices', function (Blueprint $table) {
-            $table->dropForeign(['user_id']);
-            $table->dropColumn('user_id');
-        });
+        // Tidak drop di sini -- lihat alasan sama di add_qty_m3_to_inventories_table.php.
     }
 };

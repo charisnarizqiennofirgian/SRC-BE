@@ -8,15 +8,17 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('sales_invoices', function (Blueprint $table) {
-            $table->string('status')->default('DRAFT')->after('notes');
-        });
+        // Idempotent guard -- lihat catatan di add_qty_m3_to_inventories_table.php,
+        // pola korupsi migration yang sama (kolom sudah ada duluan di tempat lain).
+        if (!Schema::hasColumn('sales_invoices', 'status')) {
+            Schema::table('sales_invoices', function (Blueprint $table) {
+                $table->string('status')->default('DRAFT')->after('notes');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('sales_invoices', function (Blueprint $table) {
-            $table->dropColumn('status');
-        });
+        // Tidak drop di sini -- lihat alasan sama di add_qty_m3_to_inventories_table.php.
     }
 };
