@@ -222,6 +222,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::middleware('permission:pembelian-operasional|pembelian-karton|pembelian-kayu')->group(function () {
         Route::get('purchase-orders/laporan-harga', [PurchaseOrderController::class, 'laporanHarga']);
         Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show']);
+        Route::put('purchase-orders/{purchaseOrder}/update-price', [PurchaseOrderController::class, 'updatePrice']);
+        Route::put('purchase-orders/{purchaseOrder}/update-quantity', [PurchaseOrderController::class, 'updateQuantity']);
         Route::apiResource('purchase-orders', PurchaseOrderController::class)->except(['show']);
 
         Route::get('goods-receipts/unbilled', [GoodsReceiptController::class, 'getUnbilledReceipts']);

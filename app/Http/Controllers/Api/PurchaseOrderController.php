@@ -170,6 +170,169 @@ class PurchaseOrderController extends Controller
         }
     }
 
+    // Edit terbatas: cuma harga per item, khusus PO Operasional yang sudah "Diterima Sebagian".
+    // Tidak pakai pola hapus-buat-ulang seperti update() biasa -- baris detail di-update di tempat
+    // (id tetap sama) supaya link ke goods_receipt_details.purchase_order_detail_id tidak putus.
+    public function updatePrice(Request $request, PurchaseOrder $purchaseOrder)
+    {
+        if ($purchaseOrder->type !== 'operasional') {
+            return response()->json(['success' => false, 'message' => 'Fitur edit harga ini hanya untuk PO Operasional.'], 400);
+        }
+
+        if ($purchaseOrder->status !== 'Diterima Sebagian') {
+            return response()->json(['success' => false, 'message' => 'Fitur ini hanya untuk PO dengan status Diterima Sebagian.'], 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'details'          => 'required|array|min:1',
+            'details.*.id'     => 'required|integer|exists:purchase_order_details,id',
+            'details.*.price'  => 'required|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $lockedItems = [];
+
+            foreach ($validator->validated()['details'] as $row) {
+                $detail = $purchaseOrder->details()->find($row['id']);
+                if (!$detail) {
+                    continue;
+                }
+
+                // Sudah pernah difakturkan (via goods_receipt_details -> purchase_bill_details)?
+                // Kalau iya, harga item ini dikunci -- jangan diubah supaya tidak membingungkan
+                // dibanding faktur yang sudah terbit (faktur sudah punya harga snapshot sendiri).
+                $alreadyBilled = DB::table('goods_receipt_details')
+                    ->where('purchase_order_detail_id', $detail->id)
+                    ->whereExists(function ($q) {
+                        $q->select('id')
+                            ->from('purchase_bill_details')
+                            ->whereColumn('purchase_bill_details.goods_receipt_detail_id', 'goods_receipt_details.id');
+                    })
+                    ->exists();
+
+                if ($alreadyBilled) {
+                    $lockedItems[] = [
+                        'item_id'   => $detail->item_id,
+                        'item_name' => optional($detail->item)->name,
+                    ];
+                    continue;
+                }
+
+                $newPrice = (float) $row['price'];
+                $detail->update([
+                    'price'    => $newPrice,
+                    'subtotal' => $detail->quantity_ordered * $newPrice * $purchaseOrder->exchange_rate,
+                ]);
+            }
+
+            $freshDetails = $purchaseOrder->details()->get(['quantity_ordered', 'price'])
+                ->map(fn ($d) => ['quantity' => $d->quantity_ordered, 'price' => $d->price])
+                ->all();
+
+            $totals = $this->calculateTotals(
+                $freshDetails,
+                (float) $purchaseOrder->ppn_percentage,
+                (float) $purchaseOrder->exchange_rate,
+                (float) $purchaseOrder->other_cost
+            );
+
+            $purchaseOrder->update([
+                'subtotal'    => $totals['subtotal'],
+                'ppn_amount'  => $totals['ppn_amount'],
+                'grand_total' => $totals['grand_total'],
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success'      => true,
+                'message'      => 'Harga PO berhasil diupdate.',
+                'data'         => $purchaseOrder->load('supplier', 'details.item'),
+                'locked_items' => $lockedItems,
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan: ' . $e->getMessage()], 500);
+        }
+    }
+
+    // Edit terbatas: cuma jumlah pesanan per item, khusus PO Kayu yang sudah "Diterima Sebagian".
+    // Alasan: kayu yang datang di lapangan sering beda dari qty yang dipesan (over-receive sudah
+    // didukung penuh di titik penerimaan, tanpa batas) -- fitur ini cuma buat koreksi ANGKA PESANAN
+    // di dokumen PO-nya sendiri, supaya sesuai realita. quantity_ordered tidak dipakai sama sekali
+    // di alur Faktur Pembelian (faktur pakai quantity_received dari goods_receipt_details), jadi
+    // tidak ada risiko ke faktur yang sudah ada -- makanya tidak perlu logic "item terkunci" seperti
+    // updatePrice() di atas.
+    public function updateQuantity(Request $request, PurchaseOrder $purchaseOrder)
+    {
+        if ($purchaseOrder->type !== 'kayu') {
+            return response()->json(['success' => false, 'message' => 'Fitur edit jumlah ini hanya untuk PO Kayu.'], 400);
+        }
+
+        if ($purchaseOrder->status !== 'Diterima Sebagian') {
+            return response()->json(['success' => false, 'message' => 'Fitur ini hanya untuk PO dengan status Diterima Sebagian.'], 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'details'            => 'required|array|min:1',
+            'details.*.id'       => 'required|integer|exists:purchase_order_details,id',
+            'details.*.quantity' => 'required|numeric|min:0.01',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            foreach ($validator->validated()['details'] as $row) {
+                $detail = $purchaseOrder->details()->find($row['id']);
+                if (!$detail) {
+                    continue;
+                }
+
+                $newQuantity = (float) $row['quantity'];
+                $detail->update([
+                    'quantity_ordered' => $newQuantity,
+                    'subtotal'         => $newQuantity * $detail->price * $purchaseOrder->exchange_rate,
+                ]);
+            }
+
+            $freshDetails = $purchaseOrder->details()->get(['quantity_ordered', 'price'])
+                ->map(fn ($d) => ['quantity' => $d->quantity_ordered, 'price' => $d->price])
+                ->all();
+
+            $totals = $this->calculateTotals(
+                $freshDetails,
+                (float) $purchaseOrder->ppn_percentage,
+                (float) $purchaseOrder->exchange_rate,
+                (float) $purchaseOrder->other_cost
+            );
+
+            $purchaseOrder->update([
+                'subtotal'    => $totals['subtotal'],
+                'ppn_amount'  => $totals['ppn_amount'],
+                'grand_total' => $totals['grand_total'],
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Jumlah pesanan PO berhasil diupdate.',
+                'data'    => $purchaseOrder->load('supplier', 'details.item'),
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => 'Terjadi kesalahan: ' . $e->getMessage()], 500);
+        }
+    }
+
     public function destroy(PurchaseOrder $purchaseOrder)
     {
         if ($purchaseOrder->status !== 'Open') {
