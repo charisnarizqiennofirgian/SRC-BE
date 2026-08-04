@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Item; // 
-use App\Models\Category; // 
+use App\Models\Item; //
+use App\Models\Category; //
 use Illuminate\Http\Request;
 use App\Imports\ProductsImport;
 use Illuminate\Support\Facades\Validator;
@@ -103,8 +103,7 @@ class ProductController extends Controller
 
     public function import(Request $request)
     {
-        // Fungsi ini juga perlu diubah agar mengimpor ke tabel 'items'
-        // Kita perlu mengubah logika di dalam file ProductsImport.php
+
         $request->validate([
             'file' => 'required|extensions:xlsx,xls,csv'
         ]);
