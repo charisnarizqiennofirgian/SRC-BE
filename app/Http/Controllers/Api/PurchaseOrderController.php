@@ -170,9 +170,7 @@ class PurchaseOrderController extends Controller
         }
     }
 
-    // Edit terbatas: cuma harga per item, khusus PO Operasional yang sudah "Diterima Sebagian".
-    // Tidak pakai pola hapus-buat-ulang seperti update() biasa -- baris detail di-update di tempat
-    // (id tetap sama) supaya link ke goods_receipt_details.purchase_order_detail_id tidak putus.
+
     public function updatePrice(Request $request, PurchaseOrder $purchaseOrder)
     {
         if ($purchaseOrder->type !== 'operasional') {
@@ -203,9 +201,7 @@ class PurchaseOrderController extends Controller
                     continue;
                 }
 
-                // Sudah pernah difakturkan (via goods_receipt_details -> purchase_bill_details)?
-                // Kalau iya, harga item ini dikunci -- jangan diubah supaya tidak membingungkan
-                // dibanding faktur yang sudah terbit (faktur sudah punya harga snapshot sendiri).
+
                 $alreadyBilled = DB::table('goods_receipt_details')
                     ->where('purchase_order_detail_id', $detail->id)
                     ->whereExists(function ($q) {
@@ -261,13 +257,7 @@ class PurchaseOrderController extends Controller
         }
     }
 
-    // Edit terbatas: cuma jumlah pesanan per item, khusus PO Kayu yang sudah "Diterima Sebagian".
-    // Alasan: kayu yang datang di lapangan sering beda dari qty yang dipesan (over-receive sudah
-    // didukung penuh di titik penerimaan, tanpa batas) -- fitur ini cuma buat koreksi ANGKA PESANAN
-    // di dokumen PO-nya sendiri, supaya sesuai realita. quantity_ordered tidak dipakai sama sekali
-    // di alur Faktur Pembelian (faktur pakai quantity_received dari goods_receipt_details), jadi
-    // tidak ada risiko ke faktur yang sudah ada -- makanya tidak perlu logic "item terkunci" seperti
-    // updatePrice() di atas.
+
     public function updateQuantity(Request $request, PurchaseOrder $purchaseOrder)
     {
         if ($purchaseOrder->type !== 'kayu') {
@@ -454,9 +444,6 @@ class PurchaseOrderController extends Controller
             'details.*.delivery_date'   => 'nullable|date',
         ]);
     }
-
-    // price per detail adalah harga dalam currency PO. subtotal selalu IDR.
-    // other_cost (biaya lain-lain, mis. ongkir) selalu IDR — ditambahkan setelah PPN.
     private function calculateTotals(array $details, float $ppnPercentage, float $exchangeRate = 1, float $otherCost = 0): array
     {
         $subtotal = collect($details)->sum(fn($item) => $item['quantity'] * $item['price'] * $exchangeRate);
