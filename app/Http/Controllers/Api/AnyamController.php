@@ -33,11 +33,22 @@ class AnyamController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
+    // Sumber stok Anyam: Assembling, Sanding, dan Finishing sekaligus (bisa dipersempit lewat ?warehouse_id=)
+    const SOURCE_WAREHOUSE_CODES = ['ASSEMBLING', 'SANDING', 'FINISHING'];
+
     public function sourceInventories(Request $request)
     {
-        $request->validate(['warehouse_id' => 'required|integer|exists:warehouses,id']);
+        if ($request->filled('warehouse_id')) {
+            $warehouses = Warehouse::where('id', $request->warehouse_id)->get();
+        } else {
+            $warehouses = Warehouse::whereIn('code', self::SOURCE_WAREHOUSE_CODES)->get();
+        }
 
-        $inventories = Inventory::where('warehouse_id', $request->warehouse_id)
+        if ($warehouses->isEmpty()) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $inventories = Inventory::whereIn('warehouse_id', $warehouses->pluck('id'))
             ->where('qty_pcs', '>', 0)
             ->with(['item', 'warehouse'])
             ->get()
@@ -47,6 +58,7 @@ class AnyamController extends Controller
                 'item_code'      => $inv->item?->code ?? '-',
                 'item_name'      => $inv->item?->name ?? '-',
                 'warehouse_id'   => $inv->warehouse_id,
+                'warehouse_code' => $inv->warehouse?->code ?? '-',
                 'warehouse_name' => $inv->warehouse?->name ?? '-',
                 'qty_pcs'        => (float) $inv->qty_pcs,
             ]);
@@ -57,21 +69,33 @@ class AnyamController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'            => ['required', 'date'],
-            'ref_po_id'       => ['required', 'integer', 'exists:production_orders,id'],
-            'notes'           => ['nullable', 'string'],
-            'items'           => ['required', 'array', 'min:1'],
-            'items.*.item_id' => ['required', 'integer', 'exists:items,id'],
-            'items.*.qty'     => ['required', 'numeric', 'min:1'],
+            'date'                  => ['required', 'date'],
+            'ref_po_id'             => ['required', 'integer', 'exists:production_orders,id'],
+            'notes'                 => ['nullable', 'string'],
+            'items'                 => ['required', 'array', 'min:1'],
+            'items.*.item_id'       => ['required', 'integer', 'exists:items,id'],
+            'items.*.warehouse_id'  => ['required', 'integer', 'exists:warehouses,id'],
+            'items.*.qty'           => ['required', 'numeric', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
-            // Gudang sumber: ASSEMBLING
-            $sourceWarehouse = Warehouse::where('code', 'ASSEMBLING')->first();
-            if (!$sourceWarehouse) {
+            // Gudang sumber yang diizinkan: Assembling, Sanding, Finishing (dipilih per baris item)
+            $allowedSourceWarehouses = Warehouse::whereIn('code', self::SOURCE_WAREHOUSE_CODES)
+                ->get()
+                ->keyBy('id');
+
+            if ($allowedSourceWarehouses->isEmpty()) {
                 throw ValidationException::withMessages([
-                    'warehouse' => ['Gudang Assembling tidak ditemukan.'],
+                    'warehouse' => ['Gudang sumber (Assembling/Sanding/Finishing) tidak ditemukan.'],
                 ]);
+            }
+
+            foreach ($data['items'] as $index => $itemData) {
+                if (!$allowedSourceWarehouses->has($itemData['warehouse_id'])) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.warehouse_id" => ['Gudang sumber tidak valid — harus Assembling, Sanding, atau Finishing.'],
+                    ]);
+                }
             }
 
             // Gudang tujuan AYAM
@@ -105,30 +129,31 @@ class AnyamController extends Controller
             ]);
 
             foreach ($data['items'] as $index => $itemData) {
-                $itemId  = $itemData['item_id'];
-                $qty     = $itemData['qty'];
+                $itemId      = $itemData['item_id'];
+                $qty         = $itemData['qty'];
+                $sourceWh    = $allowedSourceWarehouses->get($itemData['warehouse_id']);
 
-                // Cek stok di Assembling
+                // Cek stok di gudang sumber baris ini (Assembling/Sanding/Finishing)
                 $sourceInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $sourceWarehouse->id)
+                    ->where('warehouse_id', $sourceWh->id)
                     ->lockForUpdate()
                     ->first();
 
                 $available = $sourceInv?->qty_pcs ?? 0;
                 if ($available < $qty) {
                     throw ValidationException::withMessages([
-                        "items.{$index}.qty" => ["Stok tidak cukup di Gudang Assembling. Tersedia: {$available} pcs."],
+                        "items.{$index}.qty" => ["Stok tidak cukup di Gudang {$sourceWh->name}. Tersedia: {$available} pcs."],
                     ]);
                 }
 
-                // Kurangi stok Assembling
+                // Kurangi stok gudang sumber
                 $sourceInv->decrement('qty_pcs', $qty);
 
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
                     'item_id'          => $itemId,
-                    'warehouse_id'     => $sourceWarehouse->id,
+                    'warehouse_id'     => $sourceWh->id,
                     'qty'              => $qty,
                     'qty_m3'           => 0,
                     'direction'        => 'OUT',
@@ -136,7 +161,7 @@ class AnyamController extends Controller
                     'reference_type'   => 'AnyamProduction',
                     'reference_id'     => $anyam->id,
                     'reference_number' => $documentNumber,
-                    'notes'            => "Keluar untuk proses Anyam PO: {$poNumber}",
+                    'notes'            => "Keluar untuk proses Anyam PO: {$poNumber} (dari Gudang {$sourceWh->name})",
                     'user_id'          => Auth::id(),
                 ]);
 

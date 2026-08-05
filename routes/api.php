@@ -206,8 +206,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // --- PURCHASE REQUEST ---
     Route::middleware('permission:pembelian-purchase-request')->prefix('purchase-requests')->group(function () {
-        Route::get('/',           [PurchaseRequestController::class, 'index']);
-        Route::post('/',          [PurchaseRequestController::class, 'store']);
+        Route::get('/',                [PurchaseRequestController::class, 'index']);
+        Route::post('/',               [PurchaseRequestController::class, 'store']);
+        Route::get('/list-for-rekap',  [PurchaseRequestController::class, 'listForRekap']);
+        Route::get('/export-rekap',    [PurchaseRequestController::class, 'exportRekap']);
         Route::get('/{id}',       [PurchaseRequestController::class, 'show']);
         Route::put('/{id}',       [PurchaseRequestController::class, 'update']);
         Route::delete('/{id}',    [PurchaseRequestController::class, 'destroy']);

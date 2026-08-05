@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exports\PurchaseRequestRekapExport;
 use App\Http\Controllers\Controller;
 use App\Models\PurchaseRequest;
 use App\Models\PurchaseRequestDetail;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Facades\Excel;
 
 class PurchaseRequestController extends Controller
 {
@@ -377,6 +379,35 @@ class PurchaseRequestController extends Controller
             'success' => true,
             'message' => "PR {$pr->pr_number} berhasil di-unpost." . ($po ? " PO {$po->po_number} telah dibatalkan." : ''),
         ]);
+    }
+
+    // GET /purchase-requests/list-for-rekap — daftar ringan (id + pr_number) untuk dropdown/autocomplete pilih rentang rekap
+    public function listForRekap()
+    {
+        $prs = PurchaseRequest::orderBy('pr_number')->get(['id', 'pr_number']);
+
+        return response()->json(['success' => true, 'data' => $prs]);
+    }
+
+    // GET /purchase-requests/export-rekap — rekap Excel (No. PR, Supplier, Item, QTY, Harga) untuk klien Pembelian
+    public function exportRekap(Request $request)
+    {
+        $request->validate([
+            'pr_start' => ['required', 'string', 'regex:/^PR-\d{6}-\d{3}$/'],
+            'pr_end'   => ['required', 'string', 'regex:/^PR-\d{6}-\d{3}$/'],
+        ]);
+
+        $prStart = $request->pr_start;
+        $prEnd   = $request->pr_end;
+
+        // Kalau user kebalik pilih (awal > akhir), tukar otomatis daripada menolak
+        if ($prStart > $prEnd) {
+            [$prStart, $prEnd] = [$prEnd, $prStart];
+        }
+
+        $filename = "Rekap_{$prStart}_{$prEnd}.xlsx";
+
+        return Excel::download(new PurchaseRequestRekapExport($prStart, $prEnd), $filename);
     }
 
     private function generatePrNumber(): string
