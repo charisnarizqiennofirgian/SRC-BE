@@ -142,7 +142,7 @@ class AnyamController extends Controller
                 $available = $sourceInv?->qty_pcs ?? 0;
                 if ($available < $qty) {
                     throw ValidationException::withMessages([
-                        "items.{$index}.qty" => ["Stok tidak cukup di Gudang {$sourceWh->name}. Tersedia: {$available} pcs."],
+                        "items.{$index}.qty" => ["Stok tidak cukup di {$sourceWh->name}. Tersedia: {$available} pcs."],
                     ]);
                 }
 
@@ -161,7 +161,7 @@ class AnyamController extends Controller
                     'reference_type'   => 'AnyamProduction',
                     'reference_id'     => $anyam->id,
                     'reference_number' => $documentNumber,
-                    'notes'            => "Keluar untuk proses Anyam PO: {$poNumber} (dari Gudang {$sourceWh->name})",
+                    'notes'            => "Keluar untuk proses Anyam PO: {$poNumber} (dari {$sourceWh->name})",
                     'user_id'          => Auth::id(),
                 ]);
 

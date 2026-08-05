@@ -21,6 +21,7 @@ class ProductionMonitoringController extends Controller
         'SUB_ASSEMBLING'  => 'assembling_productions',
         'RAKIT'           => 'assembling_productions',
         'QC_FINAL'        => 'qc_final_productions',
+        'ANYAM'           => 'anyam_productions',
     ];
 
     private function getSearchIds(string $txType, array $poIds): array
@@ -62,6 +63,7 @@ class ProductionMonitoringController extends Controller
         'sanding'    => ['SANDING'],
         'rustik'     => ['RUSTIK'],
         'finishing'  => ['FINISHING'],
+        'anyam'      => ['ANYAM'],
         'packing'    => ['PACKING'],
     ];
 
@@ -122,6 +124,10 @@ class ProductionMonitoringController extends Controller
                 $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
 
                 // Search IDs zona hilir, di-scope ke PO milik SO ini saja (bukan seluruh gudang)
+                // 'anyam' ikut lewat loop generik ini juga (reference_id-nya anyam_productions.id,
+                // sudah didaftarkan di $subTableMap) — item_id di InventoryLog Anyam sama persis
+                // dengan produk yang dipindah (bukan komponen mentah), jadi tidak butuh perhitungan
+                // khusus terpisah seperti Ruskomp/QC Final.
                 $hilirSearchIds = [];
                 foreach ($this->hilirStageTypes as $txTypes) {
                     foreach ($txTypes as $txType) {
@@ -443,9 +449,17 @@ class ProductionMonitoringController extends Controller
                     // antaranya sudah diproses lanjut di Mesin, kolom Moulding harusnya tinggal
                     // nampilkan 5 (yang masih "mengendap" di situ), bukan tetap 10. Urutan stage di
                     // sini HARUS sama dengan urutan kolom di tabel (Moulding→Mesin→Ruskomp→
-                    // Assembling→Sanding→Rustik→Finishing→QC Final→Packing) — lihat
+                    // Assembling→Sanding→Rustik→Finishing→Anyam→QC Final→Packing) — lihat
                     // applyPipelineRemaining() untuk detail perhitungan suffix-sum-nya. Reject &
                     // target/sisa/is_done TIDAK ikut diubah, tetap pakai angka kumulatif asli.
+                    //
+                    // Anyam ditaruh setelah Finishing: walau secara fisik bisa ambil sumber dari
+                    // Assembling/Sanding/Finishing (bukan cuma 1 titik tetap), suffix-sum di sini
+                    // memang sudah dari dulu berupa APROKSIMASI "ada progress di stage manapun yang
+                    // lebih hilir = stage2 sebelumnya dianggap terpakai" (bukan pelacakan per-unit
+                    // yang strict) — jadi konsisten dengan cara stage lain diperlakukan, Anyam ikut
+                    // pola yang sama: begitu ada progress Anyam, Assembling/Sanding/Finishing ikut
+                    // otomatis "berkurang" mengikuti suffix-sum-nya.
                     $pipelineRemaining = $this->applyPipelineRemaining([
                         'moulding'   => $qtyMoulding,
                         'mesin'      => $qtyMesin,
@@ -454,6 +468,7 @@ class ProductionMonitoringController extends Controller
                         'sanding'    => $qtyHilir['sanding'],
                         'rustik'     => $qtyHilir['rustik'],
                         'finishing'  => $qtyHilir['finishing'],
+                        'anyam'      => $qtyHilir['anyam'],
                         'qc_final'   => (float) $qtyQcFinal,
                         'packing'    => $qtyHilir['packing'],
                     ]);
@@ -485,6 +500,7 @@ class ProductionMonitoringController extends Controller
                         'qty_sanding'       => $pipelineRemaining['sanding'],
                         'qty_rustik'        => $pipelineRemaining['rustik'],
                         'qty_finishing'     => $pipelineRemaining['finishing'],
+                        'qty_anyam'         => $pipelineRemaining['anyam'],
                         'qty_qc_final'      => $pipelineRemaining['qc_final'],
                         'qty_packing'       => $pipelineRemaining['packing'],
                         'qty_reject'        => (float) $qtyReject,
@@ -809,6 +825,7 @@ class ProductionMonitoringController extends Controller
                 'RUSTIK_KOMPONEN' => 'Rustik Komponen',
                 'SUB_ASSEMBLING'  => 'Sub Assembling',
                 'RAKIT'           => 'Rakit',
+                'ANYAM'           => 'Anyam',
                 'SANDING'         => 'Sanding',
                 'RUSTIK'          => 'Rustik',
                 'FINISHING'       => 'Finishing',
@@ -920,6 +937,7 @@ class ProductionMonitoringController extends Controller
                 'RUSTIK_KOMPONEN' => 'Rustik Komponen',
                 'SUB_ASSEMBLING'  => 'Sub Assembling',
                 'RAKIT'           => 'Rakit',
+                'ANYAM'           => 'Anyam',
                 'SANDING'         => 'Sanding',
                 'RUSTIK'          => 'Rustik',
                 'FINISHING'       => 'Finishing',
