@@ -18,7 +18,7 @@ class MigrateItemsData extends Command
         $this->info('Memulai proses migrasi data ke tabel items...');
 
         DB::transaction(function () {
-            // 1. Migrasi data dari tabel Products
+
             $products = Product::all();
             foreach ($products as $product) {
                 Item::create([
@@ -32,13 +32,13 @@ class MigrateItemsData extends Command
             }
             $this->info(count($products) . ' data Produk Jadi berhasil dimigrasi.');
 
-            // 2. Migrasi data dari tabel Materials
+
             $materials = Material::all();
             foreach ($materials as $material) {
                 Item::create([
                     'name' => $material->name,
                     'code' => $material->code,
-                    'category_id' => $material->material_category_id, // Perhatikan nama kolom ini
+                    'category_id' => $material->material_category_id,
                     'unit_id' => $material->unit_id,
                     'stock' => $material->stock,
                     'description' => $material->description,

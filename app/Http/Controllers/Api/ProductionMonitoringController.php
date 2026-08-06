@@ -13,6 +13,7 @@ class ProductionMonitoringController extends Controller
 {
     // Sub-tabel map — dipakai di index, detail, dan exportExcel
     private array $subTableMap = [
+        'SAWMILL'         => 'sawmill_productions',
         'KD'              => 'kd_productions',
         'PEMBAHANAN'      => 'pembahanan_productions',
         'MOULDING'        => 'moulding_productions',
@@ -26,15 +27,14 @@ class ProductionMonitoringController extends Controller
 
     private function getSearchIds(string $txType, array $poIds): array
     {
-        $searchIds = $poIds;
-        if (isset($this->subTableMap[$txType]) && !empty($poIds)) {
-            $subIds = DB::table($this->subTableMap[$txType])
+        if (isset($this->subTableMap[$txType])) {
+            if (empty($poIds)) return [];
+            return DB::table($this->subTableMap[$txType])
                 ->whereIn('ref_po_id', $poIds)
                 ->pluck('id')
                 ->toArray();
-            $searchIds = array_merge($poIds, $subIds);
         }
-        return $searchIds;
+        return $poIds;
     }
 
     // Kumpulkan semua ID produksi dari semua sub-tabel untuk query reject
@@ -88,6 +88,23 @@ class ProductionMonitoringController extends Controller
         }
 
         return $result;
+    }
+
+    private function estimateProdukJadiFromBom($componentSums, array $bomRecipeMap): float
+    {
+        $impliedUnits = [];
+        foreach ($componentSums as $cs) {
+            $qtyPerUnit = $bomRecipeMap[$cs->item_id] ?? null;
+            if ($qtyPerUnit !== null && $qtyPerUnit > 0) {
+                $impliedUnits[] = floor($cs->total_qty / $qtyPerUnit);
+            }
+        }
+
+        if (!empty($impliedUnits)) {
+            return (float) min($impliedUnits);
+        }
+
+        return (float) $componentSums->sum('total_qty');
     }
 
     public function index(Request $request)
@@ -160,15 +177,11 @@ class ProductionMonitoringController extends Controller
 
                     $statusHulu = [];
 
-                    // === QTY MOULDING & MESIN (per item, dari production_order_detail) ===
-                    // Sumber utama angka ini adalah `qty_produk_jadi` yang diisi MANUAL oleh operator
-                    // di header transaksi Moulding/Mesin (bukan qty komponen mentah dari
-                    // moulding_production_outputs/mesin_production_outputs) — operator langsung
-                    // menyatakan "batch ini setara N unit produk jadi", mirip pola output di Assembling.
-                    // Transaksi LAMA (dibuat sebelum field ini ada) punya qty_produk_jadi = NULL — supaya
-                    // histori itu tidak "hilang" dari Dashboard cuma karena flow-nya berubah, baris yang
-                    // NULL di-fallback ke cara lama (SUM qty output komponen mentah). Transaksi baru yang
-                    // sudah mengisi qty_produk_jadi tetap pakai angka manual itu, tidak dicampur/fallback.
+                    $bomRecipe = DB::table('product_boms')
+                        ->where('parent_item_id', $itemId)
+                        ->get(['child_item_id', 'qty']);
+                    $bomRecipeMap = $bomRecipe->pluck('qty', 'child_item_id')->toArray();
+
                     $detailIds = $allPoDetails->where('item_id', $itemId)->pluck('id')->toArray();
 
                     $qtyMoulding = 0;
@@ -187,9 +200,12 @@ class ProductionMonitoringController extends Controller
                             }
                         }
                         if (!empty($legacyMouldingIds)) {
-                            $qtyMoulding += (float) DB::table('moulding_production_outputs')
+                            $legacyComponentSums = DB::table('moulding_production_outputs')
                                 ->whereIn('moulding_production_id', $legacyMouldingIds)
-                                ->sum('qty');
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+                            $qtyMoulding += $this->estimateProdukJadiFromBom($legacyComponentSums, $bomRecipeMap);
                         }
 
                         // Breakdown komponen yang sudah di-input di Moulding untuk produk ini (mis.
@@ -237,9 +253,12 @@ class ProductionMonitoringController extends Controller
                             }
                         }
                         if (!empty($legacyMesinIds)) {
-                            $qtyMesin += (float) DB::table('mesin_production_outputs')
+                            $legacyMesinComponentSums = DB::table('mesin_production_outputs')
                                 ->whereIn('mesin_production_id', $legacyMesinIds)
-                                ->sum('qty');
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+                            $qtyMesin += $this->estimateProdukJadiFromBom($legacyMesinComponentSums, $bomRecipeMap);
                         }
 
                         // Breakdown komponen yang sudah di-input/dikerjakan di Mesin untuk produk ini —
@@ -298,9 +317,6 @@ class ProductionMonitoringController extends Controller
                     // ada fallback/tebakan) — frontend akan otomatis balik ke tampilan list biasa.
                     $mouldingBomChecklist = [];
                     $mesinBomChecklist    = [];
-                    $bomRecipe = DB::table('product_boms')
-                        ->where('parent_item_id', $itemId)
-                        ->get(['child_item_id', 'qty']);
 
                     if ($bomRecipe->isNotEmpty()) {
                         $bomChildIds = $bomRecipe->pluck('child_item_id')->toArray();
@@ -473,6 +489,17 @@ class ProductionMonitoringController extends Controller
                         'packing'    => $qtyHilir['packing'],
                     ]);
 
+                    $downstreamOfMesin = $qtyHilir['ruskomp'] + $qtyHilir['assembling'] + $qtyHilir['sanding']
+                        + $qtyHilir['rustik'] + $qtyHilir['finishing'] + $qtyHilir['anyam']
+                        + (float) $qtyQcFinal + $qtyHilir['packing'];
+
+                    if ($qtyMesin + $downstreamOfMesin > 0) {
+                        $pipelineRemaining['moulding'] = 0;
+                    }
+                    if ($downstreamOfMesin > 0) {
+                        $pipelineRemaining['mesin'] = 0;
+                    }
+
                     $items[] = [
                         'detail_id'         => $detail->id,
                         'item_id'           => $itemId,
@@ -576,11 +603,11 @@ class ProductionMonitoringController extends Controller
 
                     // Cek ada-tidaknya aktivitas per stage
                     $hasSawmill    = InventoryLog::where('transaction_type', 'SAWMILL')
-                        ->whereIn('reference_id', array_merge($poIds, $sawmillIds))->exists();
+                        ->whereIn('reference_id', $sawmillIds)->exists();
                     $hasKd         = InventoryLog::where('transaction_type', 'KD')
-                        ->whereIn('reference_id', array_merge($poIds, $kdIds))->exists();
+                        ->whereIn('reference_id', $kdIds)->exists();
                     $hasPembahanan = InventoryLog::where('transaction_type', 'PEMBAHANAN')
-                        ->whereIn('reference_id', array_merge($poIds, $pembahananIds))->exists();
+                        ->whereIn('reference_id', $pembahananIds)->exists();
 
                     // Qty stages (langsung pakai ref_po_id atau sub-table moulding)
                     $qtyMoulding = 0;
@@ -644,11 +671,21 @@ class ProductionMonitoringController extends Controller
                                 ->pluck('id')
                                 ->toArray()
                             : [];
-                        $itemQtyMoulding = !empty($itemMouldingIds)
-                            ? (float) DB::table('moulding_production_outputs')
+
+                        $componentSums = !empty($itemMouldingIds)
+                            ? DB::table('moulding_production_outputs')
                                 ->whereIn('moulding_production_id', $itemMouldingIds)
-                                ->sum('qty')
-                            : 0;
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get()
+                            : collect();
+
+                        $bomRecipeSample = DB::table('product_boms')
+                            ->where('parent_item_id', $itemId)
+                            ->get(['child_item_id', 'qty']);
+                        $bomRecipeMapSample = $bomRecipeSample->pluck('qty', 'child_item_id')->toArray();
+
+                        $itemQtyMoulding = $this->estimateProdukJadiFromBom($componentSums, $bomRecipeMapSample);
 
                         $itemQtyPrototype = (float) InventoryLog::where('transaction_type', 'PROTOTYPE')
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
@@ -662,15 +699,7 @@ class ProductionMonitoringController extends Controller
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
-                        // Status Sawmill per item (bukan PO-level lagi) -- sama seperti index(), karena
-                        // Sawmill (Log->Jeblosan & Jeblosan->RST) hampir tidak pernah ditag ref_po_id di
-                        // lapangan. Anggap 'done' begitu ada bukti downstream utk item ini (Moulding/
-                        // Prototype/Sanding/Packing) atau utk PO ini (KD/Pembahanan, level PO).
-                        //
-                        // Sengaja TIDAK pakai items.production_route/needsSawmill() -- dicek 23 Juli
-                        // 2026, SEMUA item di database punya production_route = 'sanding' (bukan salah
-                        // satu dari 4 nilai valid), jadi needsSawmill() akan SELALU false dan bakal
-                        // membuat SEMUA item selalu 'skip'. Lihat catatan lebih lengkap di index().
+
                         $itemHasLaterThanSawmill = $hasKd || $hasPembahanan
                             || $itemQtyMoulding > 0 || $itemQtyPrototype > 0 || $itemQtySanding > 0 || $itemQtyPacking > 0;
 
@@ -682,16 +711,8 @@ class ProductionMonitoringController extends Controller
                             $itemStatusSawmill = 'waiting';
                         }
 
-                        // Breakdown komponen Moulding + checklist vs Master BOM untuk produk sampel ini
-                        // — reuse $itemMouldingIds di atas, tidak query ulang.
                         $itemMouldingComponents = [];
-                        if (!empty($itemMouldingIds)) {
-                            $componentSums = DB::table('moulding_production_outputs')
-                                ->whereIn('moulding_production_id', $itemMouldingIds)
-                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
-                                ->groupBy('item_id')
-                                ->get();
-
+                        if ($componentSums->isNotEmpty()) {
                             $componentItemIds = $componentSums->pluck('item_id')->toArray();
                             $componentItemsById = \App\Models\Item::whereIn('id', $componentItemIds)
                                 ->get(['id', 'name', 'code'])
@@ -709,9 +730,6 @@ class ProductionMonitoringController extends Controller
                         }
 
                         $itemMouldingBomChecklist = [];
-                        $bomRecipeSample = DB::table('product_boms')
-                            ->where('parent_item_id', $itemId)
-                            ->get(['child_item_id', 'qty']);
                         if ($bomRecipeSample->isNotEmpty()) {
                             $bomChildIdsSample  = $bomRecipeSample->pluck('child_item_id')->toArray();
                             $bomItemsByIdSample = \App\Models\Item::whereIn('id', $bomChildIdsSample)
@@ -732,16 +750,17 @@ class ProductionMonitoringController extends Controller
                             }
                         }
 
-                        // Sama seperti index() reguler — tampilkan qty yang MASIH ADA di stage itu
-                        // (belum pindah ke stage berikutnya), bukan kumulatif-selamanya. Urutan di
-                        // sini HARUS sama dengan urutan kolom tabel Monitoring Produksi Sampel:
-                        // Moulding → Prototype → Sanding → Packing.
+
                         $pipelineRemainingSample = $this->applyPipelineRemaining([
                             'moulding'  => $itemQtyMoulding,
                             'prototype' => $itemQtyPrototype,
                             'sanding'   => $itemQtySanding,
                             'packing'   => $itemQtyPacking,
                         ]);
+
+                        if ($itemQtyPrototype + $itemQtySanding + $itemQtyPacking > 0) {
+                            $pipelineRemainingSample['moulding'] = 0;
+                        }
 
                         $items[] = [
                             'detail_id'         => $detail->id,
@@ -764,8 +783,7 @@ class ProductionMonitoringController extends Controller
                         ];
                     }
 
-                    // Semua item PO sampel ini sudah terkirim penuh → tidak ada lagi yang perlu
-                    // dimonitor untuk PO ini, sembunyikan dari daftar
+
                     if (empty($items)) {
                         continue;
                     }

@@ -280,11 +280,24 @@ class PurchaseRequestController extends Controller
 
         DB::beginTransaction();
         try {
-            // Generate PO number
-            $count = PurchaseOrder::whereYear('created_at', now()->year)
-                ->whereMonth('created_at', now()->month)
-                ->count();
-            $poNumber = 'PO-' . now()->format('Ym') . '-' . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
+            // Generate PO number — counter lanjut sepanjang tahun (tidak reset tiap awal
+            // bulan), berpatokan ke nomor TERTINGGI yang pernah dipakai tahun ini (bukan
+            // COUNT() baris yang rawan bentrok kalau ada PO lama yang sudah dihapus).
+            $lastPo = PurchaseOrder::whereYear('created_at', now()->year)
+                ->where('po_number', 'like', 'PO-%')
+                ->orderByRaw("CAST(SUBSTRING_INDEX(po_number, '-', -1) AS UNSIGNED) DESC")
+                ->first();
+
+            $counter = 1;
+            if ($lastPo && preg_match('/PO-\d{6}-(\d{3})/', $lastPo->po_number, $matches)) {
+                $counter = intval($matches[1]) + 1;
+            }
+
+            $poNumber = 'PO-' . now()->format('Ym') . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
+            while (PurchaseOrder::where('po_number', $poNumber)->exists()) {
+                $counter++;
+                $poNumber = 'PO-' . now()->format('Ym') . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
+            }
 
             // Hitung subtotal dari details
             $subtotal = collect($request->details)->sum(fn($d) => $d['quantity'] * $d['price']);
@@ -415,9 +428,9 @@ class PurchaseRequestController extends Controller
         $year  = now()->format('Y');
         $month = now()->format('m');
 
-        // Ambil nomor tertinggi yang pernah ada bulan ini
+        // Counter lanjut sepanjang tahun (tidak reset tiap awal bulan) — ambil
+        // nomor tertinggi yang pernah ada TAHUN ini, bukan cuma bulan ini.
         $last = PurchaseRequest::whereYear('created_at', $year)
-            ->whereMonth('created_at', $month)
             ->orderByRaw("CAST(SUBSTRING_INDEX(pr_number, '-', -1) AS UNSIGNED) DESC")
             ->first();
 

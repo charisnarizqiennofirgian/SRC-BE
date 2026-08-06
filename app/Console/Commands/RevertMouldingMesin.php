@@ -57,10 +57,7 @@ class RevertMouldingMesin extends Command
             $this->line("  - detail_id={$d->id} item={$d->item?->name} current_stage={$d->current_stage}");
         }
 
-        // Kalau revert scope-nya seluruh PO (bukan 1 detail spesifik lewat --detail), ikut sertakan
-        // juga transaksi lama yang production_order_detail_id-nya NULL (dibuat sebelum kolom ini ada,
-        // sebelum migrasi 2026_06_23) — data itu tidak bisa dipastikan milik produk yang mana, tapi
-        // karena scope-nya "hapus semua utk PO ini", aman ikut kehapus juga.
+
         $includeLegacy = !$this->option('detail');
 
         $mesinRecords = MesinProduction::where('ref_po_id', $po->id)
@@ -102,7 +99,7 @@ class RevertMouldingMesin extends Command
                 }
             }
 
-            // Revert Mesin dulu (kejadiannya paling akhir), baru Moulding — urutan mundur kronologis
+
             foreach ($mesinRecords as $mesin) {
                 $this->revertMesin($mesin, $warehouses);
             }
@@ -110,7 +107,7 @@ class RevertMouldingMesin extends Command
                 $this->revertMoulding($moulding, $warehouses);
             }
 
-            // current_stage detail cuma pernah diisi 'moulding'/'mesin' oleh 2 stage ini — aman direset ke null
+
             ProductionOrderDetail::whereIn('id', $detailIds)
                 ->whereIn('current_stage', ['moulding', 'mesin'])
                 ->update(['current_stage' => null]);
@@ -287,8 +284,7 @@ class RevertMouldingMesin extends Command
             $inv->decrement('qty_pcs', $reject->qty);
         }
 
-        // Input RST: warehouse asalnya tidak disimpan di moulding_production_inputs,
-        // ambil dari InventoryLog OUT yang dibuat bareng saat store() (1:1 per baris input).
+
         $outLogs = InventoryLog::where('reference_type', 'MouldingProduction')
             ->where('reference_id', $moulding->id)
             ->where('direction', 'OUT')
@@ -315,6 +311,6 @@ class RevertMouldingMesin extends Command
             ->where('reference_id', $moulding->id)
             ->delete();
 
-        $moulding->delete(); // cascade hapus inputs/outputs/rejects
+        $moulding->delete();
     }
 }

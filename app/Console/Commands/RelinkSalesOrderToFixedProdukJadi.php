@@ -11,7 +11,7 @@ class RelinkSalesOrderToFixedProdukJadi extends Command
     protected $signature = 'app:relink-produk-jadi-from-komponen';
     protected $description = 'Sambungkan ulang sales_order_details DAN production_order_details yang item_id-nya nyasar ke Komponen hasil insiden 2026-07-02, ke item Produk Jadi pengganti yang benar (dicari berdasarkan kode, bukan ID — aman dijalankan di database manapun). Jalankan SETELAH app:fix-komponen-code-collision & upload ulang Produk Jadi selesai.';
 
-    // Kode asli (yang sekarang dipakai ulang oleh Produk Jadi baru)
+
     private array $originalCodes = [
         '015M24T1',
         '047M18G00',

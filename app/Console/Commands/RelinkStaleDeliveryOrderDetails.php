@@ -36,7 +36,7 @@ class RelinkStaleDeliveryOrderDetails extends Command
         $affectedSalesOrderIds = [];
 
         foreach ($staleDetails as $doDetail) {
-            $trashed = $doDetail->salesOrderDetail; // withTrashed() sudah di relasi model
+            $trashed = $doDetail->salesOrderDetail;
             $activeSibling = SalesOrderDetail::where('sales_order_id', $trashed->sales_order_id)
                 ->where('item_id', $trashed->item_id)
                 ->first();
