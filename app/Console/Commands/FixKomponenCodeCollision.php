@@ -11,9 +11,7 @@ class FixKomponenCodeCollision extends Command
     protected $signature = 'app:fix-komponen-code-collision';
     protected $description = 'Ganti kode item Komponen yang salah menimpa kode Produk Jadi (insiden 2026-07-02), supaya kode aslinya bebas dipakai lagi. Aman dijalankan berulang kali (idempotent).';
 
-    // Kode ASLI (sebelum insiden) -> match by kode SEKARANG (sebelum di-rename)
-    // Kalau command ini sudah pernah dijalankan, kode ini sudah tidak ada lagi (sudah -KOMP)
-    // sehingga baris itu otomatis dilewati.
+    
     private array $affectedCodes = [
         '015M24T1',
         '047M18G00',

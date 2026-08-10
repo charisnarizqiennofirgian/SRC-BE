@@ -139,6 +139,7 @@ class GoodsReceiptController extends Controller
             'notes'                               => 'nullable|string',
             'details'                             => 'required|array|min:1',
             'details.*.item_id'                   => 'required|exists:items,id',
+            'details.*.purchase_order_detail_id'  => 'nullable|exists:purchase_order_details,id',
             'details.*.quantity_received'         => 'required|numeric|min:0',
             'details.*.price'                     => 'nullable|numeric|min:0',
             'details.*.grade'                     => 'nullable|string|max:50',
@@ -166,7 +167,9 @@ class GoodsReceiptController extends Controller
 
             foreach ($validatedData['details'] as $detail) {
                 if ($detail['quantity_received'] > 0) {
-                    $poDetail = $purchaseOrder->details->firstWhere('item_id', $detail['item_id']);
+                    $poDetail = !empty($detail['purchase_order_detail_id'])
+                        ? $purchaseOrder->details->firstWhere('id', $detail['purchase_order_detail_id'])
+                        : $purchaseOrder->details->firstWhere('item_id', $detail['item_id']);
                     $price    = isset($detail['price']) ? (float) $detail['price'] : null;
                     $subtotal = ($price !== null) ? $detail['quantity_received'] * $price : null;
                     $grade    = $detail['grade'] ?? null;

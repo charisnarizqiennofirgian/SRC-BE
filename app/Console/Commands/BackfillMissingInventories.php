@@ -13,10 +13,10 @@ class BackfillMissingInventories extends Command
     protected $signature = 'app:backfill-missing-inventories {--dry-run : Tampilkan apa yang akan dibuat tanpa menyimpan}';
     protected $description = 'Buat baris inventories yang hilang untuk item kategori Bahan Operasional/Karton Box yang punya items.stock > 0 tapi belum pernah punya baris inventories sama sekali (item lama yang stoknya cuma pernah tercatat di cache global, tidak pernah di tabel stok per-gudang). qty_pcs diisi dari items.stock. Idempotent: hanya menyentuh item yang benar-benar nol baris inventories, aman dijalankan berulang.';
 
-    // Kategori -> kode gudang tujuan, mengikuti gudang yang sudah dipakai mayoritas item sejenis di kategori itu
+    
     private const CATEGORY_WAREHOUSE = [
-        'Bahan Operasional' => 'UMUM',    // Gudang Bahan Operasional
-        'Karton Box'        => 'PACKING', // Gudang Packing (Barang Jadi)
+        'Bahan Operasional' => 'UMUM',   
+        'Karton Box'        => 'PACKING', 
     ];
 
     public function handle()

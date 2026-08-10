@@ -59,7 +59,7 @@ class BackfillInventoryNaturalWarna extends Command
 
             $sorted = $inventories->sortByDesc('qty_pcs')->values();
 
-            // Baris dengan qty_pcs terbesar menyerap sisa pembulatan; sisanya proporsional
+           
             $assignedNatural = 0.0;
             $assignedWarna   = 0.0;
             $plan = [];

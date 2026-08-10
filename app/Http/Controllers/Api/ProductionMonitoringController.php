@@ -11,6 +11,8 @@ use Carbon\Carbon;
 
 class ProductionMonitoringController extends Controller
 {
+    private const QTY_PRODUK_JADI_FEATURE_CUTOFF = '2026-07-16 14:24:20';
+
     // Sub-tabel map — dipakai di index, detail, dan exportExcel
     private array $subTableMap = [
         'SAWMILL'         => 'sawmill_productions',
@@ -189,13 +191,13 @@ class ProductionMonitoringController extends Controller
                     if (!empty($detailIds)) {
                         $mouldingRows = DB::table('moulding_productions')
                             ->whereIn('production_order_detail_id', $detailIds)
-                            ->select('id', 'qty_produk_jadi')
+                            ->select('id', 'qty_produk_jadi', 'created_at')
                             ->get();
                         $legacyMouldingIds = [];
                         foreach ($mouldingRows as $mr) {
                             if ($mr->qty_produk_jadi !== null) {
                                 $qtyMoulding += (float) $mr->qty_produk_jadi;
-                            } else {
+                            } elseif ($mr->created_at < self::QTY_PRODUK_JADI_FEATURE_CUTOFF) {
                                 $legacyMouldingIds[] = $mr->id;
                             }
                         }
@@ -242,13 +244,13 @@ class ProductionMonitoringController extends Controller
                     if (!empty($detailIds)) {
                         $mesinRows = DB::table('mesin_productions')
                             ->whereIn('production_order_detail_id', $detailIds)
-                            ->select('id', 'qty_produk_jadi')
+                            ->select('id', 'qty_produk_jadi', 'created_at')
                             ->get();
                         $legacyMesinIds = [];
                         foreach ($mesinRows as $mr) {
                             if ($mr->qty_produk_jadi !== null) {
                                 $qtyMesin += (float) $mr->qty_produk_jadi;
-                            } else {
+                            } elseif ($mr->created_at < self::QTY_PRODUK_JADI_FEATURE_CUTOFF) {
                                 $legacyMesinIds[] = $mr->id;
                             }
                         }

@@ -95,21 +95,21 @@ class PurchaseOrderController extends Controller
     {
         $purchaseOrder->load('supplier', 'details.item.unit', 'receipts.details');
 
-        // Sum quantity already received per item_id across all goods receipts
-        $receivedPerItem = [];
+        $receivedPerDetail = [];
         foreach ($purchaseOrder->receipts as $receipt) {
             foreach ($receipt->details as $rd) {
-                $receivedPerItem[$rd->item_id] = ($receivedPerItem[$rd->item_id] ?? 0) + $rd->quantity_received;
+                $key = $rd->purchase_order_detail_id;
+                $receivedPerDetail[$key] = ($receivedPerDetail[$key] ?? 0) + $rd->quantity_received;
             }
         }
 
-        $purchaseOrder->details->each(function ($detail) use ($receivedPerItem) {
+        $purchaseOrder->details->each(function ($detail) use ($receivedPerDetail) {
             if ($detail->specifications) {
                 $detail->specifications = is_string($detail->specifications)
                     ? json_decode($detail->specifications, true)
                     : $detail->specifications;
             }
-            $received = $receivedPerItem[$detail->item_id] ?? 0;
+            $received = $receivedPerDetail[$detail->id] ?? 0;
             $detail->quantity_received_total = (float) $received;
             $detail->quantity_remaining      = (float) max(0, $detail->quantity_ordered - $received);
         });

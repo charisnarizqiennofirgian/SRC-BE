@@ -40,7 +40,7 @@ class FixKomponenNaturalWarna extends Command
             $this->line('  (dry-run, tidak disimpan)');
         }
 
-        // === 2. Rekonsiliasi qty_natural/qty_warna vs stok fisik ===
+        
         $this->newLine();
         $this->info('=== 2. Rekonsiliasi Qty Natural/Warna vs stok fisik gudang ===');
 
