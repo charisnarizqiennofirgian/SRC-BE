@@ -156,6 +156,7 @@ class GoodsReceiptController extends Controller
             $isKayu        = $purchaseOrder->type === 'kayu';
 
             $goodsReceipt = GoodsReceipt::create([
+                'created_by'               => Auth::id(),
                 'receipt_number'           => $this->generateReceiptNumber(),
                 'purchase_order_id'        => $purchaseOrder->id,
                 'receipt_date'             => $validatedData['receipt_date'],

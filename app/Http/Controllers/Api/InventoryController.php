@@ -13,18 +13,18 @@ class InventoryController extends Controller
     {
         $warehouseId = $request->input('warehouse_id');
         $categoryId  = $request->input('category_id');
-        $itemType    = $request->input('item_type'); // ✅ TAMBAH INI
+        $itemType    = $request->input('item_type'); //
         $search      = $request->input('search');
         $perPage     = min($request->input('per_page', 50), 9999);
 
-        // ✅ UBAH: Group by item_id dan sum qty
+
         $query = Inventory::query()
             ->select([
                 'item_id',
                 'warehouse_id',
                 DB::raw('SUM(qty_pcs) as total_qty'),
-                DB::raw('GROUP_CONCAT(DISTINCT ref_po_id) as ref_po_ids'), // Gabung semua PO
-                DB::raw('MAX(id) as latest_id'), // Ambil ID terbaru untuk reference
+                DB::raw('GROUP_CONCAT(DISTINCT ref_po_id) as ref_po_ids'),
+                DB::raw('MAX(id) as latest_id'),
             ])
             ->with(['item.category', 'item.unit', 'warehouse'])
             ->where('qty_pcs', '>', 0)

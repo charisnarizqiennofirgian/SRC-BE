@@ -11,6 +11,7 @@ class PurchaseBill extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
+        'created_by',
         'supplier_id',
         'bill_number',
         'supplier_invoice_number',

@@ -12,6 +12,7 @@ class PurchaseOrder extends Model
 
     // Memberitahu model kolom mana yang boleh diisi secara massal
     protected $fillable = [
+        'created_by',
         'po_number',
         'supplier_id',
         'order_date',

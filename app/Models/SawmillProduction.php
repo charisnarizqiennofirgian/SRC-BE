@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class SawmillProduction extends Model
 {
     protected $fillable = [
+        'created_by',
         'document_number',
         'process_type',
         'date',

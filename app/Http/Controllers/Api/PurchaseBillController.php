@@ -8,6 +8,7 @@ use App\Models\GoodsReceiptDetail;
 use App\Models\ChartOfAccount;
 use App\Services\JournalService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -89,6 +90,7 @@ class PurchaseBillController extends Controller
 
             // Simpan Purchase Bill
             $purchaseBill = PurchaseBill::create([
+                'created_by'              => Auth::id(),
                 'supplier_id'             => $validatedData['supplier_id'],
                 'bill_number'             => $this->generateBillNumber(),
                 'supplier_invoice_number' => $validatedData['supplier_invoice_number'],

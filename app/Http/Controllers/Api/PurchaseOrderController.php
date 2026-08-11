@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PurchaseOrder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -56,6 +57,7 @@ class PurchaseOrderController extends Controller
             $totals = $this->calculateTotals($validatedData['details'], $validatedData['ppn_percentage'], $exchangeRate, $otherCost);
 
             $order = PurchaseOrder::create([
+                'created_by'      => Auth::id(),
                 'po_number'       => $this->generatePoNumber(),
                 'supplier_id'     => $validatedData['supplier_id'],
                 'order_date'      => $validatedData['order_date'],

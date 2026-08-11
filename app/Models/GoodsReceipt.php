@@ -14,6 +14,7 @@ class GoodsReceipt extends Model
      * Kolom yang bisa diisi (fillable)
      */
     protected $fillable = [
+        'created_by',
         'receipt_number',
         'purchase_order_id',
         'receipt_date',

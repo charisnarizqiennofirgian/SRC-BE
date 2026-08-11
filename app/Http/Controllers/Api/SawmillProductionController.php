@@ -129,6 +129,7 @@ class SawmillProductionController extends Controller
             $warehouseLog     = Warehouse::where('code', 'LOG')->firstOrFail();
 
             $production = SawmillProduction::create([
+                'created_by'            => Auth::id(),
                 'document_number'       => $documentNumber,
                 'process_type'          => $data['process_type'],
                 'date'                  => $data['date'],
