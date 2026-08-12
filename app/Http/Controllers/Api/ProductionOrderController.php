@@ -187,21 +187,49 @@ class ProductionOrderController extends Controller
     {
         return DB::transaction(function () use ($request, $salesOrder) {
             $salesOrder->load('buyer');
-            $poNumber = 'Produksi - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
 
-            // Buat Production Order
-            $productionOrder = ProductionOrder::create([
-                'po_number'      => $poNumber,
-                'sales_order_id' => $salesOrder->id,
-                'status'         => 'released',                        // ✅ Langsung released
-                'current_stage'  => ProductionOrder::STAGE_PENDING,    // ✅ Stage pending
-                'skip_sawmill'   => false,                             // ✅ Default false
-                'notes'          => $request->input('notes'),
-                'created_by'     => $request->user()->id,
-            ]);
+            $productionOrder = ProductionOrder::where('sales_order_id', $salesOrder->id)
+                ->where(function ($q) {
+                    $q->whereNull('type')->orWhere('type', '!=', 'sample');
+                })
+                ->first();
 
-            // Buat detail
+            $isNew = false;
+
+            if (!$productionOrder) {
+                $isNew = true;
+                $poNumber = 'Produksi - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
+
+                $productionOrder = ProductionOrder::create([
+                    'po_number'      => $poNumber,
+                    'sales_order_id' => $salesOrder->id,
+                    'status'         => 'released',                        // ✅ Langsung released
+                    'current_stage'  => ProductionOrder::STAGE_PENDING,    // ✅ Stage pending
+                    'skip_sawmill'   => false,                             // ✅ Default false
+                    'notes'          => $request->input('notes'),
+                    'created_by'     => $request->user()->id,
+                ]);
+            }
+
+            // Cocokkan berdasarkan item_id (BUKAN sales_order_detail_id) — SalesOrderController::update()
+            // selalu soft-delete + buat ulang SEMUA sales_order_details dengan id baru walau item-nya
+            // tidak berubah, jadi mencocokkan by id lama akan salah anggap semua item "baru".
+            $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
+
+            $addedCount = 0;
             foreach ($salesOrder->details as $detail) {
+                $existingMatch = null;
+                if (!empty($existingByItem[$detail->item_id])) {
+                    $existingMatch = $existingByItem[$detail->item_id]->shift();
+                }
+
+                if ($existingMatch) {
+                    if ($existingMatch->sales_order_detail_id !== $detail->id) {
+                        $existingMatch->update(['sales_order_detail_id' => $detail->id]);
+                    }
+                    continue;
+                }
+
                 ProductionOrderDetail::create([
                     'production_order_id'   => $productionOrder->id,
                     'sales_order_detail_id' => $detail->id,
@@ -209,6 +237,7 @@ class ProductionOrderController extends Controller
                     'qty_planned'           => $detail->quantity,
                     'qty_produced'          => 0,
                 ]);
+                $addedCount++;
             }
 
             // Load relations untuk routing
@@ -223,9 +252,17 @@ class ProductionOrderController extends Controller
                 'current_stage' => $routing['next_stage'],
             ]);
 
+            if ($isNew) {
+                $message = 'Production Order berhasil dibuat dari Sales Order.';
+            } elseif ($addedCount > 0) {
+                $message = "PO Produksi \"{$productionOrder->po_number}\" sudah ada, {$addedCount} item baru berhasil ditambahkan.";
+            } else {
+                $message = "PO Produksi \"{$productionOrder->po_number}\" sudah ada dan semua item sudah lengkap.";
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => 'Production Order berhasil dibuat dari Sales Order.',
+                'message' => $message,
                 'data'    => $productionOrder->load('details'),
                 'routing' => [
                     'next_stage' => $routing['next_stage'],
@@ -239,25 +276,55 @@ class ProductionOrderController extends Controller
         });
     }
 
-    // BUAT PO SAMPEL DARI SALES ORDER
+    // BUAT PO SAMPEL DARI SALES ORDER (ATAU SINKRONKAN KALAU SUDAH ADA)
     public function storeFromSalesOrderSample(Request $request, SalesOrder $salesOrder)
     {
         return DB::transaction(function () use ($request, $salesOrder) {
             $salesOrder->load('buyer');
-            $poNumber = 'Sampel - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
 
-            $productionOrder = ProductionOrder::create([
-                'po_number'      => $poNumber,
-                'sales_order_id' => $salesOrder->id,
-                'status'         => 'released',
-                'current_stage'  => ProductionOrder::STAGE_PENDING,
-                'skip_sawmill'   => false,
-                'type'           => 'sample',
-                'notes'          => $request->input('notes'),
-                'created_by'     => $request->user()->id,
-            ]);
+            $productionOrder = ProductionOrder::where('sales_order_id', $salesOrder->id)
+                ->where('type', 'sample')
+                ->first();
 
+            $isNew = false;
+
+            if (!$productionOrder) {
+                $isNew = true;
+                $poNumber = 'Sampel - ' . ($salesOrder->buyer->name ?? 'Unknown') . ' - ' . $salesOrder->so_number;
+
+                $productionOrder = ProductionOrder::create([
+                    'po_number'      => $poNumber,
+                    'sales_order_id' => $salesOrder->id,
+                    'status'         => 'released',
+                    'current_stage'  => ProductionOrder::STAGE_PENDING,
+                    'skip_sawmill'   => false,
+                    'type'           => 'sample',
+                    'notes'          => $request->input('notes'),
+                    'created_by'     => $request->user()->id,
+                ]);
+            }
+
+            // Cocokkan berdasarkan item_id (BUKAN sales_order_detail_id) — SalesOrderController::update()
+            // selalu soft-delete + buat ulang SEMUA sales_order_details dengan id baru walau item-nya
+            // tidak berubah, jadi mencocokkan by id lama akan salah anggap semua item "baru".
+            $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
+
+            $addedCount = 0;
             foreach ($salesOrder->details as $detail) {
+                $existingMatch = null;
+                if (!empty($existingByItem[$detail->item_id])) {
+                    $existingMatch = $existingByItem[$detail->item_id]->shift();
+                }
+
+                if ($existingMatch) {
+                    // Repoint FK ke sales_order_detail yang aktif sekarang, supaya tidak basi
+                    // menunjuk ke baris lama yang sudah soft-deleted.
+                    if ($existingMatch->sales_order_detail_id !== $detail->id) {
+                        $existingMatch->update(['sales_order_detail_id' => $detail->id]);
+                    }
+                    continue;
+                }
+
                 ProductionOrderDetail::create([
                     'production_order_id'   => $productionOrder->id,
                     'sales_order_detail_id' => $detail->id,
@@ -265,11 +332,20 @@ class ProductionOrderController extends Controller
                     'qty_planned'           => $detail->quantity,
                     'qty_produced'          => 0,
                 ]);
+                $addedCount++;
+            }
+
+            if ($isNew) {
+                $message = 'Production Order Sampel berhasil dibuat.';
+            } elseif ($addedCount > 0) {
+                $message = "PO Sampel \"{$productionOrder->po_number}\" sudah ada, {$addedCount} item baru berhasil ditambahkan.";
+            } else {
+                $message = "PO Sampel \"{$productionOrder->po_number}\" sudah ada dan semua item sudah lengkap.";
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Production Order Sampel berhasil dibuat.',
+                'message' => $message,
                 'data'    => $productionOrder->load('details'),
             ]);
         });
