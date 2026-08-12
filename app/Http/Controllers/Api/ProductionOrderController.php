@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\MesinProduction;
+use App\Models\MouldingProduction;
 use App\Models\ProductionOrder;
 use App\Models\ProductionOrderDetail;
+use App\Models\RustikKomponenProduction;
 use App\Models\SalesOrder;
 use App\Services\ProductionRoutingService;
 use Illuminate\Http\Request;
@@ -211,9 +214,6 @@ class ProductionOrderController extends Controller
                 ]);
             }
 
-            // Cocokkan berdasarkan item_id (BUKAN sales_order_detail_id) — SalesOrderController::update()
-            // selalu soft-delete + buat ulang SEMUA sales_order_details dengan id baru walau item-nya
-            // tidak berubah, jadi mencocokkan by id lama akan salah anggap semua item "baru".
             $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
 
             $addedCount = 0;
@@ -240,6 +240,8 @@ class ProductionOrderController extends Controller
                 $addedCount++;
             }
 
+            [$removedCount, $blockedCount] = $this->removeOrphanedProductionOrderDetails($existingByItem);
+
             // Load relations untuk routing
             $productionOrder->load('details.item');
 
@@ -252,13 +254,9 @@ class ProductionOrderController extends Controller
                 'current_stage' => $routing['next_stage'],
             ]);
 
-            if ($isNew) {
-                $message = 'Production Order berhasil dibuat dari Sales Order.';
-            } elseif ($addedCount > 0) {
-                $message = "PO Produksi \"{$productionOrder->po_number}\" sudah ada, {$addedCount} item baru berhasil ditambahkan.";
-            } else {
-                $message = "PO Produksi \"{$productionOrder->po_number}\" sudah ada dan semua item sudah lengkap.";
-            }
+            $message = $isNew
+                ? 'Production Order berhasil dibuat dari Sales Order.'
+                : $this->buildSyncMessage('PO Produksi', $productionOrder->po_number, $addedCount, $removedCount, $blockedCount);
 
             return response()->json([
                 'success' => true,
@@ -276,7 +274,7 @@ class ProductionOrderController extends Controller
         });
     }
 
-    // BUAT PO SAMPEL DARI SALES ORDER (ATAU SINKRONKAN KALAU SUDAH ADA)
+    // BUAT PO SAMPEL DARI SALES ORDER
     public function storeFromSalesOrderSample(Request $request, SalesOrder $salesOrder)
     {
         return DB::transaction(function () use ($request, $salesOrder) {
@@ -304,9 +302,6 @@ class ProductionOrderController extends Controller
                 ]);
             }
 
-            // Cocokkan berdasarkan item_id (BUKAN sales_order_detail_id) — SalesOrderController::update()
-            // selalu soft-delete + buat ulang SEMUA sales_order_details dengan id baru walau item-nya
-            // tidak berubah, jadi mencocokkan by id lama akan salah anggap semua item "baru".
             $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
 
             $addedCount = 0;
@@ -317,8 +312,6 @@ class ProductionOrderController extends Controller
                 }
 
                 if ($existingMatch) {
-                    // Repoint FK ke sales_order_detail yang aktif sekarang, supaya tidak basi
-                    // menunjuk ke baris lama yang sudah soft-deleted.
                     if ($existingMatch->sales_order_detail_id !== $detail->id) {
                         $existingMatch->update(['sales_order_detail_id' => $detail->id]);
                     }
@@ -335,13 +328,11 @@ class ProductionOrderController extends Controller
                 $addedCount++;
             }
 
-            if ($isNew) {
-                $message = 'Production Order Sampel berhasil dibuat.';
-            } elseif ($addedCount > 0) {
-                $message = "PO Sampel \"{$productionOrder->po_number}\" sudah ada, {$addedCount} item baru berhasil ditambahkan.";
-            } else {
-                $message = "PO Sampel \"{$productionOrder->po_number}\" sudah ada dan semua item sudah lengkap.";
-            }
+            [$removedCount, $blockedCount] = $this->removeOrphanedProductionOrderDetails($existingByItem);
+
+            $message = $isNew
+                ? 'Production Order Sampel berhasil dibuat.'
+                : $this->buildSyncMessage('PO Sampel', $productionOrder->po_number, $addedCount, $removedCount, $blockedCount);
 
             return response()->json([
                 'success' => true,
@@ -349,5 +340,60 @@ class ProductionOrderController extends Controller
                 'data'    => $productionOrder->load('details'),
             ]);
         });
+    }
+
+    private function removeOrphanedProductionOrderDetails($existingByItem): array
+    {
+        $removedCount = 0;
+        $blockedCount = 0;
+
+        foreach ($existingByItem as $remaining) {
+            foreach ($remaining as $orphan) {
+                if ($this->productionDetailHasActivity($orphan)) {
+                    $blockedCount++;
+                    continue;
+                }
+
+                $orphan->delete();
+                $removedCount++;
+            }
+        }
+
+        return [$removedCount, $blockedCount];
+    }
+
+    private function productionDetailHasActivity(ProductionOrderDetail $detail): bool
+    {
+        if (!empty($detail->current_stage)) {
+            return true;
+        }
+
+        if ((float) $detail->qty_produced > 0) {
+            return true;
+        }
+
+        return MouldingProduction::where('production_order_detail_id', $detail->id)->exists()
+            || MesinProduction::where('production_order_detail_id', $detail->id)->exists()
+            || RustikKomponenProduction::where('production_order_detail_id', $detail->id)->exists();
+    }
+
+    private function buildSyncMessage(string $label, string $poNumber, int $addedCount, int $removedCount, int $blockedCount): string
+    {
+        $parts = [];
+        if ($addedCount > 0) {
+            $parts[] = "{$addedCount} item baru ditambahkan";
+        }
+        if ($removedCount > 0) {
+            $parts[] = "{$removedCount} item yang sudah tidak ada di SO dihapus dari PO";
+        }
+        if ($blockedCount > 0) {
+            $parts[] = "{$blockedCount} item sudah tidak ada di SO tapi TIDAK dihapus karena sudah ada progres produksi (cek manual)";
+        }
+
+        if (empty($parts)) {
+            return "{$label} \"{$poNumber}\" sudah ada dan semua item sudah sinkron.";
+        }
+
+        return "{$label} \"{$poNumber}\" sudah ada, " . implode('; ', $parts) . '.';
     }
 }

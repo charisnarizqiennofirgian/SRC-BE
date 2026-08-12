@@ -141,6 +141,7 @@ class ProductionMonitoringController extends Controller
 
                 // Semua detail dari semua PO milik SO ini (untuk cek moulding per item)
                 $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
+                $poDetailQueueByItem = $allPoDetails->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
 
                 // Search IDs zona hilir, di-scope ke PO milik SO ini saja (bukan seluruh gudang)
                 // 'anyam' ikut lewat loop generik ini juga (reference_id-nya anyam_productions.id,
@@ -184,7 +185,11 @@ class ProductionMonitoringController extends Controller
                         ->get(['child_item_id', 'qty']);
                     $bomRecipeMap = $bomRecipe->pluck('qty', 'child_item_id')->toArray();
 
-                    $detailIds = $allPoDetails->where('item_id', $itemId)->pluck('id')->toArray();
+                    $matchedPoDetail = null;
+                    if ($poDetailQueueByItem->has($itemId) && $poDetailQueueByItem[$itemId]->isNotEmpty()) {
+                        $matchedPoDetail = $poDetailQueueByItem[$itemId]->shift();
+                    }
+                    $detailIds = $matchedPoDetail ? [$matchedPoDetail->id] : [];
 
                     $qtyMoulding = 0;
                     $mouldingComponents = [];
@@ -666,13 +671,10 @@ class ProductionMonitoringController extends Controller
                         // Fix berlaku merata untuk data lama maupun baru (bukan soal flow lama/baru —
                         // murni salah filter di query, jadi begitu diperbaiki, data lama otomatis ikut
                         // benar tanpa perlu backfill apapun).
-                        $detailIdsForItem = $po->details->where('item_id', $itemId)->pluck('id')->toArray();
-                        $itemMouldingIds  = !empty($detailIdsForItem)
-                            ? DB::table('moulding_productions')
-                                ->whereIn('production_order_detail_id', $detailIdsForItem)
-                                ->pluck('id')
-                                ->toArray()
-                            : [];
+                        $itemMouldingIds = DB::table('moulding_productions')
+                            ->where('production_order_detail_id', $detail->id)
+                            ->pluck('id')
+                            ->toArray();
 
                         $componentSums = !empty($itemMouldingIds)
                             ? DB::table('moulding_production_outputs')
