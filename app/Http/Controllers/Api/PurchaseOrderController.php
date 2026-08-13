@@ -187,6 +187,8 @@ class PurchaseOrderController extends Controller
             'details'          => 'required|array|min:1',
             'details.*.id'     => 'required|integer|exists:purchase_order_details,id',
             'details.*.price'  => 'required|numeric|min:0',
+            'other_cost'             => 'nullable|numeric|min:0',
+            'other_cost_description' => 'nullable|string|max:1000',
         ]);
 
         if ($validator->fails()) {
@@ -232,16 +234,27 @@ class PurchaseOrderController extends Controller
                 ->map(fn ($d) => ['quantity' => $d->quantity_ordered, 'price' => $d->price])
                 ->all();
 
+            // Ongkir/biaya lain-lain seringkali baru diketahui SETELAH barang dikirim/diterima
+            // sebagian — boleh diisi/diedit di sini juga, bukan cuma harga per item.
+            $otherCost = $request->filled('other_cost')
+                ? (float) $request->other_cost
+                : (float) $purchaseOrder->other_cost;
+            $otherCostDescription = $request->has('other_cost_description')
+                ? $request->other_cost_description
+                : $purchaseOrder->other_cost_description;
+
             $totals = $this->calculateTotals(
                 $freshDetails,
                 (float) $purchaseOrder->ppn_percentage,
                 (float) $purchaseOrder->exchange_rate,
-                (float) $purchaseOrder->other_cost
+                $otherCost
             );
 
             $purchaseOrder->update([
                 'subtotal'    => $totals['subtotal'],
                 'ppn_amount'  => $totals['ppn_amount'],
+                'other_cost'  => $totals['other_cost'],
+                'other_cost_description' => $otherCostDescription,
                 'grand_total' => $totals['grand_total'],
             ]);
 
