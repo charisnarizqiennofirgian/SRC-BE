@@ -13,7 +13,7 @@ class PurchaseOrderController extends Controller
 {
     public function index(Request $request)
     {
-        $query = PurchaseOrder::with('supplier')
+        $query = PurchaseOrder::with(['supplier', 'details.item:id,name'])
             ->orderByRaw("CASE WHEN status = 'Open' THEN 0 ELSE 1 END")
             ->latest();
 
