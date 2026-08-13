@@ -57,7 +57,16 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-            $item = Item::lockForUpdate()->findOrFail($request->item_id);
+            $item = Item::with('category')->lockForUpdate()->findOrFail($request->item_id);
+
+            $isProdukJadi = str_contains(strtolower($item->category?->name ?? ''), 'produk jadi');
+            if (!$isKomponen && $isProdukJadi && !$request->filled('warehouse_id')) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Gudang wajib dipilih untuk penyesuaian stok Produk Jadi.'
+                ], 422);
+            }
 
             // ── KOMPONEN: update qty_natural + qty_warna ─────────────────────
             if ($isKomponen) {
@@ -145,7 +154,17 @@ class StockAdjustmentController extends Controller
             $item->increment('stock', $movementQuantity);
             $item->refresh();
 
-            if ($item->type === Item::TYPE_FINISHED_GOOD) {
+            if ($request->filled('warehouse_id')) {
+                // Gudang eksplisit dari user (wajib untuk Produk Jadi — lihat guard di atas;
+                // opsional untuk kategori lain) selalu diprioritaskan, tidak lagi dipaksa ke Packing.
+                $inventory = Inventory::firstOrCreate(
+                    ['warehouse_id' => (int) $request->warehouse_id, 'item_id' => $item->id],
+                    ['qty_pcs' => 0, 'qty_m3' => 0]
+                );
+                $newQty = (float) $inventory->qty_pcs + $movementQuantity;
+                $inventory->update(['qty_pcs' => max(0, $newQty)]);
+            } elseif ($item->type === Item::TYPE_FINISHED_GOOD) {
+                // Fallback lama: item Produk Jadi tanpa gudang eksplisit (mis. dipanggil dari luar UI ini)
                 $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                 if (!$packingWarehouseId) {
                     throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada di master data.');
@@ -155,13 +174,6 @@ class StockAdjustmentController extends Controller
                     ['qty_pcs' => 0, 'qty_m3' => 0]
                 );
                 $newQty = $inventory->qty_pcs + $movementQuantity;
-                $inventory->update(['qty_pcs' => max(0, $newQty)]);
-            } elseif ($request->filled('warehouse_id')) {
-                $inventory = Inventory::firstOrCreate(
-                    ['warehouse_id' => (int) $request->warehouse_id, 'item_id' => $item->id],
-                    ['qty_pcs' => 0, 'qty_m3' => 0]
-                );
-                $newQty = (float) $inventory->qty_pcs + $movementQuantity;
                 $inventory->update(['qty_pcs' => max(0, $newQty)]);
             }
 

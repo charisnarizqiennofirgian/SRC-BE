@@ -141,9 +141,9 @@ class SawmillProductionController extends Controller
             ]);
 
             if ($isLogJeblosan) {
-                $this->processLogToJeblosan($data, $production, $warehouseSawmill, $warehouseLog, $referenceId, $referenceNumber, $documentNumber);
+                $this->processLogToJeblosan($data, $production, $warehouseSawmill, $warehouseLog, $referenceNumber, $documentNumber);
             } else {
-                $this->processJeblosanToRst($data, $production, $warehouseSawmill, $warehouseRstb, $referenceId, $referenceNumber, $documentNumber);
+                $this->processJeblosanToRst($data, $production, $warehouseSawmill, $warehouseRstb, $referenceNumber, $documentNumber);
             }
 
             if ($productionOrder) {
@@ -164,7 +164,7 @@ class SawmillProductionController extends Controller
         ], 201);
     }
 
-    private function processLogToJeblosan(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseLog, ?int $referenceId, string $referenceNumber, string $documentNumber): void
+    private function processLogToJeblosan(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseLog, string $referenceNumber, string $documentNumber): void
     {
         $totalLogM3 = 0;
         $totalJeblosanM3 = 0;
@@ -191,8 +191,8 @@ class SawmillProductionController extends Controller
                 'qty_m3'           => $volumeM3,
                 'direction'        => 'OUT',
                 'transaction_type' => 'SAWMILL',
-                'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
-                'reference_id'     => $referenceId ?? $production->id,
+                'reference_type'   => 'SawmillProduction',
+                'reference_id'     => $production->id,
                 'reference_number' => $referenceNumber,
                 'notes'            => "Log masuk sawmill ({$documentNumber})",
                 'user_id'          => Auth::id(),
@@ -235,8 +235,8 @@ class SawmillProductionController extends Controller
                 'qty_m3'           => $volM3,
                 'direction'        => 'IN',
                 'transaction_type' => 'SAWMILL',
-                'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
-                'reference_id'     => $referenceId ?? $production->id,
+                'reference_type'   => 'SawmillProduction',
+                'reference_id'     => $production->id,
                 'reference_number' => $referenceNumber,
                 'notes'            => "Jeblosan hasil sawmill → Gudang SAWMILL ({$documentNumber})",
                 'user_id'          => Auth::id(),
@@ -259,7 +259,7 @@ class SawmillProductionController extends Controller
         ]);
     }
 
-    private function processJeblosanToRst(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseRstb, ?int $referenceId, string $referenceNumber, string $documentNumber): void
+    private function processJeblosanToRst(array $data, SawmillProduction $production, Warehouse $warehouseSawmill, Warehouse $warehouseRstb, string $referenceNumber, string $documentNumber): void
     {
         $totalInputM3 = 0;
         $totalRstM3   = 0;
@@ -293,8 +293,8 @@ class SawmillProductionController extends Controller
                 'qty_m3'           => $volM3,
                 'direction'        => 'OUT',
                 'transaction_type' => 'SAWMILL',
-                'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
-                'reference_id'     => $referenceId ?? $production->id,
+                'reference_type'   => 'SawmillProduction',
+                'reference_id'     => $production->id,
                 'reference_number' => $referenceNumber,
                 'notes'            => "Jeblosan masuk proses RST ({$documentNumber})",
                 'user_id'          => Auth::id(),
@@ -337,8 +337,8 @@ class SawmillProductionController extends Controller
                 'qty_m3'           => $volM3,
                 'direction'        => 'IN',
                 'transaction_type' => 'SAWMILL',
-                'reference_type'   => $referenceId ? 'ProductionOrder' : 'SawmillProduction',
-                'reference_id'     => $referenceId ?? $production->id,
+                'reference_type'   => 'SawmillProduction',
+                'reference_id'     => $production->id,
                 'reference_number' => $referenceNumber,
                 'notes'            => "RST hasil sawmill → Gudang RSTB ({$documentNumber})",
                 'user_id'          => Auth::id(),
