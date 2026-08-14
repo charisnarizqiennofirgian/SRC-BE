@@ -178,13 +178,8 @@ class MaterialController extends Controller
             }
 
             if ($request->filled('warehouse_id')) {
-                $query->where(function ($q) use ($request) {
-                    $q->whereHas('inventories', function ($inner) use ($request) {
-                        $inner->where('warehouse_id', (int) $request->warehouse_id);
-                    })
-                    ->orWhere(function ($inner) {
-                        $inner->doesntHave('inventories')->where('stock', '>', 0);
-                    });
+                $query->whereHas('inventories', function ($inner) use ($request) {
+                    $inner->where('warehouse_id', (int) $request->warehouse_id);
                 });
             }
 
