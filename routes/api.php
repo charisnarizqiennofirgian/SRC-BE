@@ -528,8 +528,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::get('/{id}/download', [DokumenController::class, 'download']);
         });
         Route::middleware('permission:dokumen-upload')->group(function () {
-            Route::post('/upload',       [DokumenController::class, 'upload']);
-            Route::post('/{id}/revisi',  [DokumenController::class, 'revisi']);
+            Route::post('/upload',           [DokumenController::class, 'upload']);
+            Route::post('/{id}/revisi',      [DokumenController::class, 'revisi']);
+            Route::post('/bulk-set-buyer',   [DokumenController::class, 'bulkSetBuyer']);
         });
         Route::middleware('permission:dokumen-hapus')->delete('/{id}', [DokumenController::class, 'hapus']);
     });

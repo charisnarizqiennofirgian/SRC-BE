@@ -21,7 +21,11 @@ class DokumenController extends Controller
         }
 
         if ($request->filled('buyer_id')) {
-            $query->where('buyer_id', $request->buyer_id);
+            if ($request->buyer_id === 'none') {
+                $query->whereNull('buyer_id');
+            } else {
+                $query->where('buyer_id', $request->buyer_id);
+            }
         }
 
         if ($request->filled('search')) {
@@ -130,6 +134,22 @@ class DokumenController extends Controller
             $dokumen->path_file,
             $dokumen->nama_asli
         );
+    }
+
+    public function bulkSetBuyer(Request $request)
+    {
+        $request->validate([
+            'ids'      => 'required|array|min:1',
+            'ids.*'    => 'integer|exists:dokumen,id',
+            'buyer_id' => 'nullable|integer|exists:buyers,id',
+        ]);
+
+        Dokumen::whereIn('id', $request->ids)->update(['buyer_id' => $request->buyer_id]);
+
+        return response()->json([
+            'success' => true,
+            'message' => count($request->ids) . ' dokumen berhasil diperbarui.',
+        ]);
     }
 
     public function hapus($id)
