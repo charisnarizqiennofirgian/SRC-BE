@@ -39,31 +39,23 @@ class PurchaseRequestRekapExport implements FromArray, WithHeadings, WithEvents
             $priceByItemId = $po ? $po->details->pluck('price', 'item_id') : collect();
             $supplierName  = $po->supplier->name ?? '-';
 
-            // Gabungkan qty per nama item dalam 1 PR yang sama (bisa ada beberapa baris detail untuk item yang sama)
-            $itemTotals = [];
+            // Tiap baris detail PR ditampilkan apa adanya (tidak digabung), walau item/PR-nya sama
             foreach ($pr->details as $detail) {
                 $itemName = $detail->item->name ?? ('Item #' . $detail->item_id);
                 $qty      = (float) $detail->qty_approved;
-                if (!isset($itemTotals[$itemName])) {
-                    $itemTotals[$itemName] = ['qty' => 0, 'item_id' => $detail->item_id];
-                }
-                $itemTotals[$itemName]['qty'] += $qty;
-            }
-
-            foreach ($itemTotals as $itemName => $data) {
-                $harga = $priceByItemId->get($data['item_id']);
-                $total = $harga !== null ? round($data['qty'] * (float) $harga, 2) : null;
+                $harga    = $priceByItemId->get($detail->item_id);
+                $total    = $harga !== null ? round($qty * (float) $harga, 2) : null;
 
                 $rows[] = [
                     $pr->pr_number,
                     $supplierName,
                     $itemName,
-                    $data['qty'],
+                    $qty,
                     $harga !== null ? (float) $harga : '-',
                     $total !== null ? $total : '-',
                 ];
 
-                $this->grandTotalQty   += $data['qty'];
+                $this->grandTotalQty   += $qty;
                 $this->grandTotalHarga += $total ?? 0;
             }
         }

@@ -212,6 +212,8 @@ class PackingController extends Controller
                         ]);
                     }
 
+                    Item::whereKey($itemId)->increment('stock', $qty);
+
                     Log::info("Rakit dari komponen (packing): {$itemName} - {$qty} pcs dari " . count($item['components']) . ' komponen');
                 } else {
                     // === ALUR BIASA: KURANGI STOK GUDANG SUMBER ===
