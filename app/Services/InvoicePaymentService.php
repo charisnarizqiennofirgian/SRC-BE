@@ -34,7 +34,7 @@ class InvoicePaymentService
     ): InvoicePayment {
         DB::beginTransaction();
         try {
-            $invoice = SalesInvoice::findOrFail($salesInvoiceId);
+            $invoice = SalesInvoice::lockForUpdate()->findOrFail($salesInvoiceId);
 
             if ($invoice->payment_status === 'PAID') {
                 throw new \Exception('Invoice sudah lunas');
@@ -81,8 +81,8 @@ class InvoicePaymentService
     ): InvoicePayment {
         DB::beginTransaction();
         try {
-            $invoice = SalesInvoice::findOrFail($salesInvoiceId);
-            $downPayment = DownPayment::findOrFail($downPaymentId);
+            $invoice = SalesInvoice::lockForUpdate()->findOrFail($salesInvoiceId);
+            $downPayment = DownPayment::lockForUpdate()->findOrFail($downPaymentId);
 
             if ($invoice->payment_status === 'PAID') {
                 throw new \Exception('Invoice sudah lunas');

@@ -39,6 +39,20 @@ class ProductionMonitoringController extends Controller
         return $poIds;
     }
 
+    private function waterfallAllocate($detailsForItem, float $totalQty, string $targetField = 'quantity'): array
+    {
+        $cumulative = 0;
+        $allocations = [];
+        foreach ($detailsForItem as $d) {
+            $targetQty = (float) $d->{$targetField};
+            $remainingBudget = max(0, $totalQty - $cumulative);
+            $allocated = min($targetQty, $remainingBudget);
+            $allocations[$d->id] = $allocated;
+            $cumulative += $allocated;
+        }
+        return $allocations;
+    }
+
     // Kumpulkan semua ID produksi dari semua sub-tabel untuk query reject
     private function getAllProductionIds(array $poIds): array
     {
@@ -92,6 +106,16 @@ class ProductionMonitoringController extends Controller
         return $result;
     }
 
+    private function markPipelineRemainder(array $rawQty, array $pipelineRemaining): array
+    {
+        $result = [];
+        foreach ($rawQty as $key => $raw) {
+            $remaining = (float) $pipelineRemaining[$key];
+            $result[$key] = $remaining > 0.0001 && (float) $raw > $remaining + 0.0001;
+        }
+        return $result;
+    }
+
     private function estimateProdukJadiFromBom($componentSums, array $bomRecipeMap): float
     {
         $impliedUnits = [];
@@ -142,6 +166,10 @@ class ProductionMonitoringController extends Controller
                 // Semua detail dari semua PO milik SO ini (untuk cek moulding per item)
                 $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
                 $poDetailQueueByItem = $allPoDetails->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
+
+                $soDetailsByItem = $so->details->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
+                $hilirAllocationCache = [];
+                $qcFinalAllocationCache = [];
 
                 // Search IDs zona hilir, di-scope ke PO milik SO ini saja (bukan seluruh gudang)
                 // 'anyam' ikut lewat loop generik ini juga (reference_id-nya anyam_productions.id,
@@ -439,6 +467,17 @@ class ProductionMonitoringController extends Controller
                         }
                         $qtyHilir[$key] = $qty;
                     }
+
+                    if ($soDetailsByItem->has($itemId) && $soDetailsByItem[$itemId]->count() > 1) {
+                        $detailsForItem = $soDetailsByItem[$itemId];
+                        foreach ($qtyHilir as $key => $rawQty) {
+                            if (!isset($hilirAllocationCache[$itemId][$key])) {
+                                $hilirAllocationCache[$itemId][$key] = $this->waterfallAllocate($detailsForItem, $rawQty);
+                            }
+                            $qtyHilir[$key] = $hilirAllocationCache[$itemId][$key][$detail->id] ?? 0;
+                        }
+                    }
+
                     // 'ruskomp' dihitung dari $qtyRuskomp (qty_produk_jadi manual, per item), bukan dari
                     // InventoryLog.item_id -- lihat catatan di atas kenapa itu tidak pernah bisa cocok.
                     $qtyHilir['ruskomp'] = $qtyRuskomp;
@@ -456,6 +495,14 @@ class ProductionMonitoringController extends Controller
                             ->where('direction', 'IN')
                             ->whereIn('reference_id', $qcFinalSearchIds)
                             ->sum('qty');
+                    }
+
+                    if ($soDetailsByItem->has($itemId) && $soDetailsByItem[$itemId]->count() > 1) {
+                        $detailsForItem = $soDetailsByItem[$itemId];
+                        if (!isset($qcFinalAllocationCache[$itemId])) {
+                            $qcFinalAllocationCache[$itemId] = $this->waterfallAllocate($detailsForItem, (float) $qtyQcFinal);
+                        }
+                        $qtyQcFinal = $qcFinalAllocationCache[$itemId][$detail->id] ?? 0;
                     }
 
                     $allProductionIds = $this->getAllProductionIds($poIds);
@@ -483,7 +530,7 @@ class ProductionMonitoringController extends Controller
                     // yang strict) — jadi konsisten dengan cara stage lain diperlakukan, Anyam ikut
                     // pola yang sama: begitu ada progress Anyam, Assembling/Sanding/Finishing ikut
                     // otomatis "berkurang" mengikuti suffix-sum-nya.
-                    $pipelineRemaining = $this->applyPipelineRemaining([
+                    $rawQtyForPipeline = [
                         'moulding'   => $qtyMoulding,
                         'mesin'      => $qtyMesin,
                         'ruskomp'    => $qtyHilir['ruskomp'],
@@ -494,18 +541,9 @@ class ProductionMonitoringController extends Controller
                         'anyam'      => $qtyHilir['anyam'],
                         'qc_final'   => (float) $qtyQcFinal,
                         'packing'    => $qtyHilir['packing'],
-                    ]);
-
-                    $downstreamOfMesin = $qtyHilir['ruskomp'] + $qtyHilir['assembling'] + $qtyHilir['sanding']
-                        + $qtyHilir['rustik'] + $qtyHilir['finishing'] + $qtyHilir['anyam']
-                        + (float) $qtyQcFinal + $qtyHilir['packing'];
-
-                    if ($qtyMesin + $downstreamOfMesin > 0) {
-                        $pipelineRemaining['moulding'] = 0;
-                    }
-                    if ($downstreamOfMesin > 0) {
-                        $pipelineRemaining['mesin'] = 0;
-                    }
+                    ];
+                    $pipelineRemaining = $this->applyPipelineRemaining($rawQtyForPipeline);
+                    $pipelineIsRemainder = $this->markPipelineRemainder($rawQtyForPipeline, $pipelineRemaining);
 
                     $items[] = [
                         'detail_id'         => $detail->id,
@@ -522,20 +560,29 @@ class ProductionMonitoringController extends Controller
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
                         'qty_moulding'      => $pipelineRemaining['moulding'],
+                        'qty_moulding_is_remainder' => $pipelineIsRemainder['moulding'],
                         'moulding_components' => $mouldingComponents,
                         'moulding_bom_checklist' => $mouldingBomChecklist,
                         'qty_mesin'         => $pipelineRemaining['mesin'],
+                        'qty_mesin_is_remainder' => $pipelineIsRemainder['mesin'],
                         'mesin_components'  => $mesinComponents,
                         'mesin_bom_checklist' => $mesinBomChecklist,
 
                         // Zona Hilir
                         'qty_ruskomp'       => $pipelineRemaining['ruskomp'],
+                        'qty_ruskomp_is_remainder' => $pipelineIsRemainder['ruskomp'],
                         'qty_assembling'    => $pipelineRemaining['assembling'],
+                        'qty_assembling_is_remainder' => $pipelineIsRemainder['assembling'],
                         'qty_sanding'       => $pipelineRemaining['sanding'],
+                        'qty_sanding_is_remainder' => $pipelineIsRemainder['sanding'],
                         'qty_rustik'        => $pipelineRemaining['rustik'],
+                        'qty_rustik_is_remainder' => $pipelineIsRemainder['rustik'],
                         'qty_finishing'     => $pipelineRemaining['finishing'],
+                        'qty_finishing_is_remainder' => $pipelineIsRemainder['finishing'],
                         'qty_anyam'         => $pipelineRemaining['anyam'],
+                        'qty_anyam_is_remainder' => $pipelineIsRemainder['anyam'],
                         'qty_qc_final'      => $pipelineRemaining['qc_final'],
+                        'qty_qc_final_is_remainder' => $pipelineIsRemainder['qc_final'],
                         'qty_packing'       => $pipelineRemaining['packing'],
                         'qty_reject'        => (float) $qtyReject,
                         'has_reject'        => $qtyReject > 0,
@@ -642,9 +689,16 @@ class ProductionMonitoringController extends Controller
                     $statusKd         = $hasLaterThanKd && $hasKd             ? 'done' : ($hasLaterThanKd && !$hasKd             ? 'skip' : ($hasKd         ? 'in_progress' : 'waiting'));
                     $statusPembahanan = $hasLaterThanPembahanan && $hasPembahanan ? 'done' : ($hasLaterThanPembahanan && !$hasPembahanan ? 'skip' : ($hasPembahanan ? 'in_progress' : 'waiting'));
 
+                    $soDetailQueueByItem = $so->details->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
+                    $poDetailsByItem = $po->details->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
+                    $sampleHilirAllocationCache = [];
+
                     $items = [];
                     foreach ($po->details as $detail) {
-                        $soDetail = $so->details->firstWhere('item_id', $detail->item_id);
+                        $soDetail = null;
+                        if ($soDetailQueueByItem->has($detail->item_id) && $soDetailQueueByItem[$detail->item_id]->isNotEmpty()) {
+                            $soDetail = $soDetailQueueByItem[$detail->item_id]->shift();
+                        }
 
                         // Item yang sudah terkirim penuh (quantity_shipped >= quantity) tidak perlu
                         // tampil lagi di monitoring produksi sampel — sama seperti fix di index()
@@ -703,6 +757,21 @@ class ProductionMonitoringController extends Controller
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
+                        if ($poDetailsByItem->has($itemId) && $poDetailsByItem[$itemId]->count() > 1) {
+                            $poDetailsForItem = $poDetailsByItem[$itemId];
+                            if (!isset($sampleHilirAllocationCache[$itemId]['prototype'])) {
+                                $sampleHilirAllocationCache[$itemId]['prototype'] = $this->waterfallAllocate($poDetailsForItem, $itemQtyPrototype, 'qty_planned');
+                            }
+                            if (!isset($sampleHilirAllocationCache[$itemId]['sanding'])) {
+                                $sampleHilirAllocationCache[$itemId]['sanding'] = $this->waterfallAllocate($poDetailsForItem, $itemQtySanding, 'qty_planned');
+                            }
+                            if (!isset($sampleHilirAllocationCache[$itemId]['packing'])) {
+                                $sampleHilirAllocationCache[$itemId]['packing'] = $this->waterfallAllocate($poDetailsForItem, $itemQtyPacking, 'qty_planned');
+                            }
+                            $itemQtyPrototype = $sampleHilirAllocationCache[$itemId]['prototype'][$detail->id] ?? 0;
+                            $itemQtySanding   = $sampleHilirAllocationCache[$itemId]['sanding'][$detail->id] ?? 0;
+                            $itemQtyPacking   = $sampleHilirAllocationCache[$itemId]['packing'][$detail->id] ?? 0;
+                        }
 
                         $itemHasLaterThanSawmill = $hasKd || $hasPembahanan
                             || $itemQtyMoulding > 0 || $itemQtyPrototype > 0 || $itemQtySanding > 0 || $itemQtyPacking > 0;
@@ -755,16 +824,14 @@ class ProductionMonitoringController extends Controller
                         }
 
 
-                        $pipelineRemainingSample = $this->applyPipelineRemaining([
+                        $rawQtyForPipelineSample = [
                             'moulding'  => $itemQtyMoulding,
                             'prototype' => $itemQtyPrototype,
                             'sanding'   => $itemQtySanding,
                             'packing'   => $itemQtyPacking,
-                        ]);
-
-                        if ($itemQtyPrototype + $itemQtySanding + $itemQtyPacking > 0) {
-                            $pipelineRemainingSample['moulding'] = 0;
-                        }
+                        ];
+                        $pipelineRemainingSample = $this->applyPipelineRemaining($rawQtyForPipelineSample);
+                        $pipelineIsRemainderSample = $this->markPipelineRemainder($rawQtyForPipelineSample, $pipelineRemainingSample);
 
                         $items[] = [
                             'detail_id'         => $detail->id,
@@ -777,10 +844,13 @@ class ProductionMonitoringController extends Controller
                             'status_kd'         => $statusKd,
                             'status_pembahanan' => $statusPembahanan,
                             'qty_moulding'      => $pipelineRemainingSample['moulding'],
+                            'qty_moulding_is_remainder' => $pipelineIsRemainderSample['moulding'],
                             'moulding_components' => $itemMouldingComponents,
                             'moulding_bom_checklist' => $itemMouldingBomChecklist,
                             'qty_prototype'     => $pipelineRemainingSample['prototype'],
+                            'qty_prototype_is_remainder' => $pipelineIsRemainderSample['prototype'],
                             'qty_sanding'       => $pipelineRemainingSample['sanding'],
+                            'qty_sanding_is_remainder' => $pipelineIsRemainderSample['sanding'],
                             'qty_packing'       => $pipelineRemainingSample['packing'],
                             'sisa'              => max(0, $target - $itemQtyPacking),
                             'is_done'           => ($itemQtyPacking >= $target && $target > 0) || $po->status === 'completed',

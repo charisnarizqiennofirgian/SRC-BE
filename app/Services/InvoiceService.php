@@ -153,7 +153,7 @@ class InvoiceService
             ]);
 
             foreach ($dpAllocations as $allocation) {
-                $dp = DownPayment::find($allocation['down_payment_id']);
+                $dp = DownPayment::lockForUpdate()->find($allocation['down_payment_id']);
                 $this->downPaymentService->useDownPayment($dp, $allocation['amount_used']);
                 $dp->update(['status' => $dp->remaining_amount <= 0 ? 'FULLY_USED' : 'PARTIALLY_USED']);
             }

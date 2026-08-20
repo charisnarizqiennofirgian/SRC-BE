@@ -18,7 +18,6 @@ use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
 use App\Http\Controllers\Api\DeliveryOrderController;
-use App\Http\Controllers\Api\ProductionController;
 use App\Http\Controllers\Api\WarehouseController;
 use App\Http\Controllers\Api\SawmillProductionController;
 use App\Http\Controllers\Api\InventoryController;
@@ -296,11 +295,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::delete('/{id}', [InvoicePaymentController::class, 'destroy']);
     });
 
-    // --- PRODUKSI / BOM ---
-    // Catatan: belum jelas dipakai halaman mana (kemungkinan legacy) - dibiarkan terbuka utk sekarang
-    Route::post('/productions/transformation', [ProductionController::class, 'storeTransformation']);
-    Route::post('/productions/mutation', [ProductionController::class, 'storeMutation']);
-
     Route::middleware('permission:produksi-kd')->post('/candy-productions', [CandyProductionController::class, 'store']);
 
     // Tombol "Generate PO Produksi/Sampel" ada di halaman Sales Order (penjualan-so)
@@ -448,12 +442,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // --- AR AGING (PIUTANG) / AP AGING (HUTANG) ---
-    // CATATAN: menu frontend mereferensikan permission 'keuangan-ar-aging'/'keuangan-ap-aging' yang
-    // TERNYATA TIDAK PERNAH DIBUAT di tabel permissions (dicek langsung ke DB) - kalau digate sekarang,
-    // SEMUA orang termasuk super-admin akan ikut terblokir. Sengaja dibiarkan terbuka dulu sampai
-    // permission itu benar-benar dibuat & di-assign ke role yang sesuai.
-    Route::get('/ar-aging', [ArAgingController::class, 'index']);
-    Route::get('/ap-aging', [ApAgingController::class, 'index']);
+    Route::middleware('permission:keuangan-ar-aging')->get('/ar-aging', [ArAgingController::class, 'index']);
+    Route::middleware('permission:keuangan-ap-aging')->get('/ap-aging', [ApAgingController::class, 'index']);
 
     // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
     // Baca (dropdown akun) dipakai lintas modul (Pembelian/Penjualan/Keuangan) - tetap terbuka utk semua user login.

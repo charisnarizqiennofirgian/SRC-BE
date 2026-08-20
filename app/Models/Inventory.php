@@ -65,19 +65,29 @@ class Inventory extends Model
 
     public static function incrementGlobalStock($warehouseId, $itemId, $qty, $refPoId = null, $refProductId = null, $grade = null)
     {
-        $inventory = self::firstOrCreate(
-            [
-                'warehouse_id' => $warehouseId,
-                'item_id'      => $itemId,
-                'grade'        => $grade,
-            ],
-            [
-                'qty_pcs'        => 0,
-                'qty_m3'         => 0,
-                'ref_po_id'      => $refPoId,
-                'ref_product_id' => $refProductId,
-            ]
-        );
+        $conditions = [
+            'warehouse_id' => $warehouseId,
+            'item_id'      => $itemId,
+            'grade'        => $grade,
+        ];
+
+        $inventory = self::where($conditions)->lockForUpdate()->first();
+
+        if (!$inventory) {
+            try {
+                $inventory = self::create($conditions + [
+                    'qty_pcs'        => 0,
+                    'qty_m3'         => 0,
+                    'ref_po_id'      => $refPoId,
+                    'ref_product_id' => $refProductId,
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if ((int) $e->getCode() !== 23000) {
+                    throw $e;
+                }
+                $inventory = self::where($conditions)->lockForUpdate()->firstOrFail();
+            }
+        }
 
         $inventory->increment('qty_pcs', $qty);
 

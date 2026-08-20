@@ -24,6 +24,7 @@ class PaymentService
 
             // 1. Load Purchase Bill
             $bill = PurchaseBill::with(['supplier'])
+                                ->lockForUpdate()
                                 ->findOrFail($data['purchase_bill_id']);
 
             Log::info('Purchase Bill:', [

@@ -37,6 +37,8 @@ class PermissionsSeeder extends Seeder
             'keuangan-pembayaran-hutang',
             'keuangan-riwayat-pembayaran',
             'keuangan-neraca',
+            'keuangan-ar-aging',
+            'keuangan-ap-aging',
 
             // Manajemen Stok
             'stok-laporan-sawmill',
