@@ -86,33 +86,34 @@ class ProductionMonitoringController extends Controller
     // Ubah qty kumulatif per-stage jadi qty yang MASIH ADA di stage itu (belum pindah ke stage
     // berikutnya) — real-time pipeline view. $orderedQty harus urut sesuai alur produksi (dari
     // hulu ke hilir, key manapun asal urutannya benar). Untuk tiap stage: sisa = qty stage ini -
-    // SUM(qty SEMUA stage sesudahnya, apapun urutan sebenarnya produk itu ambil) — bukan cuma
-    // stage berikutnya persis, supaya produk yang skip 1-2 stage (mis. Ruskomp dilewati, langsung
-    // Assembling) tetap konsisten: begitu ada progress di stage manapun yang lebih hilir, stage2
-    // sebelumnya otomatis "terpakai" (di-floor ke 0 kalau hasilnya negatif).
+    // qty PALING JAUH yang sudah tercapai di stage manapun sesudahnya (MAX, bukan SUM).
+    //
+    // Kenapa MAX bukan SUM: raw qty tiap stage itu KUMULATIF (angka yang sama tidak pernah
+    // "dipindah", cuma dicatat lagi begitu masuk stage berikutnya). Kalau alurnya lurus tanpa
+    // skip (mis. Moulding->Mesin->Assembling, Ruskomp dilewati), qty yang sudah sampai Assembling
+    // itu PASTI sudah termasuk di dalam qty yang sudah sampai Mesin duluan (jalur yang sama,
+    // dicatat 2x di 2 tabel beda) — kalau keduanya dijumlah (SUM) buat dikurangi dari Moulding,
+    // qty itu kehitung dua kali dan Moulding jadi under-reported. MAX aman dari double-count ini:
+    // sisa[stage] = raw[stage] - MAX(raw semua stage sesudahnya), lalu di-floor ke 0 kalau negatif.
+    // Untuk kasus produk yang skip stage (mis. Ruskomp dilewati, langsung ke Assembling), MAX tetap
+    // benar karena stage yang dilewati raw-nya 0, jadi tidak mempengaruhi MAX sama sekali.
+    //
+    // Invarian buat verifikasi manual: SUM(hasil semua stage) harus selalu balik ke qty di stage
+    // paling hulu (asal tidak ada input dari luar pipeline) — kalau totalnya tidak cocok, berarti
+    // ada double-count yang balik lagi (jangan ganti MAX jadi SUM tanpa alasan kuat).
     private function applyPipelineRemaining(array $orderedQty): array
     {
         $keys      = array_keys($orderedQty);
         $result    = [];
-        $suffixSum = 0.0;
+        $suffixMax = 0.0;
 
         for ($i = count($keys) - 1; $i >= 0; $i--) {
             $key   = $keys[$i];
             $raw   = (float) $orderedQty[$key];
-            $result[$key] = max(0, $raw - $suffixSum);
-            $suffixSum   += $raw;
+            $result[$key] = max(0, $raw - $suffixMax);
+            $suffixMax    = max($suffixMax, $raw);
         }
 
-        return $result;
-    }
-
-    private function markPipelineRemainder(array $rawQty, array $pipelineRemaining): array
-    {
-        $result = [];
-        foreach ($rawQty as $key => $raw) {
-            $remaining = (float) $pipelineRemaining[$key];
-            $result[$key] = $remaining > 0.0001 && (float) $raw > $remaining + 0.0001;
-        }
         return $result;
     }
 
@@ -543,7 +544,6 @@ class ProductionMonitoringController extends Controller
                         'packing'    => $qtyHilir['packing'],
                     ];
                     $pipelineRemaining = $this->applyPipelineRemaining($rawQtyForPipeline);
-                    $pipelineIsRemainder = $this->markPipelineRemainder($rawQtyForPipeline, $pipelineRemaining);
 
                     $items[] = [
                         'detail_id'         => $detail->id,
@@ -560,29 +560,20 @@ class ProductionMonitoringController extends Controller
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
                         'qty_moulding'      => $pipelineRemaining['moulding'],
-                        'qty_moulding_is_remainder' => $pipelineIsRemainder['moulding'],
                         'moulding_components' => $mouldingComponents,
                         'moulding_bom_checklist' => $mouldingBomChecklist,
                         'qty_mesin'         => $pipelineRemaining['mesin'],
-                        'qty_mesin_is_remainder' => $pipelineIsRemainder['mesin'],
                         'mesin_components'  => $mesinComponents,
                         'mesin_bom_checklist' => $mesinBomChecklist,
 
                         // Zona Hilir
                         'qty_ruskomp'       => $pipelineRemaining['ruskomp'],
-                        'qty_ruskomp_is_remainder' => $pipelineIsRemainder['ruskomp'],
                         'qty_assembling'    => $pipelineRemaining['assembling'],
-                        'qty_assembling_is_remainder' => $pipelineIsRemainder['assembling'],
                         'qty_sanding'       => $pipelineRemaining['sanding'],
-                        'qty_sanding_is_remainder' => $pipelineIsRemainder['sanding'],
                         'qty_rustik'        => $pipelineRemaining['rustik'],
-                        'qty_rustik_is_remainder' => $pipelineIsRemainder['rustik'],
                         'qty_finishing'     => $pipelineRemaining['finishing'],
-                        'qty_finishing_is_remainder' => $pipelineIsRemainder['finishing'],
                         'qty_anyam'         => $pipelineRemaining['anyam'],
-                        'qty_anyam_is_remainder' => $pipelineIsRemainder['anyam'],
                         'qty_qc_final'      => $pipelineRemaining['qc_final'],
-                        'qty_qc_final_is_remainder' => $pipelineIsRemainder['qc_final'],
                         'qty_packing'       => $pipelineRemaining['packing'],
                         'qty_reject'        => (float) $qtyReject,
                         'has_reject'        => $qtyReject > 0,
@@ -831,7 +822,6 @@ class ProductionMonitoringController extends Controller
                             'packing'   => $itemQtyPacking,
                         ];
                         $pipelineRemainingSample = $this->applyPipelineRemaining($rawQtyForPipelineSample);
-                        $pipelineIsRemainderSample = $this->markPipelineRemainder($rawQtyForPipelineSample, $pipelineRemainingSample);
 
                         $items[] = [
                             'detail_id'         => $detail->id,
@@ -844,13 +834,10 @@ class ProductionMonitoringController extends Controller
                             'status_kd'         => $statusKd,
                             'status_pembahanan' => $statusPembahanan,
                             'qty_moulding'      => $pipelineRemainingSample['moulding'],
-                            'qty_moulding_is_remainder' => $pipelineIsRemainderSample['moulding'],
                             'moulding_components' => $itemMouldingComponents,
                             'moulding_bom_checklist' => $itemMouldingBomChecklist,
                             'qty_prototype'     => $pipelineRemainingSample['prototype'],
-                            'qty_prototype_is_remainder' => $pipelineIsRemainderSample['prototype'],
                             'qty_sanding'       => $pipelineRemainingSample['sanding'],
-                            'qty_sanding_is_remainder' => $pipelineIsRemainderSample['sanding'],
                             'qty_packing'       => $pipelineRemainingSample['packing'],
                             'sisa'              => max(0, $target - $itemQtyPacking),
                             'is_done'           => ($itemQtyPacking >= $target && $target > 0) || $po->status === 'completed',
