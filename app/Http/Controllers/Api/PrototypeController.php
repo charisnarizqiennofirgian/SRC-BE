@@ -149,6 +149,8 @@ class PrototypeController extends Controller
                     ]);
                 }
 
+                Item::whereKey($itemId)->increment('stock', $qty);
+
                 InventoryLog::create([
                     'date'             => $data['date'],
                     'time'             => now()->toTimeString(),
