@@ -12,10 +12,6 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->api(prepend: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-        ]);
-
         $middleware->alias([
             'cache.user' => \App\Http\Middleware\CacheUserData::class,
             'role' => \App\Http\Middleware\CheckRolePermission::class,
