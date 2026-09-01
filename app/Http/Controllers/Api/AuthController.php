@@ -46,10 +46,10 @@ class AuthController extends Controller
 
         Cache::put('user.' . $user->id, $user, 3600);
 
-        // ✅ COLLECT PERMISSIONS
+
         $permissions = $this->getUserPermissions($user);
 
-        // Tentukan dashboard route berdasarkan role
+
         $dashboardRoute = $this->getDashboardRouteByRole($user->roles->pluck('name')->toArray());
 
         return response()->json([
@@ -63,7 +63,7 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'roles' => $user->roles->pluck('name'),
             ],
-            'permissions' => $permissions,  // ✅ RETURN PERMISSIONS
+            'permissions' => $permissions,
             'dashboard_route' => $dashboardRoute
         ], 200);
     }
@@ -78,17 +78,15 @@ class AuthController extends Controller
         ], 200);
     }
 
-    /**
-     * ✅ GET USER PERMISSIONS
-     */
+
     private function getUserPermissions(User $user): array
     {
-        // Jika super-admin, return wildcard
+
         if ($user->hasRole('super-admin')) {
             return ['*'];
         }
 
-        // Collect all permissions dari semua roles
+
         $permissions = [];
         foreach ($user->roles as $role) {
             foreach ($role->permissions as $permission) {
@@ -96,25 +94,23 @@ class AuthController extends Controller
             }
         }
 
-        // Return unique permissions
+
         return array_values(array_unique($permissions));
     }
 
-    /**
-     * Tentukan dashboard route berdasarkan role user
-     */
+
     private function getDashboardRouteByRole(array $roles): string
     {
-        // Jika user memiliki role super-admin ATAU admin, arahkan ke halaman admin terpusat
+
         if (in_array('super-admin', $roles) || in_array('admin', $roles)) {
             return '/admin';
         }
 
         if (in_array('manager', $roles)) {
-            return '/manager/dashboard'; // Contoh untuk role lain
+            return '/manager/dashboard';
         }
 
-        // Default untuk role lainnya
+
         return '/dashboard';
     }
 }

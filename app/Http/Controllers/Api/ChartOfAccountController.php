@@ -8,6 +8,7 @@ use App\Exports\ChartOfAccountExport;
 use App\Exports\ChartOfAccountTemplateExport;
 use App\Imports\ChartOfAccountImport;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ChartOfAccountController extends Controller
@@ -52,7 +53,7 @@ class ChartOfAccountController extends Controller
                 'data' => $accounts
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching all COA: ' . $e->getMessage());
+            Log::error('Error fetching all COA: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data akun.',
@@ -242,7 +243,7 @@ class ChartOfAccountController extends Controller
 
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             // Excel validation error
-            \Log::error('Excel Validation Error: ' . json_encode($e->failures()));
+            Log::error('Excel Validation Error: ' . json_encode($e->failures()));
 
             return response()->json([
                 'success' => false,
@@ -252,7 +253,7 @@ class ChartOfAccountController extends Controller
 
         } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
             // File tidak bisa dibaca
-            \Log::error('Excel Reader Error: ' . $e->getMessage());
+            Log::error('Excel Reader Error: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -260,8 +261,8 @@ class ChartOfAccountController extends Controller
             ], 400);
 
         } catch (\Exception $e) {
-            \Log::error('Error import COA: ' . $e->getMessage());
-            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Error import COA: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
                 'success' => false,

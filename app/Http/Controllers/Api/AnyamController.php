@@ -33,8 +33,7 @@ class AnyamController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // Sumber stok Anyam: Assembling, Sanding, dan Finishing sekaligus (bisa dipersempit lewat ?warehouse_id=)
-    const SOURCE_WAREHOUSE_CODES = ['ASSEMBLING', 'SANDING', 'FINISHING'];
+       const SOURCE_WAREHOUSE_CODES = ['ASSEMBLING', 'SANDING', 'FINISHING'];
 
     public function sourceInventories(Request $request)
     {
@@ -79,7 +78,7 @@ class AnyamController extends Controller
         ]);
 
         return DB::transaction(function () use ($data) {
-            // Gudang sumber yang diizinkan: Assembling, Sanding, Finishing (dipilih per baris item)
+
             $allowedSourceWarehouses = Warehouse::whereIn('code', self::SOURCE_WAREHOUSE_CODES)
                 ->get()
                 ->keyBy('id');
@@ -98,7 +97,7 @@ class AnyamController extends Controller
                 }
             }
 
-            // Gudang tujuan AYAM
+
             $targetWarehouse = Warehouse::where('code', 'AYAM')->first();
             if (!$targetWarehouse) {
                 throw ValidationException::withMessages([
@@ -109,9 +108,7 @@ class AnyamController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // Generate nomor dokumen — pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris),
-            // supaya tidak bentrok kalau ada baris bulan ini yang sudah dihapus (lihat insiden serupa
-            // di OperatorMesinController).
+
             $prefix = 'ANYAM-' . now()->format('Ym') . '-';
             $last   = AnyamProduction::where('document_number', 'like', $prefix . '%')
                 ->orderByDesc('document_number')
@@ -119,7 +116,7 @@ class AnyamController extends Controller
             $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
             $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            // Simpan header
+
             $anyam = AnyamProduction::create([
                 'document_number' => $documentNumber,
                 'date'            => $data['date'],
@@ -133,7 +130,7 @@ class AnyamController extends Controller
                 $qty         = $itemData['qty'];
                 $sourceWh    = $allowedSourceWarehouses->get($itemData['warehouse_id']);
 
-                // Cek stok di gudang sumber baris ini (Assembling/Sanding/Finishing)
+
                 $sourceInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $sourceWh->id)
                     ->lockForUpdate()
@@ -146,7 +143,7 @@ class AnyamController extends Controller
                     ]);
                 }
 
-                // Kurangi stok gudang sumber
+
                 $sourceInv->decrement('qty_pcs', $qty);
 
                 InventoryLog::create([
@@ -165,7 +162,7 @@ class AnyamController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Tambah stok Anyam
+
                 $targetInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $targetWarehouse->id)
                     ->lockForUpdate()
@@ -200,7 +197,7 @@ class AnyamController extends Controller
                 Log::info("Anyam item: item_id={$itemId}, qty={$qty}");
             }
 
-            // Update stage PO
+
             if ($productionOrder) {
                 $productionOrder->current_stage = 'anyam';
                 $productionOrder->status        = 'in_progress';

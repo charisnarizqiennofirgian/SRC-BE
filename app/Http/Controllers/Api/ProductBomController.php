@@ -14,12 +14,11 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ProductBomController extends Controller
 {
-    // 🔹 LANGKAH 2: untuk halaman index Vue
-    public function index()
+       public function index()
     {
         $rows = ProductBom::selectRaw('parent_item_id, COUNT(*) as components_count')
             ->groupBy('parent_item_id')
-            ->with('parentItem') // pastikan relasi ada di model ProductBom
+            ->with('parentItem')
             ->get()
             ->map(function ($row) {
                 return [
@@ -36,15 +35,7 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // =============================================
-    // GET: Cari item untuk dropdown form BOM
-    // role=parent → item kategori Produk Jadi, role=child → item kategori Komponen (keduanya
-    // filter by kategori, bukan items.type — banyak item lama, dan item baru yang dibuat lewat
-    // form Master Barang biasa (ProductController::store()), tidak konsisten diisi items.type-nya.
-    // items.type tetap dicek via orWhereIn sebagai fallback untuk item yang sudah benar ke-tag
-    // tapi kebetulan ada di kategori lain)
-    // =============================================
-    public function searchItems(Request $request)
+        public function searchItems(Request $request)
     {
         $request->validate([
             'role'   => ['nullable', 'string', 'in:parent,child'],
@@ -87,9 +78,7 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // =============================================
-    // GET: Detail BOM satu produk (dipakai form edit & filter di Moulding/Mesin/Assembling)
-    // =============================================
+
     public function show($itemId)
     {
         $parent = Item::find($itemId);
@@ -124,9 +113,7 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // =============================================
-    // POST: Simpan (replace-all) BOM untuk satu produk
-    // =============================================
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -154,10 +141,7 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // =============================================
-    // DELETE: Hapus seluruh BOM satu produk
-    // =============================================
-    public function destroy($itemId)
+        public function destroy($itemId)
     {
         ProductBom::where('parent_item_id', $itemId)->delete();
 
@@ -167,7 +151,7 @@ class ProductBomController extends Controller
         ]);
     }
 
-    // 🔹 LANGKAH 4: import Excel BOM
+
     public function import(Request $request)
     {
         $request->validate([

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -46,7 +47,7 @@ class SupplierController extends Controller
             return response()->json($suppliers, 200);
 
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil data supplier: ' . $e->getMessage());
+            Log::error('Error saat mengambil data supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data supplier.',
@@ -80,14 +81,14 @@ class SupplierController extends Controller
             ], 201);
 
         } catch (ValidationException $e) {
-            \Log::error('Validation error saat menambah supplier: ' . $e->getMessage());
+            Log::error('Validation error saat menambah supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Data tidak valid.',
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat menambah supplier: ' . $e->getMessage());
+            Log::error('Error saat menambah supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menambahkan supplier.',
@@ -121,14 +122,14 @@ class SupplierController extends Controller
             ], 200);
 
         } catch (ValidationException $e) {
-            \Log::error('Validation error saat update supplier: ' . $e->getMessage());
+            Log::error('Validation error saat update supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Data tidak valid.',
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat update supplier: ' . $e->getMessage());
+            Log::error('Error saat update supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat memperbarui supplier.',
@@ -150,7 +151,7 @@ class SupplierController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            \Log::error('Error saat menghapus supplier: ' . $e->getMessage());
+            Log::error('Error saat menghapus supplier: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menghapus supplier. Kemungkinan sudah terhubung dengan data lain.'

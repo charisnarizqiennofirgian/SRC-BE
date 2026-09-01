@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Dokumen;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -159,7 +160,7 @@ class DokumenController extends Controller
         // Cek hak hapus — hanya uploader atau admin
         if ($dokumen->diupload_oleh !== Auth::id()) {
             $user = Auth::user();
-            if (!$user->hasRole('super-admin') && !$user->hasRole('admin')) {
+            if (!$user instanceof User || (!$user->hasRole('super-admin') && !$user->hasRole('admin'))) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Anda tidak punya akses untuk menghapus file ini.'

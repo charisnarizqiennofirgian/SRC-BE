@@ -20,9 +20,7 @@ use Illuminate\Validation\ValidationException;
 
 class AssemblingProductionController extends Controller
 {
-    // =============================================
-    // GET: Available POs
-    // =============================================
+
     public function getAvailablePos()
     {
         $pos = ProductionOrder::where('status', '!=', 'completed')
@@ -42,10 +40,7 @@ class AssemblingProductionController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // =============================================
-    // GET: Stok dari gudang sumber
-    // Default: MESIN + RUSKOMP (bisa dipersempit lewat ?warehouse_id=)
-    // =============================================
+
     public function getSourceItems(Request $request)
     {
         if ($request->filled('warehouse_id')) {
@@ -77,9 +72,7 @@ class AssemblingProductionController extends Controller
         return response()->json(['success' => true, 'data' => $inventories]);
     }
 
-    // =============================================
-    // POST: Simpan proses assembling
-    // =============================================
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -110,7 +103,7 @@ class AssemblingProductionController extends Controller
 
             Log::info("=== {$processLabel} START ===", ['po_id' => $data['ref_po_id']]);
 
-            // === GUDANG ===
+
             $warehouseAssembling = Warehouse::where('code', 'ASSEMBLING')->first();
             $warehouseReject     = Warehouse::where('code', 'REJECT')->first();
 
@@ -128,9 +121,7 @@ class AssemblingProductionController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // === NOMOR DOKUMEN ===
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
-            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+
             $docPrefix = ($data['process_type'] === 'sub_assembling' ? 'SUB' : 'RKT') . '-' . now()->format('Ym') . '-';
             $last = AssemblingProduction::where('process_type', $data['process_type'])
                 ->where('document_number', 'like', $docPrefix . '%')
@@ -139,7 +130,7 @@ class AssemblingProductionController extends Controller
             $runningNumber  = $last ? ((int) substr($last, strlen($docPrefix))) + 1 : 1;
             $documentNumber = $docPrefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            // === SIMPAN HEADER ===
+
             $assembling = AssemblingProduction::create([
                 'document_number' => $documentNumber,
                 'date'            => $data['date'],
@@ -149,7 +140,7 @@ class AssemblingProductionController extends Controller
                 'created_by'      => Auth::id(),
             ]);
 
-            // === INPUT: Kurangi stok gudang sumber ===
+
             foreach ($data['inputs'] as $index => $input) {
                 $itemId      = $input['item_id'];
                 $warehouseId = $input['warehouse_id'];
@@ -173,10 +164,7 @@ class AssemblingProductionController extends Controller
                     ]);
                 }
 
-                // Komponen: kurangi breakdown natural/warna karena stok benar-benar
-                // dipakai habis di sini (bukan sekadar pindah gudang seperti Mesin/Moulding)
-                // Ditulis ke items (global, kompatibilitas) dan inventories (per gudang, sumber baru
-                // untuk Stock Index yang di-filter gudang)
+
                 $inputItem = Item::lockForUpdate()->find($itemId);
                 $sourceInvExtra = [];
                 if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
@@ -231,7 +219,7 @@ class AssemblingProductionController extends Controller
                 Log::info("Input: {$itemName} - {$qty} pcs dari {$whName}");
             }
 
-            // === OUTPUT: Tambah stok Gudang Assembling ===
+
             foreach ($data['outputs'] as $output) {
                 $itemId   = $output['item_id'];
                 $qty      = $output['qty'];
@@ -280,7 +268,7 @@ class AssemblingProductionController extends Controller
                 Log::info("Output: {$itemName} - {$qty} pcs ke Gudang Assembling");
             }
 
-            // === REJECT → Gudang Reject ===
+
             if (!empty($data['rejects'])) {
                 foreach ($data['rejects'] as $reject) {
                     if (empty($reject['item_id']) || empty($reject['qty'])) continue;
@@ -331,7 +319,7 @@ class AssemblingProductionController extends Controller
                 }
             }
 
-            // === UPDATE STAGE PO ===
+
             if ($productionOrder) {
                 $productionOrder->current_stage = 'assembly';
                 $productionOrder->status        = 'in_progress';

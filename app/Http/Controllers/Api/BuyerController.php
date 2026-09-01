@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Buyer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -32,7 +33,7 @@ class BuyerController extends Controller
             return response()->json($buyers, 200);
 
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil data buyer: ' . $e->getMessage());
+            Log::error('Error saat mengambil data buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data buyer.',
@@ -62,14 +63,14 @@ class BuyerController extends Controller
             ], 201);
 
         } catch (ValidationException $e) {
-            \Log::error('Validation error saat menambah buyer: ' . $e->getMessage());
+            Log::error('Validation error saat menambah buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Data tidak valid.',
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat menambah buyer: ' . $e->getMessage());
+            Log::error('Error saat menambah buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menambahkan buyer.',
@@ -99,14 +100,14 @@ class BuyerController extends Controller
             ], 200);
 
         } catch (ValidationException $e) {
-            \Log::error('Validation error saat update buyer: ' . $e->getMessage());
+            Log::error('Validation error saat update buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Data tidak valid.',
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Error saat update buyer: ' . $e->getMessage());
+            Log::error('Error saat update buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat memperbarui buyer.',
@@ -125,7 +126,7 @@ class BuyerController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            \Log::error('Error saat menghapus buyer: ' . $e->getMessage());
+            Log::error('Error saat menghapus buyer: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menghapus buyer. Kemungkinan sudah terhubung dengan data lain.'
@@ -133,16 +134,13 @@ class BuyerController extends Controller
         }
     }
 
-    // =============================================
-    // GET: Download Template Excel
-    // =============================================
-    public function downloadTemplate()
+       public function downloadTemplate()
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Template Buyer');
 
-        // Header
+
         $headers = ['code', 'name', 'address', 'phone'];
         $headerStyle = [
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -157,7 +155,7 @@ class BuyerController extends Controller
         }
         $sheet->getStyle('A1:D1')->applyFromArray($headerStyle);
 
-        // Contoh data
+
         $examples = [
             ['BUY-001', 'PT Contoh Buyer', 'Jl. Contoh No. 1, Jakarta', '021-1234567'],
             ['BUY-002', 'CV Buyer Dua', 'Jl. Sample No. 2, Surabaya', '031-7654321'],
@@ -184,10 +182,7 @@ class BuyerController extends Controller
         ])->deleteFileAfterSend(true);
     }
 
-    // =============================================
-    // POST: Import dari Excel
-    // =============================================
-    public function import(Request $request)
+        public function import(Request $request)
     {
         $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls', 'max:5120'],
@@ -199,7 +194,7 @@ class BuyerController extends Controller
             $sheet = $spreadsheet->getActiveSheet();
             $rows = $sheet->toArray();
 
-            // Skip header row
+
             array_shift($rows);
 
             $imported = 0;
@@ -209,7 +204,7 @@ class BuyerController extends Controller
             foreach ($rows as $i => $row) {
                 $rowNum = $i + 2;
 
-                // Skip baris kosong
+
                 if (empty($row[0]) && empty($row[1])) continue;
 
                 $code = trim($row[0] ?? '');
@@ -221,7 +216,7 @@ class BuyerController extends Controller
                     continue;
                 }
 
-                // Skip kalau kode sudah ada
+
                 if (Buyer::where('code', $code)->exists()) {
                     $errors[] = "Baris {$rowNum}: Kode '{$code}' sudah ada, dilewati.";
                     $skipped++;
@@ -254,9 +249,7 @@ class BuyerController extends Controller
         }
     }
 
-    // =============================================
-    // GET: Export semua buyer ke Excel
-    // =============================================
+
     public function export()
     {
         $buyers = Buyer::orderBy('code')->get();
@@ -265,7 +258,7 @@ class BuyerController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Data Buyer');
 
-        // Header
+
         $headers = ['NO', 'KODE', 'NAMA', 'ALAMAT', 'TELEPON'];
         $headerStyle = [
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
@@ -282,7 +275,7 @@ class BuyerController extends Controller
         $sheet->getStyle('A1:E1')->applyFromArray($headerStyle);
         $sheet->getRowDimension(1)->setRowHeight(22);
 
-        // Data
+
         foreach ($buyers as $i => $buyer) {
             $row = $i + 2;
             $sheet->setCellValue("A{$row}", $i + 1);
@@ -298,7 +291,7 @@ class BuyerController extends Controller
             }
         }
 
-        // Border
+
         $lastRow = count($buyers) + 1;
         $sheet->getStyle("A1:E{$lastRow}")->applyFromArray([
             'borders' => ['allBorders' => ['borderStyle' => 'thin', 'color' => ['rgb' => 'E5E7EB']]],

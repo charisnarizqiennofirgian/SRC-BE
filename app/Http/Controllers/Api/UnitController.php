@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Unit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class UnitController extends Controller
@@ -21,7 +22,7 @@ class UnitController extends Controller
                 'data' => $units
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil semua satuan: ' . $e->getMessage());
+            Log::error('Error saat mengambil semua satuan: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data.',
@@ -53,7 +54,7 @@ class UnitController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Error saat mengambil data satuan: ' . $e->getMessage());
+            Log::error('Error saat mengambil data satuan: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat mengambil data.',
@@ -98,7 +99,7 @@ class UnitController extends Controller
                 'data' => $unit
             ], 201);
         } catch (\Exception $e) {
-            \Log::error('Error saat menambah satuan: ' . $e->getMessage());
+            Log::error('Error saat menambah satuan: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat menyimpan data.',
@@ -132,7 +133,7 @@ class UnitController extends Controller
                 'data' => $unit
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error saat update satuan: ' . $e->getMessage());
+            Log::error('Error saat update satuan: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Terjadi kesalahan saat memperbarui data.',
@@ -152,7 +153,7 @@ class UnitController extends Controller
                 'message' => 'Satuan berhasil dihapus.'
             ]);
         } catch (\Exception $e) {
-            \Log::error('Gagal menghapus satuan: ' . $e->getMessage());
+            Log::error('Gagal menghapus satuan: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menghapus. Kemungkinan satuan ini masih digunakan oleh data lain.'
