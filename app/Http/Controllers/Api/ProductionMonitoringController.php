@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Inventory;
+use App\Models\ProductionOrderDetail;
 use App\Models\SalesOrder;
 use App\Models\InventoryLog;
 use Illuminate\Http\Request;
@@ -13,7 +15,6 @@ class ProductionMonitoringController extends Controller
 {
     private const QTY_PRODUK_JADI_FEATURE_CUTOFF = '2026-07-16 14:24:20';
 
-    // Sub-tabel map — dipakai di index, detail, dan exportExcel
     private array $subTableMap = [
         'SAWMILL'         => 'sawmill_productions',
         'KD'              => 'kd_productions',
@@ -39,6 +40,23 @@ class ProductionMonitoringController extends Controller
         return $poIds;
     }
 
+    private function canRefreshInitialStock(?ProductionOrderDetail $poDetail, array $rawQty): bool
+    {
+        if (!$poDetail) {
+            return false;
+        }
+
+        if (!empty($poDetail->current_stage)) {
+            return false;
+        }
+
+        if ((float) $poDetail->qty_produced > 0) {
+            return false;
+        }
+
+        return array_sum($rawQty) <= 0;
+    }
+
     private function waterfallAllocate($detailsForItem, float $totalQty, string $targetField = 'quantity'): array
     {
         $cumulative = 0;
@@ -53,7 +71,6 @@ class ProductionMonitoringController extends Controller
         return $allocations;
     }
 
-    // Kumpulkan semua ID produksi dari semua sub-tabel untuk query reject
     private function getAllProductionIds(array $poIds): array
     {
         if (empty($poIds)) return [];
@@ -72,7 +89,6 @@ class ProductionMonitoringController extends Controller
         return array_unique($allIds);
     }
 
-    // Zona hilir — tiap key gudang bisa dipetakan ke >1 transaction_type (mis. assembling: sub_assembling & rakit)
     private array $hilirStageTypes = [
         'ruskomp'    => ['RUSTIK_KOMPONEN'],
         'assembling' => ['SUB_ASSEMBLING', 'RAKIT'],
@@ -83,24 +99,6 @@ class ProductionMonitoringController extends Controller
         'packing'    => ['PACKING'],
     ];
 
-    // Ubah qty kumulatif per-stage jadi qty yang MASIH ADA di stage itu (belum pindah ke stage
-    // berikutnya) — real-time pipeline view. $orderedQty harus urut sesuai alur produksi (dari
-    // hulu ke hilir, key manapun asal urutannya benar). Untuk tiap stage: sisa = qty stage ini -
-    // qty PALING JAUH yang sudah tercapai di stage manapun sesudahnya (MAX, bukan SUM).
-    //
-    // Kenapa MAX bukan SUM: raw qty tiap stage itu KUMULATIF (angka yang sama tidak pernah
-    // "dipindah", cuma dicatat lagi begitu masuk stage berikutnya). Kalau alurnya lurus tanpa
-    // skip (mis. Moulding->Mesin->Assembling, Ruskomp dilewati), qty yang sudah sampai Assembling
-    // itu PASTI sudah termasuk di dalam qty yang sudah sampai Mesin duluan (jalur yang sama,
-    // dicatat 2x di 2 tabel beda) — kalau keduanya dijumlah (SUM) buat dikurangi dari Moulding,
-    // qty itu kehitung dua kali dan Moulding jadi under-reported. MAX aman dari double-count ini:
-    // sisa[stage] = raw[stage] - MAX(raw semua stage sesudahnya), lalu di-floor ke 0 kalau negatif.
-    // Untuk kasus produk yang skip stage (mis. Ruskomp dilewati, langsung ke Assembling), MAX tetap
-    // benar karena stage yang dilewati raw-nya 0, jadi tidak mempengaruhi MAX sama sekali.
-    //
-    // Invarian buat verifikasi manual: SUM(hasil semua stage) harus selalu balik ke qty di stage
-    // paling hulu (asal tidak ada input dari luar pipeline) — kalau totalnya tidak cocok, berarti
-    // ada double-count yang balik lagi (jangan ganti MAX jadi SUM tanpa alasan kuat).
     private function applyPipelineRemaining(array $orderedQty): array
     {
         $keys      = array_keys($orderedQty);
@@ -164,7 +162,6 @@ class ProductionMonitoringController extends Controller
             foreach ($salesOrders as $so) {
                 $poIds = $so->productionOrders->pluck('id')->toArray();
 
-                // Semua detail dari semua PO milik SO ini (untuk cek moulding per item)
                 $allPoDetails = $so->productionOrders->flatMap(fn($po) => $po->details);
                 $poDetailQueueByItem = $allPoDetails->groupBy('item_id')->map(fn($g) => $g->sortBy('id')->values());
 
@@ -172,11 +169,6 @@ class ProductionMonitoringController extends Controller
                 $hilirAllocationCache = [];
                 $qcFinalAllocationCache = [];
 
-                // Search IDs zona hilir, di-scope ke PO milik SO ini saja (bukan seluruh gudang)
-                // 'anyam' ikut lewat loop generik ini juga (reference_id-nya anyam_productions.id,
-                // sudah didaftarkan di $subTableMap) — item_id di InventoryLog Anyam sama persis
-                // dengan produk yang dipindah (bukan komponen mentah), jadi tidak butuh perhitungan
-                // khusus terpisah seperti Ruskomp/QC Final.
                 $hilirSearchIds = [];
                 foreach ($this->hilirStageTypes as $txTypes) {
                     foreach ($txTypes as $txType) {
@@ -187,9 +179,6 @@ class ProductionMonitoringController extends Controller
                 $items = [];
 
                 foreach ($so->details as $detail) {
-                    // Item yang sudah terkirim penuh (quantity_shipped >= quantity) tidak perlu
-                    // diprioritaskan lagi di dashboard produksi — sudah tidak ada kerjaan produksi
-                    // yang tersisa untuk item ini, terlepas dari status current_stage/PO.
                     $qtyOrderedCheck = (float) $detail->quantity;
                     $qtyShippedCheck = (float) ($detail->quantity_shipped ?? 0);
                     if ($qtyOrderedCheck > 0 && $qtyShippedCheck >= $qtyOrderedCheck) {
@@ -198,7 +187,6 @@ class ProductionMonitoringController extends Controller
 
                     $itemId = $detail->item_id;
 
-                    // === ZONA HULU ===
                     $stageTypes = [
                         'sanwil'     => 'SAWMILL',
                         'kd'         => 'KD',
@@ -244,10 +232,6 @@ class ProductionMonitoringController extends Controller
                             $qtyMoulding += $this->estimateProdukJadiFromBom($legacyComponentSums, $bomRecipeMap);
                         }
 
-                        // Breakdown komponen yang sudah di-input di Moulding untuk produk ini (mis.
-                        // "Kaki 2, Atas 2") — dihitung terpisah dari qty_moulding di atas, selalu dari
-                        // moulding_production_outputs (data komponen granular), berlaku untuk semua
-                        // transaksi (lama maupun baru), tidak bergantung terisi/tidaknya qty_produk_jadi.
                         $allMouldingIds = $mouldingRows->pluck('id')->toArray();
                         if (!empty($allMouldingIds)) {
                             $componentSums = DB::table('moulding_production_outputs')
@@ -297,10 +281,6 @@ class ProductionMonitoringController extends Controller
                             $qtyMesin += $this->estimateProdukJadiFromBom($legacyMesinComponentSums, $bomRecipeMap);
                         }
 
-                        // Breakdown komponen yang sudah di-input/dikerjakan di Mesin untuk produk ini —
-                        // pola sama seperti moulding_components di atas: selalu dari mesin_production_outputs
-                        // (data komponen granular, karena Mesin BOM-filtered sejak input), berlaku untuk
-                        // semua transaksi (lama maupun baru), tidak bergantung terisi/tidaknya qty_produk_jadi.
                         $allMesinIds = $mesinRows->pluck('id')->toArray();
                         if (!empty($allMesinIds)) {
                             $mesinComponentSums = DB::table('mesin_production_outputs')
@@ -326,17 +306,6 @@ class ProductionMonitoringController extends Controller
                         }
                     }
 
-                    // === QTY RUSTIK KOMPONEN (per item, dari qty_produk_jadi manual) ===
-                    // Sama pola dengan Moulding/Mesin di atas -- Rustik Komponen mengonversi komponen
-                    // mentah jadi komponen lain (item_id di rustik_komponen_outputs SELALU komponen,
-                    // bukan produk jadi), jadi tidak bisa dicocokkan langsung ke $itemId produk jadi.
-                    // Sebelum fix ini (23 Juli 2026), qty_ruskomp SELALU 0 di seluruh dashboard karena
-                    // ProductionMonitoringController mencocokkan InventoryLog.item_id = produk jadi
-                    // secara langsung -- data itu tidak pernah ada utk transaksi RUSTIK_KOMPONEN.
-                    // Transaksi LAMA (sebelum kolom qty_produk_jadi ada) punya nilai NULL -- tetap
-                    // tampil 0 di kolom ini (tidak ada fallback qty komponen mentah seperti Moulding/
-                    // Mesin, karena breakdown komponennya juga tidak bisa dicocokkan ke produk jadi
-                    // manapun secara otomatis) sampai transaksi baru mengisi field ini.
                     $qtyRuskomp = 0;
                     if (!empty($detailIds)) {
                         $qtyRuskomp = (float) DB::table('rustik_komponen_productions')
@@ -345,12 +314,6 @@ class ProductionMonitoringController extends Controller
                             ->sum('qty_produk_jadi');
                     }
 
-                    // === CHECKLIST KOMPONEN vs RESEP MASTER BOM (Moulding & Mesin) ===
-                    // Referensi "komponen apa saja yang seharusnya ada" diambil dari resep di Master
-                    // BOM (product_boms) produk ini — bukan dari data produksi. Qty aktualnya dicocokkan
-                    // dari breakdown moulding_components/mesin_components yang sudah dihitung di atas.
-                    // Kalau produk belum punya resep BOM sama sekali, checklist dibiarkan KOSONG (tidak
-                    // ada fallback/tebakan) — frontend akan otomatis balik ke tampilan list biasa.
                     $mouldingBomChecklist = [];
                     $mesinBomChecklist    = [];
 
@@ -413,25 +376,6 @@ class ProductionMonitoringController extends Controller
                             }
 
                             if ($key === 'sanwil') {
-                                // Sawmill (Log->Jeblosan & Jeblosan->RST) hampir tidak pernah ditag
-                                // ref_po_id di lapangan -- admin belum tau PO-nya saat proses ini
-                                // (beda dari KD/Pembahanan yang ref_po_id-nya wajib diisi). Kalau cuma
-                                // andalkan $hasActivity (tag eksplisit), status ini akan SELALU
-                                // 'skip'/'waiting' walau secara fisik sudah dikerjakan. Fix: anggap
-                                // sawmill 'done' begitu ada bukti downstream (KD/Pembahanan/Moulding/
-                                // Mesin) untuk PO ini.
-                                //
-                                // Sengaja TIDAK dicoba pakai items.production_route/needsSawmill() untuk
-                                // membedakan 'done' vs 'skip' di sini -- dicek waktu perbaikan ini dibuat
-                                // (23 Juli 2026): SEMUA 10.955 item di database punya production_route =
-                                // 'sanding', bukan salah satu dari 4 nilai valid (from_log/from_rst/
-                                // direct/external). Kolom itu rusak/tidak pernah terisi benar di seluruh
-                                // data, jadi needsSawmill() akan SELALU false kalau dipakai -- bakal
-                                // mengulang bug yang sama (semua item salah label 'skip'). Sampai data
-                                // itu diperbaiki terpisah, status 'skip' utk sanwil TIDAK dipakai lagi di
-                                // sini -- untagged + ada progress hilir selalu dianggap 'done' (baik itu
-                                // beneran lewat sawmill maupun rute yang skip sawmill, dua-duanya sama-
-                                // sama "sudah tidak menghalangi" dari sisi status).
                                 $anyLaterActiveSanwil = $anyLaterActive || $qtyMoulding > 0 || $qtyMesin > 0;
 
                                 if ($hasActivity) {
@@ -451,9 +395,6 @@ class ProductionMonitoringController extends Controller
                         }
                     }
 
-                    // === ZONA HILIR ===
-                    // Di-scope ke reference_id milik PO SO ini (via $hilirSearchIds), bukan total stok gudang —
-                    // total stok gudang dipakai bersama semua SO yang order item yang sama, jadi tidak boleh dipakai di sini.
                     $qtyHilir = [];
                     foreach ($this->hilirStageTypes as $key => $txTypes) {
                         $qty = 0;
@@ -479,15 +420,10 @@ class ProductionMonitoringController extends Controller
                         }
                     }
 
-                    // 'ruskomp' dihitung dari $qtyRuskomp (qty_produk_jadi manual, per item), bukan dari
-                    // InventoryLog.item_id -- lihat catatan di atas kenapa itu tidak pernah bisa cocok.
                     $qtyHilir['ruskomp'] = $qtyRuskomp;
 
                     $target = (float) $detail->quantity;
 
-                    // reference_id InventoryLog QC_FINAL = qc_final_productions.id (bukan po_id
-                    // langsung) — harus lewat getSearchIds() sama seperti stage hilir lainnya,
-                    // kalau tidak qty selalu 0 walau QC Final sudah pernah disimpan.
                     $qcFinalSearchIds = $this->getSearchIds('QC_FINAL', $poIds);
                     $qtyQcFinal = 0;
                     if (!empty($qcFinalSearchIds)) {
@@ -515,22 +451,6 @@ class ProductionMonitoringController extends Controller
                     $qtyPacking  = $qtyHilir['packing'];
                     $poCompleted = $so->productionOrders->where('status', 'completed')->count() > 0;
 
-                    // === QTY REAL-TIME PER STAGE (bukan lagi kumulatif-selamanya) ===
-                    // Klien minta tampilan "pipeline": kalau Moulding sudah produksi 10 lalu 5 di
-                    // antaranya sudah diproses lanjut di Mesin, kolom Moulding harusnya tinggal
-                    // nampilkan 5 (yang masih "mengendap" di situ), bukan tetap 10. Urutan stage di
-                    // sini HARUS sama dengan urutan kolom di tabel (Moulding→Mesin→Ruskomp→
-                    // Assembling→Sanding→Rustik→Finishing→Anyam→QC Final→Packing) — lihat
-                    // applyPipelineRemaining() untuk detail perhitungan suffix-sum-nya. Reject &
-                    // target/sisa/is_done TIDAK ikut diubah, tetap pakai angka kumulatif asli.
-                    //
-                    // Anyam ditaruh setelah Finishing: walau secara fisik bisa ambil sumber dari
-                    // Assembling/Sanding/Finishing (bukan cuma 1 titik tetap), suffix-sum di sini
-                    // memang sudah dari dulu berupa APROKSIMASI "ada progress di stage manapun yang
-                    // lebih hilir = stage2 sebelumnya dianggap terpakai" (bukan pelacakan per-unit
-                    // yang strict) — jadi konsisten dengan cara stage lain diperlakukan, Anyam ikut
-                    // pola yang sama: begitu ada progress Anyam, Assembling/Sanding/Finishing ikut
-                    // otomatis "berkurang" mengikuti suffix-sum-nya.
                     $rawQtyForPipeline = [
                         'moulding'   => $qtyMoulding,
                         'mesin'      => $qtyMesin,
@@ -545,17 +465,22 @@ class ProductionMonitoringController extends Controller
                     ];
                     $pipelineRemaining = $this->applyPipelineRemaining($rawQtyForPipeline);
 
+                    $stok = (float) ($matchedPoDetail->initial_stock_snapshot ?? 0);
+                    $stokUpdatable = $this->canRefreshInitialStock($matchedPoDetail, $rawQtyForPipeline);
+
                     $items[] = [
                         'detail_id'         => $detail->id,
+                        'production_order_detail_id' => $matchedPoDetail?->id,
                         'item_id'           => $itemId,
                         'item_name'         => $detail->item?->name ?? '-',
                         'item_code'         => $detail->item?->code ?? '-',
                         'target'            => $target,
+                        'stok'              => $stok,
+                        'stok_updatable'    => $stokUpdatable,
                         'delivery_date'     => $detail->delivery_date
                                                 ? Carbon::parse($detail->delivery_date)->format('d/m/Y')
                                                 : '-',
 
-                        // Zona Hulu
                         'status_sanwil'     => $statusHulu['sanwil'],
                         'status_kd'         => $statusHulu['kd'],
                         'status_pembahanan' => $statusHulu['pembahanan'],
@@ -566,7 +491,6 @@ class ProductionMonitoringController extends Controller
                         'mesin_components'  => $mesinComponents,
                         'mesin_bom_checklist' => $mesinBomChecklist,
 
-                        // Zona Hilir
                         'qty_ruskomp'       => $pipelineRemaining['ruskomp'],
                         'qty_assembling'    => $pipelineRemaining['assembling'],
                         'qty_sanding'       => $pipelineRemaining['sanding'],
@@ -578,18 +502,15 @@ class ProductionMonitoringController extends Controller
                         'qty_reject'        => (float) $qtyReject,
                         'has_reject'        => $qtyReject > 0,
 
-                        'sisa'              => max(0, $target - $qtyPacking),
-                        'is_done'           => ($qtyPacking >= $target && $target > 0) || $poCompleted,
+                        'sisa'              => max(0, $target - $stok - $qtyPacking),
+                        'is_done'           => (($qtyPacking + $stok) >= $target && $target > 0) || $poCompleted,
                     ];
                 }
 
-                // Semua item SO ini sudah terkirim penuh (difilter di atas) — SO tidak perlu
-                // muncul lagi di dashboard prioritas produksi.
                 if (empty($items)) {
                     continue;
                 }
 
-                // Group per SO
                 $result[] = [
                     'so_id'              => $so->id,
                     'so_number'          => $so->so_number,
@@ -640,13 +561,11 @@ class ProductionMonitoringController extends Controller
                 foreach ($so->productionOrders as $po) {
                     $poIds = [$po->id];
 
-                    // Sub-table IDs untuk stage yang pakai sub-table
                     $sawmillIds    = DB::table('sawmill_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
                     $kdIds         = DB::table('kd_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
                     $pembahananIds = DB::table('pembahanan_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
                     $mouldingIds   = DB::table('moulding_productions')->whereIn('ref_po_id', $poIds)->pluck('id')->toArray();
 
-                    // Cek ada-tidaknya aktivitas per stage
                     $hasSawmill    = InventoryLog::where('transaction_type', 'SAWMILL')
                         ->whereIn('reference_id', $sawmillIds)->exists();
                     $hasKd         = InventoryLog::where('transaction_type', 'KD')
@@ -654,7 +573,6 @@ class ProductionMonitoringController extends Controller
                     $hasPembahanan = InventoryLog::where('transaction_type', 'PEMBAHANAN')
                         ->whereIn('reference_id', $pembahananIds)->exists();
 
-                    // Qty stages (langsung pakai ref_po_id atau sub-table moulding)
                     $qtyMoulding = 0;
                     if (!empty($mouldingIds)) {
                         $qtyMoulding = (float) DB::table('moulding_production_outputs')
@@ -671,9 +589,6 @@ class ProductionMonitoringController extends Controller
                     $qtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
                         ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
 
-                    // Status sekuensial untuk hulu stages
-                    // 'sanwil' dipindah jadi per-item (dihitung di dalam loop $po->details di bawah)
-                    // karena butuh production_route item -- lihat penjelasan root cause di index().
                     $hasLaterThanKd         = $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
                     $hasLaterThanPembahanan = $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
 
@@ -691,10 +606,6 @@ class ProductionMonitoringController extends Controller
                             $soDetail = $soDetailQueueByItem[$detail->item_id]->shift();
                         }
 
-                        // Item yang sudah terkirim penuh (quantity_shipped >= quantity) tidak perlu
-                        // tampil lagi di monitoring produksi sampel — sama seperti fix di index()
-                        // reguler (lihat "Dashboard Monitoring — Item/SO yang Sudah Terkirim Penuh
-                        // Otomatis Hilang"), belum dulu ikut diterapkan di sini sampai sekarang.
                         $qtyOrderedCheck = (float) ($soDetail?->quantity ?? 0);
                         $qtyShippedCheck = (float) ($soDetail?->quantity_shipped ?? 0);
                         if ($qtyOrderedCheck > 0 && $qtyShippedCheck >= $qtyOrderedCheck) {
@@ -707,15 +618,6 @@ class ProductionMonitoringController extends Controller
                         $target = (float) $detail->qty_planned;
                         $itemId = $detail->item_id;
 
-                        // Qty Moulding untuk item ini di-scope via production_order_detail_id, BUKAN
-                        // via filter output.item_id = $itemId seperti sebelumnya — filter itu SELALU
-                        // menghasilkan 0 karena item di moulding_production_outputs adalah KOMPONEN
-                        // mentah (mis. "BINGKAI DEPAN"), bukan item produk jadi ($itemId) — dua ID yang
-                        // memang berbeda di hampir semua kasus nyata. Ini akar penyebab kolom Moulding
-                        // di Dashboard/Monitoring Sampel tampil kosong padahal transaksinya nyata ada.
-                        // Fix berlaku merata untuk data lama maupun baru (bukan soal flow lama/baru —
-                        // murni salah filter di query, jadi begitu diperbaiki, data lama otomatis ikut
-                        // benar tanpa perlu backfill apapun).
                         $itemMouldingIds = DB::table('moulding_productions')
                             ->where('production_order_detail_id', $detail->id)
                             ->pluck('id')
@@ -823,12 +725,18 @@ class ProductionMonitoringController extends Controller
                         ];
                         $pipelineRemainingSample = $this->applyPipelineRemaining($rawQtyForPipelineSample);
 
+                        $stokSample = (float) ($detail->initial_stock_snapshot ?? 0);
+                        $stokUpdatableSample = $this->canRefreshInitialStock($detail, $rawQtyForPipelineSample);
+
                         $items[] = [
                             'detail_id'         => $detail->id,
+                            'production_order_detail_id' => $detail->id,
                             'item_id'           => $itemId,
                             'item_name'         => $detail->item?->name ?? '-',
                             'item_code'         => $detail->item?->code ?? '-',
                             'target'            => $target,
+                            'stok'              => $stokSample,
+                            'stok_updatable'    => $stokUpdatableSample,
                             'delivery_date'     => $deliveryDate,
                             'status_sanwil'     => $itemStatusSawmill,
                             'status_kd'         => $statusKd,
@@ -839,8 +747,8 @@ class ProductionMonitoringController extends Controller
                             'qty_prototype'     => $pipelineRemainingSample['prototype'],
                             'qty_sanding'       => $pipelineRemainingSample['sanding'],
                             'qty_packing'       => $pipelineRemainingSample['packing'],
-                            'sisa'              => max(0, $target - $itemQtyPacking),
-                            'is_done'           => ($itemQtyPacking >= $target && $target > 0) || $po->status === 'completed',
+                            'sisa'              => max(0, $target - $stokSample - $itemQtyPacking),
+                            'is_done'           => (($itemQtyPacking + $stokSample) >= $target && $target > 0) || $po->status === 'completed',
                         ];
                     }
 
@@ -928,7 +836,6 @@ class ProductionMonitoringController extends Controller
             foreach ($stages as $type => $label) {
                 $searchIds = $this->getSearchIds($type, $poIds);
 
-                // Untuk MESIN, kumpulkan subIds agar bisa query nama mesin
                 $subIds = [];
                 if ($type === 'MESIN' && !empty($poIds)) {
                     $subIds = DB::table('mesin_productions')
@@ -947,7 +854,6 @@ class ProductionMonitoringController extends Controller
 
                 if ($logsIn->isEmpty() && $logsOut->isEmpty()) continue;
 
-                // Ambil nama mesin jika stage MESIN
                 $machineName = null;
                 if ($type === 'MESIN' && !empty($subIds)) {
                     $machineName = DB::table('mesin_production_inputs')
@@ -1053,7 +959,6 @@ class ProductionMonitoringController extends Controller
                 ->whereIn('reference_id', $allProductionIds)->where('direction', 'IN')
                 ->with(['warehouse', 'item', 'user'])->orderBy('date', 'asc')->get();
 
-            // === BUAT EXCEL ===
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Laporan Produksi');
@@ -1234,6 +1139,103 @@ class ProductionMonitoringController extends Controller
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])->deleteFileAfterSend(true);
 
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    private function hasAnyProductionActivityForItem(int $productionOrderId, int $itemId, ProductionOrderDetail $poDetail): bool
+    {
+        if (!empty($poDetail->current_stage) || (float) $poDetail->qty_produced > 0) {
+            return true;
+        }
+
+        if (DB::table('moulding_productions')->where('production_order_detail_id', $poDetail->id)->exists()
+            || DB::table('mesin_productions')->where('production_order_detail_id', $poDetail->id)->exists()
+            || DB::table('rustik_komponen_productions')->where('production_order_detail_id', $poDetail->id)->exists()) {
+            return true;
+        }
+
+        $poIds = [$productionOrderId];
+
+        foreach ($this->hilirStageTypes as $txTypes) {
+            foreach ($txTypes as $txType) {
+                $searchIds = $this->getSearchIds($txType, $poIds);
+                if (empty($searchIds)) {
+                    continue;
+                }
+                if (InventoryLog::where('transaction_type', $txType)
+                    ->whereIn('reference_id', $searchIds)
+                    ->where('direction', 'IN')
+                    ->where('item_id', $itemId)
+                    ->exists()) {
+                    return true;
+                }
+            }
+        }
+
+        $qcFinalSearchIds = $this->getSearchIds('QC_FINAL', $poIds);
+        if (!empty($qcFinalSearchIds)) {
+            if (InventoryLog::where('transaction_type', 'QC_FINAL')
+                ->whereIn('reference_id', $qcFinalSearchIds)
+                ->where('direction', 'IN')
+                ->where('item_id', $itemId)
+                ->exists()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function refreshInitialStock($productionOrderDetailId)
+    {
+        try {
+            $detail = ProductionOrderDetail::findOrFail($productionOrderDetailId);
+
+            if ($this->hasAnyProductionActivityForItem($detail->production_order_id, $detail->item_id, $detail)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tidak bisa diperbarui otomatis — item ini sudah ada progres produksi.',
+                ], 422);
+            }
+
+            $detail->update([
+                'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Stok awal berhasil diperbarui.',
+                'data'    => ['initial_stock_snapshot' => (float) $detail->initial_stock_snapshot],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function setInitialStockManual(Request $request, $productionOrderDetailId)
+    {
+        $validated = $request->validate([
+            'value' => 'required|numeric|min:0',
+        ]);
+
+        try {
+            $detail = ProductionOrderDetail::findOrFail($productionOrderDetailId);
+
+            $detail->update([
+                'initial_stock_snapshot' => $validated['value'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Stok awal berhasil disimpan.',
+                'data'    => ['initial_stock_snapshot' => (float) $detail->initial_stock_snapshot],
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }

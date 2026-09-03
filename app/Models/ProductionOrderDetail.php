@@ -18,6 +18,7 @@ class ProductionOrderDetail extends Model
         'qty_planned',
         'qty_produced',
         'current_stage',
+        'initial_stock_snapshot',
     ];
 
     public function productionOrder()

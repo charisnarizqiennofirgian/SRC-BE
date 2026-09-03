@@ -58,15 +58,7 @@ use App\Http\Controllers\Api\ApAgingController;
 use App\Http\Controllers\Api\DokumenController;
 
 
-/*
-|--------------------------------------------------------------------------
-| API Routes
-|--------------------------------------------------------------------------
-*/
 
-// ==========================================
-// PUBLIC ROUTES (Tidak Perlu Login)
-// ==========================================
 
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
@@ -86,13 +78,9 @@ Route::get('/password-policy', function () {
     ]);
 });
 
-// ==========================================
-// PROTECTED ROUTES (Perlu Login)
-// ==========================================
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
-    // --- USER INFO ---
     Route::get('/user', function (Request $request) {
         $user = $request->user();
         return [
@@ -103,8 +91,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         ];
     });
 
-    // --- PENGATURAN ---
-    // Roles & Permissions Management (permission: manage-roles)
     Route::middleware('permission:manage-roles')->group(function () {
         Route::prefix('roles')->group(function () {
             Route::get('/', [RoleController::class, 'index']);
@@ -114,7 +100,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::delete('/{id}', [RoleController::class, 'destroy']);
         });
 
-        // Permissions Management
         Route::prefix('permissions')->group(function () {
             Route::get('/', [PermissionController::class, 'index']);
             Route::post('/', [PermissionController::class, 'store']);
@@ -123,11 +108,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::delete('/{id}', [PermissionController::class, 'destroy']);
         });
 
-        // Get all permissions for role form
         Route::get('/roles-permissions', [RoleController::class, 'getPermissions']);
     });
 
-    // Users Management (permission: manage-users)
     Route::middleware('permission:manage-users')->prefix('users')->group(function () {
         Route::get('/', [UserController::class, 'index']);
         Route::post('/', [UserController::class, 'store']);
@@ -137,7 +120,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/reset-password', [UserController::class, 'resetPassword']);
     });
 
-    // --- MASTER DATA ---
     Route::get('/categories/all', [CategoryController::class, 'all']);
     Route::apiResource('categories', CategoryController::class);
 
@@ -163,11 +145,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/materials/template', [MaterialController::class, 'downloadTemplate']);
     Route::apiResource('materials', MaterialController::class);
 
-    // --- DIMENSI KARTON BOX ---
     Route::get('/items/{id}/dimension-history', [ItemDimensionHistoryController::class, 'index']);
     Route::put('/items/{id}/dimensions', [ItemDimensionHistoryController::class, 'update']);
 
-    // --- MANAJEMEN STOK ---
     Route::middleware('permission:stok-index')->get('/stock-report', [StockReportController::class, 'index']);
     Route::middleware('permission:stok-laporan-sawmill')->get('reports/sawmill-yield', [\App\Http\Controllers\Api\SawmillReportController::class, 'index']);
 
@@ -184,26 +164,21 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/stock-adjustments/upload-saldo-awal-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
         Route::post('/stock-adjustments/upload-produk-jadi', [StockAdjustmentController::class, 'uploadSaldoAwalProdukJadi']);
 
-        // BOM Produk
         Route::get('/stock-adjustments/template-bom', [StockAdjustmentController::class, 'downloadTemplateBom']);
         Route::post('/stock-adjustments/upload-bom', [StockAdjustmentController::class, 'uploadBom']);
 
         Route::prefix('stock-adjustments')->group(function () {
-            // 🟣 Karton Box
             Route::get('/template-karton-box', [StockAdjustmentController::class, 'downloadTemplateKartonBox']);
             Route::post('/upload-karton-box', [StockAdjustmentController::class, 'uploadSaldoAwalKartonBox']);
 
-            // 🟡 Komponen
             Route::get('/template-komponen', [StockAdjustmentController::class, 'downloadTemplateKomponen']);
             Route::post('/upload-komponen', [StockAdjustmentController::class, 'uploadSaldoAwalKomponen']);
 
-            // 🟢 Jeblosan
             Route::get('/template-jeblosan', [StockAdjustmentController::class, 'downloadTemplateJeblosan']);
             Route::post('/upload-jeblosan', [StockAdjustmentController::class, 'uploadSaldoAwalJeblosan']);
         });
     });
 
-    // --- PURCHASE REQUEST ---
     Route::middleware('permission:pembelian-purchase-request')->prefix('purchase-requests')->group(function () {
         Route::get('/',                [PurchaseRequestController::class, 'index']);
         Route::post('/',               [PurchaseRequestController::class, 'store']);
@@ -218,8 +193,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/unpost',        [PurchaseRequestController::class, 'unpost']);
     });
 
-    // --- PEMBELIAN ---
-    // PO dipakai 3 halaman berbeda (Operasional/Karton/Kayu) lewat endpoint yang sama -> gate longgar (salah satu cukup)
     Route::middleware('permission:pembelian-operasional|pembelian-karton|pembelian-kayu')->group(function () {
         Route::get('purchase-orders/laporan-harga', [PurchaseOrderController::class, 'laporanHarga']);
         Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show']);
@@ -237,7 +210,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::apiResource('purchase-bills', PurchaseBillController::class);
     });
 
-    // --- PEMBAYARAN HUTANG --- (dipakai halaman "Pembayaran Hutang" & "Riwayat Pembayaran")
     Route::middleware('permission:keuangan-pembayaran-hutang|keuangan-riwayat-pembayaran')->prefix('purchase-payments')->group(function () {
         Route::get('/', [PurchasePaymentController::class, 'index']);
         Route::post('/', [PurchasePaymentController::class, 'store']);
@@ -246,14 +218,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/{id}', [PurchasePaymentController::class, 'show']);
     });
 
-    // --- PENJUALAN ---
     Route::middleware('permission:penjualan-so')->group(function () {
         Route::apiResource('sales-orders', SalesOrderController::class);
         Route::get('sales-orders-open', [SalesOrderController::class, 'getOpenSalesOrders']);
         Route::get('sales-orders/{id}/generate-pi-number', [SalesOrderController::class, 'generatePINumber']);
     });
 
-    // --- PENGIRIMAN ---
     Route::middleware('permission:penjualan-pengiriman')->prefix('delivery-orders')->group(function () {
         Route::get('/available-for-invoice', [DeliveryOrderController::class, 'getAvailableForInvoice']);
         Route::get('/', [DeliveryOrderController::class, 'index']);
@@ -265,7 +235,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/mark-delivered', [DeliveryOrderController::class, 'markDelivered']);
     });
 
-    // --- SALES INVOICE ---
     Route::middleware('permission:penjualan-invoice')->prefix('sales-invoices')->group(function () {
         Route::get('/', [SalesInvoiceController::class, 'index']);
         Route::post('/', [SalesInvoiceController::class, 'store']);
@@ -277,7 +246,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::delete('/{id}', [SalesInvoiceController::class, 'destroy']);
     });
 
-    // --- UANG MUKA PENJUALAN ---
     Route::middleware('permission:penjualan-uang-muka')->prefix('down-payments')->group(function () {
         Route::get('/', [DownPaymentController::class, 'index']);
         Route::post('/', [DownPaymentController::class, 'store']);
@@ -286,7 +254,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::delete('/{id}', [DownPaymentController::class, 'destroy']);
     });
 
-    // --- PEMBAYARAN FAKTUR --- (bagian dari alur Sales Invoice)
     Route::middleware('permission:penjualan-invoice')->prefix('invoice-payments')->group(function () {
         Route::get('/', [InvoicePaymentController::class, 'index']);
         Route::post('/cash', [InvoicePaymentController::class, 'receiveCashPayment']);
@@ -297,18 +264,15 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     Route::middleware('permission:produksi-kd')->post('/candy-productions', [CandyProductionController::class, 'store']);
 
-    // Tombol "Generate PO Produksi/Sampel" ada di halaman Sales Order (penjualan-so)
     Route::middleware('permission:penjualan-so')->group(function () {
         Route::post('/sales-orders/{salesOrder}/production-orders', [ProductionOrderController::class, 'storeFromSalesOrder']);
         Route::post('/sales-orders/{salesOrder}/generate-sample-po', [ProductionOrderController::class, 'storeFromSalesOrderSample']);
     });
 
-    // Daftar/detail PO dipakai lintas SEMUA halaman tahap produksi sbg dropdown - tetap terbuka utk user login
     Route::get('/production-orders', [ProductionOrderController::class, 'index']);
     Route::get('/production-orders/simple', [ProductionOrderController::class, 'simpleList']);
     Route::get('/production-orders/{productionOrder}', [ProductionOrderController::class, 'show']);
 
-    // Master BOM / Resep
     Route::middleware('permission:produksi-master-bom')->group(function () {
         Route::post('/product-boms/import', [ProductBomController::class, 'import']);
         Route::prefix('production')->group(function () {
@@ -321,14 +285,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         });
     });
 
-    // --- PROSES PEMBAHANAN ---
     Route::middleware('permission:produksi-pembahanan')->group(function () {
         Route::get('/produksi/pembahanan/available-pos', [PembahananController::class, 'getAvailableProductionOrders']);
         Route::get('/produksi/pembahanan/source-inventories', [PembahananController::class, 'sourceInventories']);
         Route::post('/produksi/pembahanan', [PembahananController::class, 'store']);
     });
 
-    // --- PROSES MOULDING ---
     Route::middleware('permission:produksi-moulding')->group(function () {
         Route::get('produksi/moulding/rst-items', [MouldingController::class, 'getRstItems']);
         Route::get('produksi/moulding/komponen-items', [MouldingController::class, 'getKomponenItems']);
@@ -338,7 +300,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('produksi/moulding/{id}/selesai', [MouldingController::class, 'tandaiSelesai']);
     });
 
-    // --- OPERATOR MESIN ---
     Route::middleware('permission:produksi-mesin')->group(function () {
         Route::get('/operator-mesin/machines', [OperatorMesinController::class, 'getMachines']);
         Route::get('/operator-mesin/available-pos', [OperatorMesinController::class, 'getAvailablePos']);
@@ -348,17 +309,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/operator-mesin/selesai/{poId}', [OperatorMesinController::class, 'tandaiSelesai']);
     });
 
-    // --- GUDANG --- (lookup dasar dipakai lintas modul - tetap terbuka, digate lewat stok-index di bawah)
     Route::get('/warehouses', [WarehouseController::class, 'index']);
     Route::get('/inventories', [InventoryController::class, 'index']);
 
-    // --- PRODUKSI PENGGERGAJAN ---
     Route::middleware('permission:produksi-sawmill')->group(function () {
         Route::get('/sawmill-productions/sawmill-stock', [SawmillProductionController::class, 'getSawmillStock']);
         Route::post('/sawmill-productions', [SawmillProductionController::class, 'store']);
     });
 
-    // --- PROSES RUSTIK KOMPONEN ---
     Route::middleware('permission:produksi-rustik-komponen')->prefix('rustik-komponen')->group(function () {
         Route::get('/available-pos', [RustikKomponenController::class, 'getAvailablePos']);
         Route::get('/mesin-items', [RustikKomponenController::class, 'getMesinItems']);
@@ -366,47 +324,39 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/store', [RustikKomponenController::class, 'store']);
     });
 
-    // --- PROSES ASSEMBLING ---
     Route::middleware('permission:produksi-assembling')->prefix('assembling-produksi')->group(function () {
         Route::get('/available-pos', [AssemblingProductionController::class, 'getAvailablePos']);
         Route::get('/source-items', [AssemblingProductionController::class, 'getSourceItems']);
         Route::post('/store', [AssemblingProductionController::class, 'store']);
     });
 
-    // --- PROSES SANDING ---
     Route::middleware('permission:produksi-sanding')->group(function () {
         Route::get('/produksi/transfer/source-items', [SandingController::class, 'sourceItems']);
         Route::post('/produksi/sanding/store', [SandingController::class, 'store']);
     });
 
-    // --- PROSES RUSTIK ---
     Route::middleware('permission:produksi-rustik')->post('/produksi/rustik/store', [RustikController::class, 'store']);
 
-    // --- PROSES FINISHING ---
     Route::middleware('permission:produksi-finishing')->post('/produksi/finishing/store', [FinishingController::class, 'store']);
 
-    // --- PROSES ANYAM ---
     Route::middleware('permission:produksi-anyam')->prefix('produksi/anyam')->group(function () {
         Route::get('/available-pos',      [AnyamController::class, 'getAvailableProductionOrders']);
         Route::get('/source-inventories', [AnyamController::class, 'sourceInventories']);
         Route::post('/',                  [AnyamController::class, 'store']);
     });
 
-    // --- PROSES PROTOTYPE --- (cuma ada di Produksi Sampel)
     Route::middleware('permission:produksi-sampel-prototype')->prefix('produksi/prototype')->group(function () {
         Route::get('/available-pos',  [PrototypeController::class, 'getAvailableProductionOrders']);
         Route::get('/source-items',   [PrototypeController::class, 'getSourceItems']);
         Route::post('/',              [PrototypeController::class, 'store']);
     });
 
-    // --- QC FINAL ---
     Route::middleware('permission:produksi-qc-final')->prefix('qc-final')->group(function () {
         Route::get('/available-pos', [QcFinalController::class, 'getAvailablePos']);
         Route::get('/source-items', [QcFinalController::class, 'getSourceItems']);
         Route::post('/store', [QcFinalController::class, 'store']);
     });
 
-    // --- PROSES PACKING ---
     Route::middleware('permission:produksi-packing')->prefix('packing')->group(function () {
         Route::get('/available-pos', [PackingController::class, 'getAvailablePos']);
         Route::get('/packing-items', [PackingController::class, 'getPackingItems']);
@@ -415,7 +365,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/selesai/{poId}', [PackingController::class, 'selesaiPacking']);
     });
 
-    // --- PENGGUNAAN MATERIAL (ASSEMBLING DLL) ---
     Route::middleware('permission:produksi-pemakaian-bahan')->prefix('material-usages')->group(function () {
         Route::get('/', [MaterialUsageController::class, 'index']);
         Route::post('/', [MaterialUsageController::class, 'store']);
@@ -425,7 +374,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/stock/{itemId}', [MaterialUsageController::class, 'checkStock']);
     });
 
-    // --- LOG INVENTORY --- (dipakai lintas modul, digate stok-index)
     Route::middleware('permission:stok-index')->prefix('inventory-logs')->group(function () {
         Route::get('/', [InventoryLogController::class, 'index']);
         Route::get('/warehouses', [InventoryLogController::class, 'getWarehouses']);
@@ -433,21 +381,18 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/items', [InventoryLogController::class, 'getItems']);
     });
 
-    // --- MONITORING PRODUKSI ---
     Route::middleware('permission:stok-monitoring-produksi')->prefix('production-monitoring')->group(function () {
         Route::get('/', [ProductionMonitoringController::class, 'index']);
         Route::get('/sample', [ProductionMonitoringController::class, 'sampleIndex']);
         Route::get('/detail', [ProductionMonitoringController::class, 'detail']);
         Route::get('/export-excel', [ProductionMonitoringController::class, 'exportExcel']);
+        Route::post('/detail/{productionOrderDetailId}/refresh-stock', [ProductionMonitoringController::class, 'refreshInitialStock']);
+        Route::post('/detail/{productionOrderDetailId}/set-stock-manual', [ProductionMonitoringController::class, 'setInitialStockManual']);
     });
 
-    // --- AR AGING (PIUTANG) / AP AGING (HUTANG) ---
     Route::middleware('permission:keuangan-ar-aging')->get('/ar-aging', [ArAgingController::class, 'index']);
     Route::middleware('permission:keuangan-ap-aging')->get('/ap-aging', [ApAgingController::class, 'index']);
 
-    // --- CHART OF ACCOUNT (AKUN PERKIRAAN) ---
-    // Baca (dropdown akun) dipakai lintas modul (Pembelian/Penjualan/Keuangan) - tetap terbuka utk semua user login.
-    // Cuma aksi kelola master data COA yang dikunci ke permission master-coa.
     Route::prefix('coa')->group(function () {
         Route::get('/all', [ChartOfAccountController::class, 'all']);
         Route::get('/', [ChartOfAccountController::class, 'index']);
@@ -463,12 +408,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
             Route::delete('/{id}', [ChartOfAccountController::class, 'destroy']);
         });
 
-        // '/{id}' harus terdaftar PALING TERAKHIR di antara route GET prefix ini,
-        // supaya tidak menelan path literal seperti '/template' di atas.
         Route::get('/{id}', [ChartOfAccountController::class, 'show']);
     });
 
-    // --- METODE PEMBAYARAN ---
     Route::middleware('permission:master-metode-pembayaran')->prefix('payment-methods')->group(function () {
         Route::get('/', [PaymentMethodController::class, 'index']);
         Route::post('/', [PaymentMethodController::class, 'store']);
@@ -479,8 +421,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::delete('/{id}', [PaymentMethodController::class, 'destroy']);
     });
 
-    // --- JURNAL UMUM ---
-    // Opening Balance (permission: keuangan-opening-balance)
     Route::middleware('permission:keuangan-opening-balance')->group(function () {
         Route::get('/journal-entries/opening-balance/check',    [JournalEntryController::class, 'checkOpeningBalance']);
         Route::get('/journal-entries/opening-balance/template', [JournalEntryController::class, 'downloadTemplate']);
@@ -494,7 +434,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/manual', [JournalEntryController::class, 'storeManual']);
         Route::get('/{id}', [JournalEntryController::class, 'show']);
 
-        // ✅ TAMBAH ROUTES BARU
         Route::post('/{id}/unpost', [JournalEntryController::class, 'unpost']);
         Route::post('/{id}/repost', [JournalEntryController::class, 'repost']);
         Route::post('/{id}/void', [JournalEntryController::class, 'void']);
@@ -502,16 +441,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/{id}/history', [JournalEntryController::class, 'history']);
     });
 
-    // --- BUKU BESAR (GENERAL LEDGER) ---
     Route::middleware('permission:keuangan-buku-besar')->get('general-ledger', [GeneralLedgerController::class, 'index']);
 
-    // --- LAPORAN LABA RUGI (INCOME STATEMENT) ---
     Route::middleware('permission:keuangan-laba-rugi')->get('income-statement', [IncomeStatementController::class, 'index']);
 
-    // --- NERACA (BALANCE SHEET) ---
     Route::middleware('permission:keuangan-neraca')->get('balance-sheet', [BalanceSheetController::class, 'index']);
 
-    // --- DOKUMEN --- (granular per aksi, sesuai 3 permission dokumen yang sudah ada)
     Route::prefix('dokumen')->group(function () {
         Route::middleware('permission:dokumen-lihat')->group(function () {
             Route::get('/',              [DokumenController::class, 'index']);
@@ -525,7 +460,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::middleware('permission:dokumen-hapus')->delete('/{id}', [DokumenController::class, 'hapus']);
     });
 
-    // --- UTILITAS DASHBOARD ---
     Route::get('/dashboard-route', function (Request $request) {
         $user = $request->user();
         $roles = $user->roles->pluck('name')->toArray();

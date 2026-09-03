@@ -111,4 +111,15 @@ class Inventory extends Model
     {
         return self::where('item_id', $itemId)->sum('qty_pcs');
     }
+
+    public static function getAvailableFinishedStock($itemId): float
+    {
+        $inventories = self::where('item_id', $itemId)->get(['qty_pcs']);
+
+        if ($inventories->isEmpty()) {
+            return (float) (Item::find($itemId)?->stock ?? 0);
+        }
+
+        return (float) $inventories->sum('qty_pcs');
+    }
 }

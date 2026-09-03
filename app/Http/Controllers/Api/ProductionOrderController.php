@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Inventory;
 use App\Models\MesinProduction;
 use App\Models\MouldingProduction;
 use App\Models\ProductionOrder;
@@ -22,10 +23,8 @@ class ProductionOrderController extends Controller
         $this->routingService = $routingService;
     }
 
-    // LIST UNTUK DROPDOWN / GRID
     public function index(Request $request)
     {
-        // Jika hanya ingin data sederhana untuk dropdown
         if ($request->has('simple')) {
             $pos = ProductionOrder::select('id', 'po_number')->latest()->get();
 
@@ -42,17 +41,14 @@ class ProductionOrderController extends Controller
             ])
             ->orderByDesc('created_at');
 
-        // Filter by status
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // Filter by status_not
         if ($request->filled('status_not')) {
             $query->where('status', '!=', $request->status_not);
         }
 
-        // ✅ KHUSUS SAWMILL: filter stage pending atau sawmill saja
         if ($request->filled('for_sawmill')) {
             $query->whereIn('current_stage', [
                 ProductionOrder::STAGE_PENDING,
@@ -60,22 +56,17 @@ class ProductionOrderController extends Controller
             ]);
         }
 
-        // Filter by type (production / sample)
         if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
 
-        // ✅ FILTER BY CURRENT STAGE (UNTUK MENU MOULDING, ASSEMBLY, DST)
         if ($request->filled('current_stage')) {
             $query->where('current_stage', $request->current_stage);
         }
 
-        // ✅ FILTER: PO yang sudah siap untuk stage tertentu
         if ($request->filled('ready_for_stage')) {
             $targetStage = $request->ready_for_stage;
 
-            // Contoh: ready_for_stage=moulding
-            // Artinya: current_stage = 'pembahanan' (sebelum moulding)
             $stageMap = [
                 'sawmill' => ProductionOrder::STAGE_PENDING,
                 'pembahanan' => ProductionOrder::STAGE_SAWMILL,
@@ -90,7 +81,6 @@ class ProductionOrderController extends Controller
             }
         }
 
-        // Filter by buyer
         if ($request->filled('buyer_id')) {
             $query->whereHas('salesOrder', function ($q) use ($request) {
                 $q->where('buyer_id', $request->buyer_id);
@@ -105,7 +95,6 @@ class ProductionOrderController extends Controller
             $mainTarget = $po->details->first();
             $productName = $mainTarget?->item?->name ?? null;
 
-            // ✅ FORMAT STANDAR (Produksi - Buyer - SO) ATAU SESUAI PO_NUMBER
             $label = $po->po_number;
 
             return [
@@ -113,8 +102,8 @@ class ProductionOrderController extends Controller
                 'po_number'      => $po->po_number,
                 'label'          => $label,
                 'status'         => $po->status,
-                'current_stage'  => $po->current_stage,      // ✅ TAMBAH
-                'skip_sawmill'   => $po->skip_sawmill,       // ✅ TAMBAH
+                'current_stage'  => $po->current_stage,
+                'skip_sawmill'   => $po->skip_sawmill,
                 'sales_order_id' => $po->sales_order_id,
                 'buyer_name'     => $buyerName,
                 'so_number'      => $soNumber,
@@ -128,7 +117,6 @@ class ProductionOrderController extends Controller
         ]);
     }
 
-    // Fungsi baru untuk mendapatkan data sederhana PO (untuk dropdown)
     public function simpleList()
     {
         $pos = ProductionOrder::select('id', 'po_number')->latest()->get();
@@ -139,7 +127,6 @@ class ProductionOrderController extends Controller
         ]);
     }
 
-    // DETAIL UNTUK CONTEKAN DI SAWMILL
     public function show(ProductionOrder $productionOrder)
     {
         $productionOrder->load([
@@ -153,8 +140,8 @@ class ProductionOrderController extends Controller
                 'id'            => $productionOrder->id,
                 'po_number'     => $productionOrder->po_number,
                 'status'        => $productionOrder->status,
-                'current_stage' => $productionOrder->current_stage,      // ✅ TAMBAH
-                'skip_sawmill'  => $productionOrder->skip_sawmill,       // ✅ TAMBAH
+                'current_stage' => $productionOrder->current_stage,
+                'skip_sawmill'  => $productionOrder->skip_sawmill,
                 'sales_order_id'=> $productionOrder->sales_order_id,
                 'sales_order'   => [
                     'so_number'  => $productionOrder->salesOrder?->so_number,
@@ -185,7 +172,6 @@ class ProductionOrderController extends Controller
         ]);
     }
 
-    // ✅ BUAT DARI SALES ORDER (UPDATED WITH ROUTING)
     public function storeFromSalesOrder(Request $request, SalesOrder $salesOrder)
     {
         return DB::transaction(function () use ($request, $salesOrder) {
@@ -206,9 +192,9 @@ class ProductionOrderController extends Controller
                 $productionOrder = ProductionOrder::create([
                     'po_number'      => $poNumber,
                     'sales_order_id' => $salesOrder->id,
-                    'status'         => 'released',                        // ✅ Langsung released
-                    'current_stage'  => ProductionOrder::STAGE_PENDING,    // ✅ Stage pending
-                    'skip_sawmill'   => false,                             // ✅ Default false
+                    'status'         => 'released',
+                    'current_stage'  => ProductionOrder::STAGE_PENDING,
+                    'skip_sawmill'   => false,
                     'notes'          => $request->input('notes'),
                     'created_by'     => $request->user()->id,
                 ]);
@@ -236,19 +222,17 @@ class ProductionOrderController extends Controller
                     'item_id'               => $detail->item_id,
                     'qty_planned'           => $detail->quantity,
                     'qty_produced'          => 0,
+                    'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
                 ]);
                 $addedCount++;
             }
 
             [$removedCount, $blockedCount] = $this->removeOrphanedProductionOrderDetails($existingByItem);
 
-            // Load relations untuk routing
             $productionOrder->load('details.item');
 
-            // ✅ TENTUKAN ROUTING (CEK STOK RST)
             $routing = $this->routingService->determineRouting($productionOrder);
 
-            // Update PO dengan routing result
             $productionOrder->update([
                 'skip_sawmill' => $routing['skip_sawmill'],
                 'current_stage' => $routing['next_stage'],
@@ -274,7 +258,6 @@ class ProductionOrderController extends Controller
         });
     }
 
-    // BUAT PO SAMPEL DARI SALES ORDER
     public function storeFromSalesOrderSample(Request $request, SalesOrder $salesOrder)
     {
         return DB::transaction(function () use ($request, $salesOrder) {
@@ -324,6 +307,7 @@ class ProductionOrderController extends Controller
                     'item_id'               => $detail->item_id,
                     'qty_planned'           => $detail->quantity,
                     'qty_produced'          => 0,
+                    'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
                 ]);
                 $addedCount++;
             }
