@@ -16,22 +16,33 @@ use Illuminate\Validation\ValidationException;
 
 class FinishingController extends Controller
 {
+    const DEFAULT_SOURCE_WAREHOUSE_CODES = ['SANDING', 'RUSTIK'];
+
     public function sourceItems(Request $request)
     {
-        $request->validate([
-            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
-        ]);
+        if ($request->filled('warehouse_id')) {
+            $warehouses = Warehouse::where('id', $request->warehouse_id)->get();
+        } else {
+            $warehouses = Warehouse::whereIn('code', self::DEFAULT_SOURCE_WAREHOUSE_CODES)->get();
+        }
 
-        $inventories = Inventory::where('warehouse_id', $request->warehouse_id)
+        if ($warehouses->isEmpty()) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        $inventories = Inventory::whereIn('warehouse_id', $warehouses->pluck('id'))
             ->where('qty_pcs', '>', 0)
-            ->with('item')
+            ->with(['item', 'warehouse'])
             ->get()
             ->map(function ($inv) {
                 return [
-                    'item_id'       => $inv->item_id,
-                    'item_code'     => $inv->item?->code ?? '-',
-                    'item_name'     => $inv->item?->name ?? '-',
-                    'qty_available' => (float) $inv->qty_pcs,
+                    'item_id'        => $inv->item_id,
+                    'item_code'      => $inv->item?->code ?? '-',
+                    'item_name'      => $inv->item?->name ?? '-',
+                    'qty_available'  => (float) $inv->qty_pcs,
+                    'warehouse_id'   => $inv->warehouse_id,
+                    'warehouse_code' => $inv->warehouse?->code ?? '-',
+                    'warehouse_name' => $inv->warehouse?->name ?? '-',
                 ];
             });
 
@@ -41,19 +52,19 @@ class FinishingController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'date'                => ['required', 'date'],
-            'ref_po_id'           => ['required', 'integer', 'exists:production_orders,id'],
-            'source_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
-            'notes'               => ['nullable', 'string'],
-            'items'               => ['required', 'array', 'min:1'],
-            'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
-            'items.*.qty'         => ['required', 'numeric', 'min:1'],
+            'date'                        => ['required', 'date'],
+            'ref_po_id'                   => ['required', 'integer', 'exists:production_orders,id'],
+            'source_warehouse_id'         => ['nullable', 'integer', 'exists:warehouses,id'],
+            'notes'                       => ['nullable', 'string'],
+            'items'                       => ['required', 'array', 'min:1'],
+            'items.*.item_id'             => ['required', 'integer', 'exists:items,id'],
+            'items.*.source_warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
+            'items.*.qty'                 => ['required', 'numeric', 'min:1'],
         ]);
 
         return DB::transaction(function () use ($data) {
             Log::info('=== FINISHING START ===', ['po_id' => $data['ref_po_id']]);
 
-            $sourceWarehouse = Warehouse::find($data['source_warehouse_id']);
             $targetWarehouse = Warehouse::where('code', 'FINISHING')->first();
 
             if (!$targetWarehouse) {
@@ -64,10 +75,15 @@ class FinishingController extends Controller
 
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
-            $sourceName      = $sourceWarehouse?->name ?? '-';
 
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
-            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
+            $warehouseCache = [];
+            $resolveWarehouse = function ($id) use (&$warehouseCache) {
+                if (!array_key_exists($id, $warehouseCache)) {
+                    $warehouseCache[$id] = Warehouse::find($id);
+                }
+                return $warehouseCache[$id];
+            };
+
             $prefix = 'FNS-' . now()->format('Ym') . '-';
             $last   = InventoryLog::where('transaction_type', 'FINISHING')
                 ->where('direction', 'OUT')
@@ -82,8 +98,16 @@ class FinishingController extends Controller
                 $qty      = $item['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
+                $sourceWhId = $item['source_warehouse_id'] ?? $data['source_warehouse_id'] ?? null;
+                if (!$sourceWhId) {
+                    throw ValidationException::withMessages([
+                        "items.{$index}.source_warehouse_id" => ['Gudang sumber wajib dipilih.'],
+                    ]);
+                }
+                $sourceName = $resolveWarehouse($sourceWhId)?->name ?? '-';
+
                 $sourceInv = Inventory::where('item_id', $itemId)
-                    ->where('warehouse_id', $data['source_warehouse_id'])
+                    ->where('warehouse_id', $sourceWhId)
                     ->lockForUpdate()->first();
 
                 $availableQty = $sourceInv?->qty_pcs ?? 0;
@@ -100,7 +124,7 @@ class FinishingController extends Controller
 
                 InventoryLog::create([
                     'date' => $data['date'], 'time' => now()->toTimeString(),
-                    'item_id' => $itemId, 'warehouse_id' => $data['source_warehouse_id'],
+                    'item_id' => $itemId, 'warehouse_id' => $sourceWhId,
                     'qty' => $qty, 'qty_m3' => 0, 'direction' => 'OUT',
                     'transaction_type' => 'FINISHING', 'reference_type' => 'ProductionOrder',
                     'reference_id'     => $data['ref_po_id'],

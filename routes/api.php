@@ -337,7 +337,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     Route::middleware('permission:produksi-rustik')->post('/produksi/rustik/store', [RustikController::class, 'store']);
 
-    Route::middleware('permission:produksi-finishing')->post('/produksi/finishing/store', [FinishingController::class, 'store']);
+    Route::middleware('permission:produksi-finishing')->group(function () {
+        Route::get('/produksi/finishing/source-items', [FinishingController::class, 'sourceItems']);
+        Route::post('/produksi/finishing/store', [FinishingController::class, 'store']);
+    });
 
     Route::middleware('permission:produksi-anyam')->prefix('produksi/anyam')->group(function () {
         Route::get('/available-pos',      [AnyamController::class, 'getAvailableProductionOrders']);

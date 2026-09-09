@@ -25,7 +25,7 @@ class SalesOrderController extends Controller
                 'details:id,sales_order_id,item_id,item_name,quantity,unit_price,line_total',
                 'details.item:id,name,hs_code,nw_per_box,gw_per_box,m3_per_carton,wood_consumed_per_pcs'
             ])
-                ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
+                ->select('id', 'so_number', 'no_pi', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency');
 
             $salesOrders = $query->orderBy('so_date', 'desc')
                 ->orderBy('id', 'desc')
