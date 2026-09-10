@@ -618,10 +618,11 @@ class ProductionMonitoringController extends Controller
                         $target = (float) $detail->qty_planned;
                         $itemId = $detail->item_id;
 
-                        $itemMouldingIds = DB::table('moulding_productions')
+                        $mouldingRowsSample = DB::table('moulding_productions')
                             ->where('production_order_detail_id', $detail->id)
-                            ->pluck('id')
-                            ->toArray();
+                            ->select('id', 'qty_produk_jadi', 'created_at')
+                            ->get();
+                        $itemMouldingIds = $mouldingRowsSample->pluck('id')->toArray();
 
                         $componentSums = !empty($itemMouldingIds)
                             ? DB::table('moulding_production_outputs')
@@ -636,7 +637,23 @@ class ProductionMonitoringController extends Controller
                             ->get(['child_item_id', 'qty']);
                         $bomRecipeMapSample = $bomRecipeSample->pluck('qty', 'child_item_id')->toArray();
 
-                        $itemQtyMoulding = $this->estimateProdukJadiFromBom($componentSums, $bomRecipeMapSample);
+                        $itemQtyMoulding = 0;
+                        $legacyMouldingIdsSample = [];
+                        foreach ($mouldingRowsSample as $mr) {
+                            if ($mr->qty_produk_jadi !== null) {
+                                $itemQtyMoulding += (float) $mr->qty_produk_jadi;
+                            } elseif ($mr->created_at < self::QTY_PRODUK_JADI_FEATURE_CUTOFF) {
+                                $legacyMouldingIdsSample[] = $mr->id;
+                            }
+                        }
+                        if (!empty($legacyMouldingIdsSample)) {
+                            $legacyComponentSumsSample = DB::table('moulding_production_outputs')
+                                ->whereIn('moulding_production_id', $legacyMouldingIdsSample)
+                                ->select('item_id', DB::raw('SUM(qty) as total_qty'))
+                                ->groupBy('item_id')
+                                ->get();
+                            $itemQtyMoulding += $this->estimateProdukJadiFromBom($legacyComponentSumsSample, $bomRecipeMapSample);
+                        }
 
                         $itemQtyPrototype = (float) InventoryLog::where('transaction_type', 'PROTOTYPE')
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
