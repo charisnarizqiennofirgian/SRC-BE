@@ -49,6 +49,15 @@ class MaterialUsageController extends Controller
 
             $items = $query->get();
 
+            $realStockByItem = Inventory::whereIn('item_id', $items->pluck('id'))
+                ->selectRaw('item_id, SUM(qty_pcs) as total')
+                ->groupBy('item_id')
+                ->pluck('total', 'item_id');
+
+            $items->each(function ($item) use ($realStockByItem) {
+                $item->stock = (float) ($realStockByItem[$item->id] ?? 0);
+            });
+
             Log::info('Consumable items found: ' . $items->count());
 
             return response()->json([
@@ -109,12 +118,13 @@ class MaterialUsageController extends Controller
     {
         try {
             $item = Item::with('unit:id,name')->findOrFail($itemId);
+            $realStock = (float) Inventory::where('item_id', $itemId)->sum('qty_pcs');
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'item' => $item,
-                    'stock' => (float) $item->stock,
+                    'stock' => $realStock,
                 ]
             ]);
         } catch (\Exception $e) {
@@ -148,15 +158,6 @@ class MaterialUsageController extends Controller
         try {
             $item = Item::with('unit')->findOrFail($request->item_id);
 
-            if ($item->stock < $request->qty) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "Stok barang tidak cukup! Tersedia: {$item->stock} {$item->unit->name}, Diminta: {$request->qty} {$item->unit->name}"
-                ], 422);
-            }
-
-            $item->decrement('stock', $request->qty);
-
             try {
                 $deductedByWarehouse = $this->decrementInventoryFifo($item->id, $request->qty);
             } catch (\Exception $e) {
@@ -166,6 +167,8 @@ class MaterialUsageController extends Controller
                     'message' => $e->getMessage(),
                 ], 422);
             }
+
+            $item->update(['stock' => max(0, $item->stock - $request->qty)]);
 
             $logs = [];
             foreach ($deductedByWarehouse as $warehouseId => $qtyDeducted) {
