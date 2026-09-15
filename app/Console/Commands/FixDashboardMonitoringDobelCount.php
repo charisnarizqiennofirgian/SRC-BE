@@ -43,6 +43,10 @@ class FixDashboardMonitoringDobelCount extends Command
         $this->info('--- Koreksi ledger Anyam SO-2026-06-0005 (PATIO DINING ARMCHAIR) ---');
         $this->fixAnyamCase($dryRun);
 
+        $this->newLine();
+        $this->info('--- Koreksi Moulding legacy salah estimasi BOM (2x lipat) — SO-2026-06-0005 baris 1 ---');
+        $this->fixMouldingLegacyOverEstimateCase($dryRun);
+
         if ($dryRun) {
             $this->newLine();
             $this->warn('Jalankan tanpa --dry-run untuk menyimpan.');
@@ -163,5 +167,43 @@ class FixDashboardMonitoringDobelCount extends Command
             $totalStock = DB::table('inventories')->where('item_id', $itemId)->sum('qty_pcs');
             DB::table('items')->where('id', $itemId)->update(['stock' => $totalStock]);
         });
+    }
+
+    private function fixMouldingLegacyOverEstimateCase(bool $dryRun): void
+    {
+        $doc           = 'MLD-202607-003';
+        $expectedValue = 31.0;
+        $label         = 'PATIO DINING ARMCHAIR NATURAL TEAK AND ROPE LIGHT GREY/LIGHT GREY (SO-2026-06-0005, baris 1)';
+
+        $row = DB::table('moulding_productions')->where('document_number', $doc)->first();
+        if (!$row) {
+            $this->error("[$doc] tidak ditemukan — dilewati.");
+            return;
+        }
+
+        if ($row->qty_produk_jadi !== null && (float) $row->qty_produk_jadi === $expectedValue) {
+            $this->line("[$doc] sudah bernilai $expectedValue, dilewati.");
+            return;
+        }
+
+        if ($row->qty_produk_jadi !== null) {
+            $this->warn("[$doc] qty_produk_jadi sudah diisi manual ({$row->qty_produk_jadi}, bukan NULL) — dilewati, kemungkinan sudah dikoreksi staf atau kondisi berbeda. Cek manual.");
+            return;
+        }
+
+        $mesinQty = (float) DB::table('mesin_productions')
+            ->where('production_order_detail_id', $row->production_order_detail_id)
+            ->sum('qty_produk_jadi');
+
+        if (abs($mesinQty - $expectedValue) > 0.001) {
+            $this->warn("[$doc] ({$label}) qty Mesin di detail yang sama sekarang {$mesinQty}, bukan {$expectedValue} seperti saat koreksi ini dibuat — dilewati, state server sudah beda. Cek manual, jangan asal timpa.");
+            return;
+        }
+
+        $this->info("[$doc] ({$label}) qty_produk_jadi: NULL (estimasi BOM legacy salah, ~62 karena output komponen 2x lipat) -> {$expectedValue} (selaras dengan Mesin & Anyam)");
+
+        if (!$dryRun) {
+            DB::table('moulding_productions')->where('id', $row->id)->update(['qty_produk_jadi' => $expectedValue]);
+        }
     }
 }
