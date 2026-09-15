@@ -69,6 +69,7 @@ class PermissionsSeeder extends Seeder
             'produksi-sampel-packing',
             'produksi-qc-final',
             'produksi-packing',
+            'produksi-konfirmasi-pengiriman',
             'produksi-master-bom',
 
             // Pembelian

@@ -289,6 +289,49 @@ class DeliveryOrderController extends Controller
         }
     }
 
+    /**
+     * Dipakai PPIC lewat menu "Konfirmasi Pengiriman" — versi ringkas dari alur Sales:
+     * PPIC cuma tahu barang & qty yang benar-benar dimuat, tidak isi dokumen ekspor
+     * (buyer/incoterm/BL/forwarder dst — field itu dibiarkan kosong di sini, tetap
+     * kerjaan Sales lewat menu Daftar Pengiriman yang sama, record yang sama).
+     * Reuse store()+ship() apa adanya (bukan re-implementasi) supaya validasi & efek
+     * sampingnya (potong stok, update quantity_shipped, auto-hide dashboard) identik
+     * dengan alur Sales biasa — store() bikin DRAFT dulu, ship() langsung dipanggil
+     * setelahnya supaya sekali PPIC konfirmasi, DO langsung SHIPPED (bukan nyangkut
+     * draft menunggu Sales sadar & klik Kirim manual — itu gap yang mau ditutup).
+     */
+    public function confirmFromProduction(Request $request)
+    {
+        $storeResponse = $this->store($request);
+        $storeData = json_decode($storeResponse->getContent(), true);
+
+        if (!($storeData['success'] ?? false)) {
+            return $storeResponse;
+        }
+
+        $deliveryOrderId = $storeData['data']['id'];
+        $shipResponse = $this->ship($deliveryOrderId);
+        $shipData = json_decode($shipResponse->getContent(), true);
+
+        if (!($shipData['success'] ?? false)) {
+            // DO sudah tersimpan sebagai DRAFT (stok belum berkurang), tapi gagal
+            // dikonfirmasi terkirim — jangan dianggap hilang, tetap ada di sistem
+            // dan bisa diselesaikan manual lewat menu Daftar Pengiriman (Sales).
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tersimpan sebagai draft, tapi gagal dikonfirmasi terkirim: '
+                    . ($shipData['message'] ?? 'kesalahan tidak diketahui')
+                    . ' — silakan hubungi tim Penjualan untuk menyelesaikan (DO: ' . ($storeData['data']['do_number'] ?? '-') . ').',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pengiriman berhasil dikonfirmasi. Barang sudah tercatat terkirim.',
+            'data' => $shipData['data'],
+        ]);
+    }
+
     public function ship($id)
     {
         DB::beginTransaction();

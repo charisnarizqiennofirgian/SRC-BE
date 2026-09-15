@@ -235,6 +235,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/mark-delivered', [DeliveryOrderController::class, 'markDelivered']);
     });
 
+    // PPIC — versi ringkas alur Pengiriman: cuma pilih SO + barang/qty yang dimuat,
+    // tanpa dokumen ekspor (itu tetap punya Sales, lihat grup route di atas).
+    Route::middleware('permission:produksi-konfirmasi-pengiriman')->prefix('production/shipment-confirmations')->group(function () {
+        Route::get('/', [DeliveryOrderController::class, 'index']);
+        Route::post('/', [DeliveryOrderController::class, 'confirmFromProduction']);
+    });
+
     Route::middleware('permission:penjualan-invoice')->prefix('sales-invoices')->group(function () {
         Route::get('/', [SalesInvoiceController::class, 'index']);
         Route::post('/', [SalesInvoiceController::class, 'store']);

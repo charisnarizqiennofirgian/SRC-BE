@@ -68,6 +68,18 @@ class ProductionMonitoringController extends Controller
             $allocations[$d->id] = $allocated;
             $cumulative += $allocated;
         }
+
+        $surplus = $totalQty - $cumulative;
+        $rowCount = count($allocations);
+        if ($surplus > 0.0001 && $rowCount > 0) {
+            $base = floor($surplus / $rowCount);
+            $remainder = $surplus - ($base * $rowCount);
+            $ids = array_keys($allocations);
+            foreach ($ids as $i => $id) {
+                $allocations[$id] += $base + ($i < $remainder ? 1 : 0);
+            }
+        }
+
         return $allocations;
     }
 
@@ -129,7 +141,7 @@ class ProductionMonitoringController extends Controller
             return (float) min($impliedUnits);
         }
 
-        return (float) $componentSums->sum('total_qty');
+        return 0.0;
     }
 
     public function index(Request $request)
