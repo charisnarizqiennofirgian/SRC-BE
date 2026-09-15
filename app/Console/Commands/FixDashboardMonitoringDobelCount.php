@@ -25,6 +25,10 @@ class FixDashboardMonitoringDobelCount extends Command
         ['doc' => 'MSN-202607-009', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
         ['doc' => 'MSN-202607-010', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
         ['doc' => 'MSN-202607-011', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
+        ['doc' => 'MLD-202607-072', 'table' => 'moulding_productions', 'label' => 'RAFAEL FRAME DINING TABLE 264X154 BRUSHED (SO-2026-05-0003)'],
+        ['doc' => 'MLD-202607-074', 'table' => 'moulding_productions', 'label' => 'RAFAEL FRAME DINING TABLE 264X154 BRUSHED (SO-2026-05-0003)'],
+        ['doc' => 'MLD-202607-071', 'table' => 'moulding_productions', 'label' => 'RAFAEL FRAME DINING TABLE 264X155 PICKLED (SO-2026-05-0003)'],
+        ['doc' => 'MLD-202607-075', 'table' => 'moulding_productions', 'label' => 'RAFAEL FRAME DINING TABLE 264X155 PICKLED (SO-2026-05-0003)'],
     ];
 
     public function handle(): int
