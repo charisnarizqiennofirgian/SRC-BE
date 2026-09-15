@@ -22,6 +22,9 @@ class FixDashboardMonitoringDobelCount extends Command
     private array $zeroCases = [
         ['doc' => 'MLD-202607-034', 'table' => 'moulding_productions', 'label' => 'SANDY BACKREST NATURAL TEAK (SO-2026-0006)'],
         ['doc' => 'MLD-202607-033', 'table' => 'moulding_productions', 'label' => 'GRAND LIFE COFFEE TABLE FRAME (SO-2026-0006)'],
+        ['doc' => 'MSN-202607-009', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
+        ['doc' => 'MSN-202607-010', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
+        ['doc' => 'MSN-202607-011', 'table' => 'mesin_productions',    'label' => 'LAREN TOP TABLE 89X89 IN TEAK PICKLED (SO-2026-06-0005)'],
     ];
 
     public function handle(): int
