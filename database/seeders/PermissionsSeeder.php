@@ -65,6 +65,7 @@ class PermissionsSeeder extends Seeder
             'produksi-sampel-pembahanan',
             'produksi-sampel-moulding',
             'produksi-sampel-prototype',
+            'produksi-sampel-rustik',
             'produksi-sampel-sanding',
             'produksi-sampel-packing',
             'produksi-qc-final',

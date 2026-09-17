@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\PurchaseRequestController;
 
 use App\Http\Controllers\Api\SandingController;
 use App\Http\Controllers\Api\RustikController;
+use App\Http\Controllers\Api\SampelRustikController;
 use App\Http\Controllers\Api\FinishingController;
 use App\Http\Controllers\Api\PackingController;
 use App\Http\Controllers\Api\MaterialUsageController;
@@ -359,6 +360,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/available-pos',  [PrototypeController::class, 'getAvailableProductionOrders']);
         Route::get('/source-items',   [PrototypeController::class, 'getSourceItems']);
         Route::post('/',              [PrototypeController::class, 'store']);
+    });
+
+    Route::middleware('permission:produksi-sampel-rustik')->prefix('produksi/sampel-rustik')->group(function () {
+        Route::get('/available-pos',  [SampelRustikController::class, 'getAvailablePos']);
+        Route::get('/source-items',   [SampelRustikController::class, 'getSourceItems']);
+        Route::post('/',              [SampelRustikController::class, 'store']);
     });
 
     Route::middleware('permission:produksi-qc-final')->prefix('qc-final')->group(function () {

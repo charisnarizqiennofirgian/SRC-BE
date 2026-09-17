@@ -111,6 +111,16 @@ class ProductionMonitoringController extends Controller
         'packing'    => ['PACKING'],
     ];
 
+    private array $hilirPhysicalWarehouseCodes = [
+        'assembling' => 'ASSEMBLING',
+        'sanding'    => 'SANDING',
+        'rustik'     => 'RUSTIK',
+        'finishing'  => 'FINISHING',
+        'anyam'      => 'AYAM',
+        'qc_final'   => 'QC_FINAL',
+        'packing'    => 'PACKING',
+    ];
+
     private function applyPipelineRemaining(array $orderedQty): array
     {
         $keys      = array_keys($orderedQty);
@@ -170,6 +180,11 @@ class ProductionMonitoringController extends Controller
 
             $salesOrders = $query->get();
             $result = [];
+
+            $hilirPhysicalWarehouseIds = \App\Models\Warehouse::whereIn('code', array_values($this->hilirPhysicalWarehouseCodes))
+                ->pluck('id', 'code')
+                ->toArray();
+            $itemTypeCache = [];
 
             foreach ($salesOrders as $so) {
                 $poIds = $so->productionOrders->pluck('id')->toArray();
@@ -480,6 +495,27 @@ class ProductionMonitoringController extends Controller
                     $stok = (float) ($matchedPoDetail->initial_stock_snapshot ?? 0);
                     $stokUpdatable = $this->canRefreshInitialStock($matchedPoDetail, $rawQtyForPipeline);
 
+                    if (!array_key_exists($itemId, $itemTypeCache)) {
+                        $itemTypeCache[$itemId] = \App\Models\Item::where('id', $itemId)->value('type');
+                    }
+
+                    $stokGudangHilir = [];
+                    if ($itemTypeCache[$itemId] === \App\Models\Item::TYPE_FINISHED_GOOD) {
+                        foreach ($this->hilirPhysicalWarehouseCodes as $stageKey => $whCode) {
+                            $whId = $hilirPhysicalWarehouseIds[$whCode] ?? null;
+                            if (!$whId) {
+                                continue;
+                            }
+                            $physicalQty = (float) (Inventory::where('item_id', $itemId)
+                                ->where('warehouse_id', $whId)
+                                ->value('qty_pcs') ?? 0);
+                            $pipelineQty = (float) ($pipelineRemaining[$stageKey] ?? 0);
+                            if ($physicalQty > $pipelineQty) {
+                                $stokGudangHilir[$stageKey] = $physicalQty;
+                            }
+                        }
+                    }
+
                     $items[] = [
                         'detail_id'         => $detail->id,
                         'production_order_detail_id' => $matchedPoDetail?->id,
@@ -513,6 +549,7 @@ class ProductionMonitoringController extends Controller
                         'qty_packing'       => $pipelineRemaining['packing'],
                         'qty_reject'        => (float) $qtyReject,
                         'has_reject'        => $qtyReject > 0,
+                        'stok_gudang_hilir' => $stokGudangHilir,
 
                         'sisa'              => max(0, $target - $stok - $qtyPacking),
                         'is_done'           => (($qtyPacking + $stok) >= $target && $target > 0) || $poCompleted,
@@ -595,14 +632,17 @@ class ProductionMonitoringController extends Controller
                     $qtyPrototype = (float) InventoryLog::where('transaction_type', 'PROTOTYPE')
                         ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
 
+                    $qtyRustik = (float) InventoryLog::where('transaction_type', 'RUSTIK_SAMPLE')
+                        ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
+
                     $qtySanding = (float) InventoryLog::where('transaction_type', 'SANDING')
                         ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
 
                     $qtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
                         ->whereIn('reference_id', $poIds)->where('direction', 'IN')->sum('qty');
 
-                    $hasLaterThanKd         = $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
-                    $hasLaterThanPembahanan = $qtyMoulding > 0 || $qtyPrototype > 0 || $qtySanding > 0 || $qtyPacking > 0;
+                    $hasLaterThanKd         = $hasPembahanan || $qtyMoulding > 0 || $qtyPrototype > 0 || $qtyRustik > 0 || $qtySanding > 0 || $qtyPacking > 0;
+                    $hasLaterThanPembahanan = $qtyMoulding > 0 || $qtyPrototype > 0 || $qtyRustik > 0 || $qtySanding > 0 || $qtyPacking > 0;
 
                     $statusKd         = $hasLaterThanKd && $hasKd             ? 'done' : ($hasLaterThanKd && !$hasKd             ? 'skip' : ($hasKd         ? 'in_progress' : 'waiting'));
                     $statusPembahanan = $hasLaterThanPembahanan && $hasPembahanan ? 'done' : ($hasLaterThanPembahanan && !$hasPembahanan ? 'skip' : ($hasPembahanan ? 'in_progress' : 'waiting'));
@@ -671,6 +711,10 @@ class ProductionMonitoringController extends Controller
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
+                        $itemQtyRustik = (float) InventoryLog::where('transaction_type', 'RUSTIK_SAMPLE')
+                            ->whereIn('reference_id', $poIds)->where('direction', 'IN')
+                            ->where('item_id', $itemId)->sum('qty');
+
                         $itemQtySanding = (float) InventoryLog::where('transaction_type', 'SANDING')
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
@@ -684,6 +728,9 @@ class ProductionMonitoringController extends Controller
                             if (!isset($sampleHilirAllocationCache[$itemId]['prototype'])) {
                                 $sampleHilirAllocationCache[$itemId]['prototype'] = $this->waterfallAllocate($poDetailsForItem, $itemQtyPrototype, 'qty_planned');
                             }
+                            if (!isset($sampleHilirAllocationCache[$itemId]['rustik'])) {
+                                $sampleHilirAllocationCache[$itemId]['rustik'] = $this->waterfallAllocate($poDetailsForItem, $itemQtyRustik, 'qty_planned');
+                            }
                             if (!isset($sampleHilirAllocationCache[$itemId]['sanding'])) {
                                 $sampleHilirAllocationCache[$itemId]['sanding'] = $this->waterfallAllocate($poDetailsForItem, $itemQtySanding, 'qty_planned');
                             }
@@ -691,12 +738,13 @@ class ProductionMonitoringController extends Controller
                                 $sampleHilirAllocationCache[$itemId]['packing'] = $this->waterfallAllocate($poDetailsForItem, $itemQtyPacking, 'qty_planned');
                             }
                             $itemQtyPrototype = $sampleHilirAllocationCache[$itemId]['prototype'][$detail->id] ?? 0;
+                            $itemQtyRustik    = $sampleHilirAllocationCache[$itemId]['rustik'][$detail->id] ?? 0;
                             $itemQtySanding   = $sampleHilirAllocationCache[$itemId]['sanding'][$detail->id] ?? 0;
                             $itemQtyPacking   = $sampleHilirAllocationCache[$itemId]['packing'][$detail->id] ?? 0;
                         }
 
                         $itemHasLaterThanSawmill = $hasKd || $hasPembahanan
-                            || $itemQtyMoulding > 0 || $itemQtyPrototype > 0 || $itemQtySanding > 0 || $itemQtyPacking > 0;
+                            || $itemQtyMoulding > 0 || $itemQtyPrototype > 0 || $itemQtyRustik > 0 || $itemQtySanding > 0 || $itemQtyPacking > 0;
 
                         if ($hasSawmill) {
                             $itemStatusSawmill = $itemHasLaterThanSawmill ? 'done' : 'in_progress';
@@ -749,6 +797,7 @@ class ProductionMonitoringController extends Controller
                         $rawQtyForPipelineSample = [
                             'moulding'  => $itemQtyMoulding,
                             'prototype' => $itemQtyPrototype,
+                            'rustik'    => $itemQtyRustik,
                             'sanding'   => $itemQtySanding,
                             'packing'   => $itemQtyPacking,
                         ];
@@ -774,6 +823,7 @@ class ProductionMonitoringController extends Controller
                             'moulding_components' => $itemMouldingComponents,
                             'moulding_bom_checklist' => $itemMouldingBomChecklist,
                             'qty_prototype'     => $pipelineRemainingSample['prototype'],
+                            'qty_rustik'        => $pipelineRemainingSample['rustik'],
                             'qty_sanding'       => $pipelineRemainingSample['sanding'],
                             'qty_packing'       => $pipelineRemainingSample['packing'],
                             'sisa'              => max(0, $target - $stokSample - $itemQtyPacking),
@@ -844,6 +894,7 @@ class ProductionMonitoringController extends Controller
                 'ANYAM'           => 'Anyam',
                 'SANDING'         => 'Sanding',
                 'RUSTIK'          => 'Rustik',
+                'RUSTIK_SAMPLE'   => 'Rustik Sampel',
                 'FINISHING'       => 'Finishing',
                 'QC_FINAL'        => 'QC Final',
                 'PACKING'         => 'Packing',
@@ -954,6 +1005,7 @@ class ProductionMonitoringController extends Controller
                 'ANYAM'           => 'Anyam',
                 'SANDING'         => 'Sanding',
                 'RUSTIK'          => 'Rustik',
+                'RUSTIK_SAMPLE'   => 'Rustik Sampel',
                 'FINISHING'       => 'Finishing',
                 'QC_FINAL'        => 'QC Final',
                 'PACKING'         => 'Packing',
