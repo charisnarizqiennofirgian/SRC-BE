@@ -660,9 +660,11 @@ class DeliveryOrderController extends Controller
         try {
             $do = DeliveryOrder::with('details')->findOrFail($id);
 
-            if ($do->status !== 'DRAFT') {
-                throw new \Exception('Hanya DO dengan status DRAFT yang bisa diedit');
+            if (!in_array($do->status, ['DRAFT', 'SHIPPED'], true)) {
+                throw new \Exception('Hanya DO dengan status DRAFT atau SHIPPED yang bisa diedit');
             }
+
+            $isShipped = $do->status === 'SHIPPED';
 
             $validated = $request->validate([
                 'barcode_image' => 'nullable|image|mimes:jpeg,png|max:1024',
@@ -729,7 +731,7 @@ class DeliveryOrderController extends Controller
                 $do->save();
             }
 
-            if ($request->has('details')) {
+            if (!$isShipped && $request->has('details')) {
                 $details = $request->details;
                 if (is_string($details)) {
                     $details = json_decode($details, true);
