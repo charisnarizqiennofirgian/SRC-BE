@@ -31,6 +31,9 @@ class PurchaseOrderController extends Controller
                 $q->where('po_number', 'like', '%' . $search . '%')
                   ->orWhereHas('supplier', function ($sq) use ($search) {
                       $sq->where('name', 'like', '%' . $search . '%');
+                  })
+                  ->orWhereHas('details.item', function ($iq) use ($search) {
+                      $iq->where('name', 'like', '%' . $search . '%');
                   });
             });
         }

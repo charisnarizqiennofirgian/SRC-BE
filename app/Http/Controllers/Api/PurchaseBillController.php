@@ -164,12 +164,23 @@ class PurchaseBillController extends Controller
         }
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $bills = PurchaseBill::with(['supplier:id,name', 'coa:id,code,name'])
+        $query = PurchaseBill::with(['supplier:id,name', 'coa:id,code,name'])
             ->whereNull('deleted_at')
-            ->latest()
-            ->paginate(15);
+            ->latest();
+
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('bill_number', 'like', "%{$search}%")
+                  ->orWhere('supplier_invoice_number', 'like', "%{$search}%")
+                  ->orWhereHas('supplier', fn($sq) => $sq->where('name', 'like', "%{$search}%"))
+                  ->orWhereHas('details.item', fn($iq) => $iq->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        $bills = $query->paginate(15);
 
         return response()->json([
             'success' => true,
