@@ -405,6 +405,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/export-excel', [ProductionMonitoringController::class, 'exportExcel']);
         Route::post('/detail/{productionOrderDetailId}/refresh-stock', [ProductionMonitoringController::class, 'refreshInitialStock']);
         Route::post('/detail/{productionOrderDetailId}/set-stock-manual', [ProductionMonitoringController::class, 'setInitialStockManual']);
+        Route::get('/detail/{productionOrderDetailId}/gudang-source-items', [ProductionMonitoringController::class, 'gudangSourceItems']);
+        Route::post('/detail/{productionOrderDetailId}/ambil-dari-gudang', [ProductionMonitoringController::class, 'ambilDariGudang']);
     });
 
     Route::middleware('permission:keuangan-ar-aging')->get('/ar-aging', [ArAgingController::class, 'index']);

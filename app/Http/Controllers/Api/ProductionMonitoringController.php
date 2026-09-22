@@ -7,8 +7,11 @@ use App\Models\Inventory;
 use App\Models\ProductionOrderDetail;
 use App\Models\SalesOrder;
 use App\Models\InventoryLog;
+use App\Models\Warehouse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Carbon\Carbon;
 
 class ProductionMonitoringController extends Controller
@@ -719,7 +722,7 @@ class ProductionMonitoringController extends Controller
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
-                        $itemQtyPacking = (float) InventoryLog::where('transaction_type', 'PACKING')
+                        $itemQtyPacking = (float) InventoryLog::whereIn('transaction_type', ['PACKING', 'GUDANG_LANGSUNG'])
                             ->whereIn('reference_id', $poIds)->where('direction', 'IN')
                             ->where('item_id', $itemId)->sum('qty');
 
@@ -898,6 +901,7 @@ class ProductionMonitoringController extends Controller
                 'FINISHING'       => 'Finishing',
                 'QC_FINAL'        => 'QC Final',
                 'PACKING'         => 'Packing',
+                'GUDANG_LANGSUNG' => 'Ambil dari Gudang',
             ];
 
             $result = [];
@@ -1009,6 +1013,7 @@ class ProductionMonitoringController extends Controller
                 'FINISHING'       => 'Finishing',
                 'QC_FINAL'        => 'QC Final',
                 'PACKING'         => 'Packing',
+                'GUDANG_LANGSUNG' => 'Ambil dari Gudang',
             ];
 
             $stagesData = [];
@@ -1058,6 +1063,7 @@ class ProductionMonitoringController extends Controller
                 'FINISHING'       => 'BE185D',
                 'QC_FINAL'        => '166534',
                 'PACKING'         => '1E40AF',
+                'GUDANG_LANGSUNG' => '4B5563',
             ];
 
             $row = 1;
@@ -1267,6 +1273,172 @@ class ProductionMonitoringController extends Controller
         }
 
         return false;
+    }
+
+    // =============================================
+    // GET: Daftar gudang yang punya stok item ini, untuk dipilih sebagai
+    // sumber pada aksi "Ambil dari Gudang" (produk sample yang bisa dipenuhi
+    // langsung dari stok tanpa lewat pipeline produksi sample).
+    // =============================================
+    public function gudangSourceItems($productionOrderDetailId)
+    {
+        try {
+            $detail = ProductionOrderDetail::with('item')->findOrFail($productionOrderDetailId);
+            $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+
+            $items = Inventory::where('item_id', $detail->item_id)
+                ->where('qty_pcs', '>', 0)
+                ->when($packingWarehouseId, fn($q) => $q->where('warehouse_id', '!=', $packingWarehouseId))
+                ->with('warehouse')
+                ->get()
+                ->map(fn($inv) => [
+                    'warehouse_id'   => $inv->warehouse_id,
+                    'warehouse_code' => $inv->warehouse?->code ?? '-',
+                    'warehouse_name' => $inv->warehouse?->name ?? '-',
+                    'qty_available'  => (float) $inv->qty_pcs,
+                ])
+                ->values();
+
+            return response()->json(['success' => true, 'data' => $items]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // =============================================
+    // POST: Catat item sample yang dipenuhi langsung dari stok gudang
+    // (skip pipeline produksi sample). Stok keluar dari gudang sumber,
+    // masuk ke Gudang Packing (supaya bisa langsung dikirim via Delivery
+    // Order), dicatat dengan transaction_type GUDANG_LANGSUNG supaya tetap
+    // bisa dibedakan dari hasil packing pipeline biasa di riwayat/audit.
+    // =============================================
+    public function ambilDariGudang(Request $request, $productionOrderDetailId)
+    {
+        $data = $request->validate([
+            'warehouse_id' => ['required', 'integer', 'exists:warehouses,id'],
+            'qty'          => ['required', 'numeric', 'min:0.01'],
+            'date'         => ['nullable', 'date'],
+            'notes'        => ['nullable', 'string'],
+        ]);
+
+        try {
+            return DB::transaction(function () use ($data, $productionOrderDetailId) {
+                $detail = ProductionOrderDetail::with(['item', 'productionOrder'])
+                    ->findOrFail($productionOrderDetailId);
+                $po = $detail->productionOrder;
+
+                $packingWarehouse = Warehouse::where('code', 'PACKING')->first();
+                if (!$packingWarehouse) {
+                    throw ValidationException::withMessages([
+                        'warehouse' => ['Gudang Packing tidak ditemukan.'],
+                    ]);
+                }
+
+                if ((int) $data['warehouse_id'] === (int) $packingWarehouse->id) {
+                    throw ValidationException::withMessages([
+                        'warehouse_id' => ['Gudang sumber tidak boleh Gudang Packing itu sendiri.'],
+                    ]);
+                }
+
+                $itemName = $detail->item?->name ?? "ID {$detail->item_id}";
+                $poNumber = $po?->po_number ?? '-';
+
+                $sourceInv = Inventory::where('item_id', $detail->item_id)
+                    ->where('warehouse_id', $data['warehouse_id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                $available = (float) ($sourceInv?->qty_pcs ?? 0);
+                if ($available < $data['qty']) {
+                    throw ValidationException::withMessages([
+                        'qty' => ["Stok '{$itemName}' di gudang tersebut tidak cukup. Tersedia: {$available} pcs, diminta: {$data['qty']} pcs."],
+                    ]);
+                }
+
+                $date = $data['date'] ?? now()->toDateString();
+
+                $prefix = 'GDL-' . now()->format('Ym') . '-';
+                $last   = InventoryLog::where('transaction_type', 'GUDANG_LANGSUNG')
+                    ->where('direction', 'IN')
+                    ->where('reference_number', 'like', $prefix . '%')
+                    ->orderByDesc('reference_number')
+                    ->value('reference_number');
+                $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
+                $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
+
+                $sourceInv->decrement('qty_pcs', $data['qty']);
+
+                InventoryLog::create([
+                    'date'             => $date,
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $detail->item_id,
+                    'warehouse_id'     => $data['warehouse_id'],
+                    'qty'              => $data['qty'],
+                    'qty_m3'           => 0,
+                    'direction'        => 'OUT',
+                    'transaction_type' => 'GUDANG_LANGSUNG',
+                    'reference_type'   => 'ProductionOrder',
+                    'reference_id'     => $detail->production_order_id,
+                    'reference_number' => $documentNumber,
+                    'notes'            => $data['notes'] ?? "Ambil langsung dari gudang untuk '{$itemName}' ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                $packingInv = Inventory::where('item_id', $detail->item_id)
+                    ->where('warehouse_id', $packingWarehouse->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($packingInv) {
+                    $packingInv->increment('qty_pcs', $data['qty']);
+                } else {
+                    Inventory::create([
+                        'item_id'      => $detail->item_id,
+                        'warehouse_id' => $packingWarehouse->id,
+                        'qty_pcs'      => $data['qty'],
+                        'ref_po_id'    => $detail->production_order_id,
+                    ]);
+                }
+
+                InventoryLog::create([
+                    'date'             => $date,
+                    'time'             => now()->toTimeString(),
+                    'item_id'          => $detail->item_id,
+                    'warehouse_id'     => $packingWarehouse->id,
+                    'qty'              => $data['qty'],
+                    'qty_m3'           => 0,
+                    'direction'        => 'IN',
+                    'transaction_type' => 'GUDANG_LANGSUNG',
+                    'reference_type'   => 'ProductionOrder',
+                    'reference_id'     => $detail->production_order_id,
+                    'reference_number' => $documentNumber,
+                    'notes'            => "Produk jadi '{$itemName}' diambil langsung dari gudang, siap kirim ({$documentNumber}) - PO: {$poNumber}",
+                    'user_id'          => Auth::id(),
+                ]);
+
+                if ($po && $po->status !== 'completed') {
+                    $po->status = 'in_progress';
+                    $po->save();
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Berhasil dicatat: {$itemName} diambil dari gudang ({$documentNumber}).",
+                    'data'    => ['document_number' => $documentNumber],
+                ], 201);
+            });
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => collect($e->errors())->flatten()->first(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 
     public function refreshInitialStock($productionOrderDetailId)
