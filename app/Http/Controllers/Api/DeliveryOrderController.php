@@ -40,6 +40,37 @@ class DeliveryOrderController extends Controller
         return $deliveryOrder;
     }
 
+    private function attachQtySummary(DeliveryOrder $deliveryOrder): DeliveryOrder
+    {
+        $lines = [];
+        foreach ($deliveryOrder->details as $detail) {
+            $soDetail = $detail->salesOrderDetail;
+            if ($soDetail && $soDetail->trashed()) {
+                $soDetail = SalesOrderDetail::resolveCurrent($soDetail->sales_order_id, $detail->item_id) ?? $soDetail;
+            }
+            $key = $soDetail ? 'so' . $soDetail->id : 'item' . $detail->item_id;
+
+            if (!isset($lines[$key])) {
+                $lines[$key] = [
+                    'item_name' => $detail->item_name,
+                    'so_number' => $detail->salesOrderDetail?->salesOrder?->so_number,
+                    'ordered'   => (float) ($soDetail->quantity ?? 0),
+                    'shipped'   => 0.0,
+                ];
+            }
+            $lines[$key]['shipped'] += (float) $detail->quantity_shipped;
+        }
+
+        $lines = array_values($lines);
+        $deliveryOrder->setAttribute('qty_summary', [
+            'ordered' => array_sum(array_column($lines, 'ordered')),
+            'shipped' => array_sum(array_column($lines, 'shipped')),
+            'items'   => $lines,
+        ]);
+
+        return $deliveryOrder;
+    }
+
     public function index(Request $request)
     {
         try {
@@ -66,7 +97,9 @@ class DeliveryOrderController extends Controller
             }
 
             $deliveryOrders = $query->paginate($perPage);
-            $deliveryOrders->getCollection()->transform(fn ($do) => $this->attachSalesOrdersInfo($do));
+            $deliveryOrders->getCollection()->transform(
+                fn ($do) => $this->attachQtySummary($this->attachSalesOrdersInfo($do))
+            );
 
             return response()->json([
                 'success' => true,
@@ -330,6 +363,235 @@ class DeliveryOrderController extends Controller
             'message' => 'Pengiriman berhasil dikonfirmasi. Barang sudah tercatat terkirim.',
             'data' => $shipData['data'],
         ]);
+    }
+
+    public function showForProduction($id)
+    {
+        $response = $this->show($id);
+        $payload = $response->getData(true);
+        if (!($payload['success'] ?? false)) {
+            return $response;
+        }
+
+        $soIds = [];
+        foreach ($payload['data']['details'] as $i => $detail) {
+            $soDetail = SalesOrderDetail::withTrashed()->find($detail['sales_order_detail_id']);
+            if ($soDetail && $soDetail->trashed()) {
+                $active = SalesOrderDetail::where('sales_order_id', $soDetail->sales_order_id)
+                    ->where('item_id', $soDetail->item_id)
+                    ->first();
+                if ($active) {
+                    $payload['data']['details'][$i]['sales_order_detail_id'] = $active->id;
+                    $soDetail = $active;
+                }
+            }
+            if ($soDetail) {
+                $soIds[] = $soDetail->sales_order_id;
+            }
+        }
+
+        $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+        $payload['data']['edit_sales_orders'] = SalesOrder::with([
+            'buyer:id,name,address,eu_factory_number',
+            'details.item:id,name,code,stock,unit_id,hs_code,nw_per_box,gw_per_box,m3_per_carton,wood_consumed_per_pcs',
+            'details.item.unit:id,name',
+        ])
+            ->select('id', 'so_number', 'buyer_id', 'user_id', 'so_date', 'grand_total', 'status', 'currency')
+            ->whereIn('id', array_unique($soIds))
+            ->get()
+            ->each(function ($so) use ($packingWarehouseId) {
+                $so->details->each(function ($detail) use ($packingWarehouseId) {
+                    $packingStock = (float) Inventory::where('item_id', $detail->item_id)
+                        ->where('warehouse_id', $packingWarehouseId)
+                        ->sum('qty_pcs');
+                    $detail->current_stock = $packingStock > 0 ? $packingStock : (float) ($detail->item->stock ?? 0);
+                });
+            });
+
+        return response()->json($payload);
+    }
+
+    public function updateFromProduction(Request $request, $id)
+    {
+        DB::beginTransaction();
+        try {
+            $do = DeliveryOrder::with('details')->lockForUpdate()->findOrFail($id);
+
+            if (!in_array($do->status, ['DRAFT', 'SHIPPED'], true)) {
+                throw new \Exception("Pengiriman berstatus {$do->status} tidak bisa diedit lagi.");
+            }
+
+            $invoiced = \App\Models\SalesInvoiceDetail::whereIn('delivery_order_detail_id', $do->details->pluck('id'))->exists();
+            if ($invoiced) {
+                throw new \Exception('Pengiriman ini sudah dibuatkan invoice, tidak bisa diedit lagi.');
+            }
+
+            $salesOrderIds = $request->sales_order_ids;
+            if (is_string($salesOrderIds)) {
+                $salesOrderIds = json_decode($salesOrderIds, true);
+            }
+            if (empty($salesOrderIds) || !is_array($salesOrderIds)) {
+                throw new \Exception('Minimal pilih 1 Sales Order.');
+            }
+            $salesOrders = SalesOrder::whereIn('id', $salesOrderIds)->get();
+            if ($salesOrders->count() !== count(array_unique($salesOrderIds))) {
+                throw new \Exception('Ada Sales Order yang tidak ditemukan.');
+            }
+            if ($salesOrders->pluck('buyer_id')->unique()->count() > 1 || $salesOrders->first()->buyer_id != $do->buyer_id) {
+                throw new \Exception('Semua Sales Order harus dari buyer yang sama dengan pengiriman ini.');
+            }
+            if ($salesOrders->pluck('currency')->unique()->count() > 1) {
+                throw new \Exception('Semua Sales Order yang digabung dalam satu pengiriman harus memakai currency yang sama.');
+            }
+
+            $details = $request->details;
+            if (is_string($details)) {
+                $details = json_decode($details, true);
+            }
+            if (empty($details) || !is_array($details)) {
+                throw new \Exception('Tidak ada barang yang dikirim.');
+            }
+
+            $affectedSoIds = $this->salesOrderIdsOfDetails($do->details);
+
+            if ($do->status === 'SHIPPED') {
+                $this->reverseShipment($do);
+            }
+
+            $do->update(['sales_order_id' => $salesOrders->first()->id]);
+
+            $subRequest = Request::create('/', 'PUT', [
+                'delivery_date' => $request->delivery_date ?: $do->delivery_date,
+                'shipment_mode' => $request->shipment_mode ?: $do->shipment_mode,
+                'details'       => $details,
+            ]);
+            $updateData = $this->update($subRequest, $do->id)->getData(true);
+            if (!($updateData['success'] ?? false)) {
+                throw new \Exception($updateData['message'] ?? 'Gagal menyimpan perubahan barang.');
+            }
+
+            $shipData = $this->ship($do->id)->getData(true);
+            if (!($shipData['success'] ?? false)) {
+                throw new \Exception($shipData['message'] ?? 'Gagal memproses ulang pengiriman.');
+            }
+
+            foreach (array_unique($affectedSoIds) as $soId) {
+                $this->recomputeSalesOrderShipStatus($soId);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => "Pengiriman {$do->do_number} berhasil diperbarui. Stok dan qty terkirim SO sudah disesuaikan.",
+                'data'    => $shipData['data'] ?? null,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => collect($e->errors())->flatten()->first()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+    }
+
+    private function reverseShipment(DeliveryOrder $do): void
+    {
+        $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
+        if (!$packingWarehouseId) {
+            throw new \Exception('Gudang Packing tidak ditemukan.');
+        }
+
+        foreach ($do->details as $detail) {
+            $qty = (float) $detail->quantity_shipped;
+            if ($qty <= 0) {
+                continue;
+            }
+
+            $inventory = Inventory::where('warehouse_id', $packingWarehouseId)
+                ->where('item_id', $detail->item_id)
+                ->where('grade_key', '')
+                ->lockForUpdate()
+                ->first();
+            if ($inventory) {
+                $inventory->increment('qty_pcs', $qty);
+            } else {
+                Inventory::create([
+                    'warehouse_id' => $packingWarehouseId,
+                    'item_id'      => $detail->item_id,
+                    'qty_pcs'      => $qty,
+                    'qty_m3'       => 0,
+                ]);
+            }
+
+            $item = Item::lockForUpdate()->find($detail->item_id);
+            if ($item) {
+                $item->update(['stock' => (float) $item->stock + $qty]);
+            }
+
+            StockMovement::create([
+                'item_id'  => $detail->item_id,
+                'type'     => 'IN',
+                'quantity' => $qty,
+                'notes'    => "Koreksi konfirmasi pengiriman (DO: {$do->do_number}) — stok dikembalikan sebelum diproses ulang",
+            ]);
+
+            InventoryLog::create([
+                'date'             => now()->toDateString(),
+                'time'             => now()->toTimeString(),
+                'item_id'          => $detail->item_id,
+                'warehouse_id'     => $packingWarehouseId,
+                'qty'              => $qty,
+                'direction'        => 'IN',
+                'transaction_type' => 'SALE',
+                'reference_type'   => 'DeliveryOrder',
+                'reference_id'     => $do->id,
+                'reference_number' => $do->do_number,
+                'notes'            => "Koreksi pengiriman {$do->do_number}: stok dikembalikan sebelum diproses ulang",
+                'user_id'          => Auth::id(),
+            ]);
+
+            $soDetail = SalesOrderDetail::withTrashed()->find($detail->sales_order_detail_id);
+            if ($soDetail && $soDetail->trashed()) {
+                $active = SalesOrderDetail::where('sales_order_id', $soDetail->sales_order_id)
+                    ->where('item_id', $soDetail->item_id)
+                    ->first();
+                if ($active) {
+                    $detail->update(['sales_order_detail_id' => $active->id]);
+                    $soDetail = $active;
+                }
+            }
+            if ($soDetail) {
+                $soDetail->update(['quantity_shipped' => max(0, (float) $soDetail->quantity_shipped - $qty)]);
+            }
+        }
+
+        $do->status = 'DRAFT';
+        $do->save();
+    }
+
+    private function salesOrderIdsOfDetails($details): array
+    {
+        return SalesOrderDetail::withTrashed()
+            ->whereIn('id', collect($details)->pluck('sales_order_detail_id'))
+            ->pluck('sales_order_id')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function recomputeSalesOrderShipStatus($soId): void
+    {
+        $salesOrder = SalesOrder::with('details')->find($soId);
+        if (!$salesOrder || !in_array($salesOrder->status, ['Confirmed', 'Partial Shipped', 'Shipped'], true)) {
+            return;
+        }
+
+        $allShipped = $salesOrder->details->every(fn ($d) => (float) $d->quantity_shipped >= (float) $d->quantity);
+        $anyShipped = $salesOrder->details->contains(fn ($d) => (float) $d->quantity_shipped > 0);
+
+        $salesOrder->status = $allShipped ? 'Shipped' : ($anyShipped ? 'Partial Shipped' : 'Confirmed');
+        $salesOrder->save();
     }
 
     public function ship($id)

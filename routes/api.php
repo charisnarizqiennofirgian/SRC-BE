@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\BuyerController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\StockReportController;
 use App\Http\Controllers\Api\StockAdjustmentController;
+use App\Http\Controllers\Api\StockOpnameController;
 use App\Http\Controllers\Api\PurchaseOrderController;
 use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
@@ -180,6 +181,20 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         });
     });
 
+    Route::middleware('permission:stok-opname')->prefix('stock-opnames')->group(function () {
+        Route::get('/',                        [StockOpnameController::class, 'index']);
+        Route::post('/',                       [StockOpnameController::class, 'store']);
+        Route::get('/items/search',            [StockOpnameController::class, 'searchItems']);
+        Route::get('/{id}',                    [StockOpnameController::class, 'show']);
+        Route::delete('/{id}',                 [StockOpnameController::class, 'destroy']);
+        Route::put('/{id}/details',            [StockOpnameController::class, 'saveDetails']);
+        Route::post('/{id}/items',             [StockOpnameController::class, 'addItem']);
+        Route::delete('/{id}/items/{detailId}',[StockOpnameController::class, 'removeItem']);
+        Route::get('/{id}/export',             [StockOpnameController::class, 'export']);
+        Route::post('/{id}/import',            [StockOpnameController::class, 'import']);
+        Route::post('/{id}/post',              [StockOpnameController::class, 'post']);
+    });
+
     Route::middleware('permission:pembelian-purchase-request')->prefix('purchase-requests')->group(function () {
         Route::get('/',                [PurchaseRequestController::class, 'index']);
         Route::post('/',               [PurchaseRequestController::class, 'store']);
@@ -241,6 +256,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::middleware('permission:produksi-konfirmasi-pengiriman')->prefix('production/shipment-confirmations')->group(function () {
         Route::get('/', [DeliveryOrderController::class, 'index']);
         Route::post('/', [DeliveryOrderController::class, 'confirmFromProduction']);
+        Route::get('/{id}', [DeliveryOrderController::class, 'showForProduction']);
+        Route::put('/{id}', [DeliveryOrderController::class, 'updateFromProduction']);
     });
 
     Route::middleware('permission:penjualan-invoice')->prefix('sales-invoices')->group(function () {

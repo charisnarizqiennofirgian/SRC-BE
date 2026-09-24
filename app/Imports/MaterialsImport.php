@@ -12,7 +12,7 @@ use App\Models\StockMovement;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-// ✅ REMOVED: use Maatwebsite\Excel\Concerns\WithValidation;
+
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
@@ -75,7 +75,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         ->where('short_name', $unitShortName)
                         ->orWhere('name', $unitShortName)
                         ->first();
-                        
+
                     if (!$unit) {
                         try {
                             $unit = Unit::create([
@@ -87,7 +87,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         } catch (\Exception $e) {
                             $unit = Unit::withTrashed()->get()->first(function($u) use ($unitShortName) {
                                 $cleanInput = strtoupper(preg_replace('/\s+/u', '', $unitShortName));
-                                return strtoupper(preg_replace('/\s+/u', '', $u->name)) === $cleanInput || 
+                                return strtoupper(preg_replace('/\s+/u', '', $u->name)) === $cleanInput ||
                                        strtoupper(preg_replace('/\s+/u', '', $u->short_name)) === $cleanInput;
                             });
                             if (!$unit) throw $e;
@@ -97,7 +97,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         $unit->restore();
                     }
 
-                    // ✅ Cast kode to string (handle numeric from Excel)
+
                     $kode = strtoupper(trim((string) $row['kode']));
                     $item = Item::withTrashed()->firstOrNew(['code' => $kode]);
                     if ($item->trashed()) {
@@ -120,9 +120,7 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         }
                     }
 
-                    // Guard: kalau item lama sudah ada, punya kategori, dan kategorinya beda dari
-                    // kategori Excel ini, JANGAN ditimpa — kode bentrok berarti kesalahan input,
-                    // bukan update item yang sama. Overwrite di sini pernah merusak master data lain.
+
                     if ($item->exists && $item->category_id && $item->category_id !== $category->id) {
                         Log::error("ROW #{$index} DITOLAK: kode '{$kode}' sudah dipakai item lain (id={$item->id}, nama='{$item->name}', category_id={$item->category_id}). Tidak ditimpa untuk mencegah kerusakan master data.");
                         continue;
@@ -308,5 +306,5 @@ class MaterialsImport implements ToCollection, WithHeadingRow
         Log::info("Import Material selesai. Berhasil: {$processedRows} baris. Ditolak: " . count($skippedRows) . " baris.");
     }
 
-    // ✅ REMOVED rules() method completely
+
 }

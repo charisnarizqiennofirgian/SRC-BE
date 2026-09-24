@@ -176,6 +176,7 @@ class InventoryLogController extends Controller
                 ['value' => 'PRODUCTION', 'label' => 'Produksi'],
                 ['value' => 'USAGE', 'label' => 'Pemakaian'],
                 ['value' => 'ADJUSTMENT', 'label' => 'Penyesuaian'],
+                ['value' => 'OPNAME', 'label' => 'Stok Opname'],
                 ['value' => 'TRANSFER_IN', 'label' => 'Transfer Masuk'],
                 ['value' => 'TRANSFER_OUT', 'label' => 'Transfer Keluar'],
             ]
@@ -221,6 +222,7 @@ class InventoryLogController extends Controller
             'PRODUCTION' => 'PROD',
             'USAGE' => 'PAKAI',
             'ADJUSTMENT' => 'ADJUST',
+            'OPNAME' => 'OPNAME',
             'TRANSFER_IN' => 'MASUK',
             'TRANSFER_OUT' => 'KELUAR',
         ];
