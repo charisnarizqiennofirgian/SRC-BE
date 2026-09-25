@@ -49,6 +49,76 @@ class GoodsReceiptController extends Controller
         return response()->json(['success' => true, 'data' => $receipts]);
     }
 
+    public function buktiPenerimaan($id)
+    {
+        $receipt = DB::transaction(function () use ($id) {
+            $receipt = GoodsReceipt::lockForUpdate()->findOrFail($id);
+            if (!$receipt->bpb_number) {
+                $receipt->bpb_number = $this->generateBpbNumber($receipt->receipt_date ?: now());
+                DB::table('goods_receipts')->where('id', $receipt->id)->update(['bpb_number' => $receipt->bpb_number]);
+            }
+
+            return $receipt;
+        });
+
+        $receipt->load([
+            'purchaseOrder.supplier',
+            'details.item.unit',
+            'details.purchaseOrderDetail',
+        ]);
+        $po = $receipt->purchaseOrder;
+
+        $lines = $receipt->details->map(function ($d) {
+            $qty = (float) $d->quantity_received;
+            $price = $d->price !== null ? (float) $d->price : (float) ($d->purchaseOrderDetail->price ?? 0);
+
+            return [
+                'item_name' => $d->item?->name ?? '-',
+                'unit'      => $d->item?->unit?->name,
+                'quantity'  => $qty,
+                'price'     => $price,
+                'amount'    => round($qty * $price, 2),
+            ];
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'bpb_number'       => $receipt->bpb_number,
+                'receipt_number'   => $receipt->receipt_number,
+                'receipt_date'     => $receipt->receipt_date ? \Carbon\Carbon::parse($receipt->receipt_date)->toDateString() : null,
+                'supplier_name'    => $po?->supplier?->name,
+                'supplier_address' => $po?->supplier?->address,
+                'po_number'        => $po?->po_number,
+                'currency'         => $po?->currency ?: 'IDR',
+                'notes'            => $receipt->notes,
+                'supplier_document_number' => $receipt->supplier_document_number,
+                'lines'            => $lines,
+                'total'            => round($lines->sum('amount'), 2),
+            ],
+        ]);
+    }
+
+    private function generateBpbNumber($date): string
+    {
+        $date = \Carbon\Carbon::parse($date);
+        $year = $date->year;
+        $roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'][$date->month - 1];
+
+        $last = GoodsReceipt::withTrashed()
+            ->where('bpb_number', 'like', "%/SBC/%/{$year}")
+            ->orderByRaw("CAST(SUBSTRING_INDEX(bpb_number, '/', 1) AS UNSIGNED) DESC")
+            ->value('bpb_number');
+        $counter = $last ? ((int) explode('/', $last)[0]) + 1 : 1;
+
+        do {
+            $candidate = str_pad($counter, 3, '0', STR_PAD_LEFT) . "/SBC/{$roman}/{$year}";
+            $counter++;
+        } while (GoodsReceipt::withTrashed()->where('bpb_number', $candidate)->exists());
+
+        return $candidate;
+    }
+
     // DELETE /goods-receipts/{id} — batalkan GR (reverse stok)
     public function destroy($id)
     {

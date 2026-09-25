@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\StockReportController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\StockOpnameController;
 use App\Http\Controllers\Api\PurchaseOrderController;
+use App\Http\Controllers\Api\PurchaseOrderRekapController;
 use App\Http\Controllers\Api\GoodsReceiptController;
 use App\Http\Controllers\Api\PurchaseBillController;
 use App\Http\Controllers\Api\SalesOrderController;
@@ -209,6 +210,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/{id}/unpost',        [PurchaseRequestController::class, 'unpost']);
     });
 
+    Route::middleware('permission:pembelian-operasional|pembelian-karton')->prefix('purchase-orders/rekap-supplier')->group(function () {
+        Route::get('/options', [PurchaseOrderRekapController::class, 'options']);
+        Route::get('/export',  [PurchaseOrderRekapController::class, 'export']);
+        Route::get('/',        [PurchaseOrderRekapController::class, 'index']);
+    });
+
     Route::middleware('permission:pembelian-operasional|pembelian-karton|pembelian-kayu')->group(function () {
         Route::get('purchase-orders/laporan-harga', [PurchaseOrderController::class, 'laporanHarga']);
         Route::get('purchase-orders/{purchaseOrder}', [PurchaseOrderController::class, 'show']);
@@ -217,6 +224,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::apiResource('purchase-orders', PurchaseOrderController::class)->except(['show']);
 
         Route::get('goods-receipts/unbilled', [GoodsReceiptController::class, 'getUnbilledReceipts']);
+        Route::get('goods-receipts/{id}/bukti-penerimaan', [GoodsReceiptController::class, 'buktiPenerimaan']);
         Route::post('goods-receipts/{po_id}/tutup', [GoodsReceiptController::class, 'tutup']);
         Route::apiResource('goods-receipts', GoodsReceiptController::class);
     });
