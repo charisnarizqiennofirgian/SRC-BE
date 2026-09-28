@@ -274,15 +274,13 @@ class JournalService
         return $ppnAccount;
     }
 
-    /**
-     * Create Credit line untuk Hutang Usaha
-     */
+
     private function createHutangLine(JournalEntry $journal, PurchaseBill $bill, float $amount): void
     {
-        // Prioritas: payable_account_id dari supplier
+
         $hutangAccountId = $bill->supplier->payable_account_id;
 
-        // Fallback: cari akun Hutang Usaha
+
         if (!$hutangAccountId) {
             $hutangAccount = ChartOfAccount::where('code', '310.01.001')
                 ->where('is_active', true)

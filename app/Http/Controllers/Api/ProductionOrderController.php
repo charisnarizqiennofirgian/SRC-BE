@@ -3,13 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Inventory;
-use App\Models\MesinProduction;
-use App\Models\MouldingProduction;
 use App\Models\ProductionOrder;
-use App\Models\ProductionOrderDetail;
-use App\Models\RustikKomponenProduction;
 use App\Models\SalesOrder;
+use App\Services\ProductionOrderDetailSyncService;
 use App\Services\ProductionRoutingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,10 +13,12 @@ use Illuminate\Support\Facades\DB;
 class ProductionOrderController extends Controller
 {
     protected $routingService;
+    protected $detailSyncService;
 
-    public function __construct(ProductionRoutingService $routingService)
+    public function __construct(ProductionRoutingService $routingService, ProductionOrderDetailSyncService $detailSyncService)
     {
         $this->routingService = $routingService;
+        $this->detailSyncService = $detailSyncService;
     }
 
     public function index(Request $request)
@@ -200,34 +198,10 @@ class ProductionOrderController extends Controller
                 ]);
             }
 
-            $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
-
-            $addedCount = 0;
-            foreach ($salesOrder->details as $detail) {
-                $existingMatch = null;
-                if (!empty($existingByItem[$detail->item_id])) {
-                    $existingMatch = $existingByItem[$detail->item_id]->shift();
-                }
-
-                if ($existingMatch) {
-                    if ($existingMatch->sales_order_detail_id !== $detail->id) {
-                        $existingMatch->update(['sales_order_detail_id' => $detail->id]);
-                    }
-                    continue;
-                }
-
-                ProductionOrderDetail::create([
-                    'production_order_id'   => $productionOrder->id,
-                    'sales_order_detail_id' => $detail->id,
-                    'item_id'               => $detail->item_id,
-                    'qty_planned'           => $detail->quantity,
-                    'qty_produced'          => 0,
-                    'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
-                ]);
-                $addedCount++;
-            }
-
-            [$removedCount, $blockedCount] = $this->removeOrphanedProductionOrderDetails($existingByItem);
+            $sync = $this->detailSyncService->sync($productionOrder, $salesOrder);
+            $addedCount   = count($sync['added']);
+            $removedCount = count($sync['removed']);
+            $blockedCount = count($sync['blocked']);
 
             $productionOrder->load('details.item');
 
@@ -285,34 +259,10 @@ class ProductionOrderController extends Controller
                 ]);
             }
 
-            $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
-
-            $addedCount = 0;
-            foreach ($salesOrder->details as $detail) {
-                $existingMatch = null;
-                if (!empty($existingByItem[$detail->item_id])) {
-                    $existingMatch = $existingByItem[$detail->item_id]->shift();
-                }
-
-                if ($existingMatch) {
-                    if ($existingMatch->sales_order_detail_id !== $detail->id) {
-                        $existingMatch->update(['sales_order_detail_id' => $detail->id]);
-                    }
-                    continue;
-                }
-
-                ProductionOrderDetail::create([
-                    'production_order_id'   => $productionOrder->id,
-                    'sales_order_detail_id' => $detail->id,
-                    'item_id'               => $detail->item_id,
-                    'qty_planned'           => $detail->quantity,
-                    'qty_produced'          => 0,
-                    'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
-                ]);
-                $addedCount++;
-            }
-
-            [$removedCount, $blockedCount] = $this->removeOrphanedProductionOrderDetails($existingByItem);
+            $sync = $this->detailSyncService->sync($productionOrder, $salesOrder);
+            $addedCount   = count($sync['added']);
+            $removedCount = count($sync['removed']);
+            $blockedCount = count($sync['blocked']);
 
             $message = $isNew
                 ? 'Production Order Sampel berhasil dibuat.'
@@ -324,41 +274,6 @@ class ProductionOrderController extends Controller
                 'data'    => $productionOrder->load('details'),
             ]);
         });
-    }
-
-    private function removeOrphanedProductionOrderDetails($existingByItem): array
-    {
-        $removedCount = 0;
-        $blockedCount = 0;
-
-        foreach ($existingByItem as $remaining) {
-            foreach ($remaining as $orphan) {
-                if ($this->productionDetailHasActivity($orphan)) {
-                    $blockedCount++;
-                    continue;
-                }
-
-                $orphan->delete();
-                $removedCount++;
-            }
-        }
-
-        return [$removedCount, $blockedCount];
-    }
-
-    private function productionDetailHasActivity(ProductionOrderDetail $detail): bool
-    {
-        if (!empty($detail->current_stage)) {
-            return true;
-        }
-
-        if ((float) $detail->qty_produced > 0) {
-            return true;
-        }
-
-        return MouldingProduction::where('production_order_detail_id', $detail->id)->exists()
-            || MesinProduction::where('production_order_detail_id', $detail->id)->exists()
-            || RustikKomponenProduction::where('production_order_detail_id', $detail->id)->exists();
     }
 
     private function buildSyncMessage(string $label, string $poNumber, int $addedCount, int $removedCount, int $blockedCount): string

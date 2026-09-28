@@ -8,6 +8,7 @@ use App\Models\Item;
 use App\Models\Inventory;
 use App\Models\Warehouse;
 use App\Models\DeliveryOrderDetail;
+use App\Services\ProductionOrderDetailSyncService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -246,7 +247,7 @@ class SalesOrderController extends Controller
         }
     }
 
-    public function update(Request $request, string $id)
+    public function update(Request $request, string $id, ProductionOrderDetailSyncService $syncService)
     {
         $validator = Validator::make($request->all(), [
             'buyer_id' => 'required|exists:buyers,id',
@@ -350,14 +351,28 @@ class SalesOrderController extends Controller
                 }
             }
 
+            $blockedItems = [];
+            foreach ($salesOrder->productionOrders()->get() as $productionOrder) {
+                $sync = $syncService->sync($productionOrder, $salesOrder);
+                foreach ($sync['blocked'] as $blocked) {
+                    $blockedItems[] = ($blocked->item?->name ?? "Item #{$blocked->item_id}") . " ({$productionOrder->po_number})";
+                }
+            }
+
             DB::commit();
 
             $salesOrder->load(['buyer:id,name,address,eu_factory_number', 'user:id,name', 'details.item']);
 
+            $message = 'Sales Order berhasil diperbarui!';
+            if (!empty($blockedItems)) {
+                $message .= ' Perhatian: item berikut sudah tidak ada di SO tapi tetap di PO karena sudah ada progres produksi (cek manual): ' . implode(', ', $blockedItems) . '.';
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => 'Sales Order berhasil diperbarui!',
-                'data' => $salesOrder
+                'message' => $message,
+                'data' => $salesOrder,
+                'production_sync_blocked' => $blockedItems,
             ], 200);
 
         } catch (\Exception $e) {
