@@ -70,7 +70,6 @@ class FixConsumableDisplayStockDesync extends Command
             $matchesCache = abs($logNet - $cache) < 0.001;
 
             if ($matchesInventory && !$matchesCache) {
-                // inventory_logs membuktikan SUM(inventories) yang benar -> items.stock ikut ke situ
                 $cacheAdjusted[] = [$item->code, $item->name, $cache, $invSum];
                 if (!$dryRun) {
                     $item->stock = $invSum;
@@ -80,7 +79,6 @@ class FixConsumableDisplayStockDesync extends Command
             }
 
             if ($matchesCache && !$matchesInventory) {
-                // inventory_logs membuktikan items.stock yang benar -> inventories yang disesuaikan
                 if ($cache > $invSum) {
                     $this->topUpInventory($item, $cache, $invSum, $fallbackWarehouseIds, $inventoryToppedUp, $dryRun);
                 } else {
@@ -89,7 +87,6 @@ class FixConsumableDisplayStockDesync extends Command
                 continue;
             }
 
-            // NET tidak cocok ke keduanya -> coba jelaskan lewat stock_movements (info saja, tidak auto-fix)
             $movements = class_exists(StockMovement::class)
                 ? StockMovement::where('item_id', $item->id)->get()
                 : collect();

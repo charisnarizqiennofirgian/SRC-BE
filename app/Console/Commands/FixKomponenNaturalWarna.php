@@ -25,7 +25,6 @@ class FixKomponenNaturalWarna extends Command
         }
         $this->info("Kategori Komponen: id={$category->id}");
 
-        // === 1. Backfill type NULL -> component ===
         $this->newLine();
         $this->info('=== 1. Backfill items.type NULL -> component ===');
 
@@ -40,7 +39,6 @@ class FixKomponenNaturalWarna extends Command
             $this->line('  (dry-run, tidak disimpan)');
         }
 
-        
         $this->newLine();
         $this->info('=== 2. Rekonsiliasi Qty Natural/Warna vs stok fisik gudang ===');
 
