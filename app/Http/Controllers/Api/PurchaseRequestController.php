@@ -16,7 +16,6 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class PurchaseRequestController extends Controller
 {
-    // GET /purchase-requests
     public function index(Request $request)
     {
         try {
@@ -33,6 +32,7 @@ class PurchaseRequestController extends Controller
                 $search = $request->search;
                 $query->where(function ($q) use ($search) {
                     $q->where('pr_number', 'like', "%{$search}%")
+                      ->orWhere('peruntukan', 'like', "%{$search}%")
                       ->orWhereHas('salesOrder', fn($q2) => $q2->where('so_number', 'like', "%{$search}%"))
                       ->orWhereHas('details.item', fn($q2) => $q2->where('name', 'like', "%{$search}%"));
                 });
@@ -49,6 +49,7 @@ class PurchaseRequestController extends Controller
                     'sales_order'   => $pr->salesOrder ? ['so_number' => $pr->salesOrder->so_number] : null,
                     'requested_by'  => $pr->requestedBy ? ['name' => $pr->requestedBy->name] : null,
                     'deadline'      => $pr->deadline?->toDateString(),
+                    'peruntukan'    => $pr->peruntukan,
                     'status'        => $pr->status,
                     'details_count' => $pr->details_count,
                     'created_at'    => $pr->created_at,
@@ -66,13 +67,13 @@ class PurchaseRequestController extends Controller
         }
     }
 
-    // POST /purchase-requests
     public function store(Request $request)
     {
         $request->validate([
             'so_id'    => 'nullable|exists:sales_orders,id',
-            'deadline' => 'required|date',
-            'notes'    => 'nullable|string',
+            'deadline'   => 'required|date',
+            'peruntukan' => 'nullable|string|max:255',
+            'notes'      => 'nullable|string',
             'details'  => 'required|array|min:1',
             'details.*.item_id'      => 'required|exists:items,id',
             'details.*.qty_requested'=> 'required|numeric|min:0.001',
@@ -81,7 +82,6 @@ class PurchaseRequestController extends Controller
 
         DB::beginTransaction();
         try {
-            // Generate PR number
             $prNumber = $this->generatePrNumber();
 
             $pr = PurchaseRequest::create([
@@ -89,6 +89,7 @@ class PurchaseRequestController extends Controller
                 'so_id'        => $request->so_id,
                 'requested_by' => Auth::id(),
                 'deadline'     => $request->deadline,
+                'peruntukan'   => $request->peruntukan,
                 'notes'        => $request->notes,
                 'status'       => 'draft',
             ]);
@@ -111,7 +112,6 @@ class PurchaseRequestController extends Controller
                 'message' => "PR {$prNumber} berhasil dibuat.",
                 'data'    => $pr,
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error store PR: ' . $e->getMessage());
@@ -119,7 +119,6 @@ class PurchaseRequestController extends Controller
         }
     }
 
-    // GET /purchase-requests/{id}
     public function show($id)
     {
         try {
@@ -137,7 +136,6 @@ class PurchaseRequestController extends Controller
         }
     }
 
-    // PUT /purchase-requests/{id}
     public function update(Request $request, $id)
     {
         $pr = PurchaseRequest::findOrFail($id);
@@ -151,8 +149,9 @@ class PurchaseRequestController extends Controller
 
         $request->validate([
             'so_id'    => 'nullable|exists:sales_orders,id',
-            'deadline' => 'required|date',
-            'notes'    => 'nullable|string',
+            'deadline'   => 'required|date',
+            'peruntukan' => 'nullable|string|max:255',
+            'notes'      => 'nullable|string',
             'details'  => 'required|array|min:1',
             'details.*.item_id'       => 'required|exists:items,id',
             'details.*.qty_requested' => 'required|numeric|min:0.001',
@@ -163,13 +162,12 @@ class PurchaseRequestController extends Controller
         try {
             $pr->update([
                 'so_id'    => $request->so_id,
-                'deadline' => $request->deadline,
-                'notes'    => $request->notes,
-                // Reset ke draft jika sebelumnya submitted agar harus di-review ulang
-                'status'   => 'draft',
+                'deadline'   => $request->deadline,
+                'peruntukan' => $request->peruntukan,
+                'notes'      => $request->notes,
+                'status'     => 'draft',
             ]);
 
-            // Hapus detail lama, insert baru
             $pr->details()->delete();
             foreach ($request->details as $detail) {
                 PurchaseRequestDetail::create([
@@ -194,7 +192,6 @@ class PurchaseRequestController extends Controller
         }
     }
 
-    // POST /purchase-requests/{id}/submit
     public function submit($id)
     {
         $pr = PurchaseRequest::findOrFail($id);
@@ -214,7 +211,6 @@ class PurchaseRequestController extends Controller
         ]);
     }
 
-    // POST /purchase-requests/{id}/cancel
     public function cancel($id)
     {
         $pr = PurchaseRequest::findOrFail($id);
@@ -234,7 +230,6 @@ class PurchaseRequestController extends Controller
         ]);
     }
 
-    // DELETE /purchase-requests/{id}
     public function destroy($id)
     {
         $pr = PurchaseRequest::findOrFail($id);
@@ -255,7 +250,6 @@ class PurchaseRequestController extends Controller
         ]);
     }
 
-    // POST /purchase-requests/{id}/convert-to-po
     public function convertToPO(Request $request, $id)
     {
         $pr = PurchaseRequest::with('details.item')->findOrFail($id);
@@ -281,9 +275,6 @@ class PurchaseRequestController extends Controller
 
         DB::beginTransaction();
         try {
-            // Generate PO number — counter lanjut sepanjang tahun (tidak reset tiap awal
-            // bulan), berpatokan ke nomor TERTINGGI yang pernah dipakai tahun ini (bukan
-            // COUNT() baris yang rawan bentrok kalau ada PO lama yang sudah dihapus).
             $lastPo = PurchaseOrder::whereYear('created_at', now()->year)
                 ->where('po_number', 'like', 'PO-%')
                 ->orderByRaw("CAST(SUBSTRING_INDEX(po_number, '-', -1) AS UNSIGNED) DESC")
@@ -300,14 +291,12 @@ class PurchaseRequestController extends Controller
                 $poNumber = 'PO-' . now()->format('Ym') . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
             }
 
-            // Hitung subtotal dari details
             $subtotal = collect($request->details)->sum(fn($d) => $d['quantity'] * $d['price']);
             $ppnRate  = $request->ppn_percentage ?? 12;
             $actualPpnRate = ($ppnRate == 11.12) ? 11 : $ppnRate;
             $ppnAmount  = $subtotal * ($actualPpnRate / 100);
             $grandTotal = $subtotal + $ppnAmount;
 
-            // Tentukan type dari item pertama
             $firstItemId = $request->details[0]['item_id'];
             $firstItem   = \App\Models\Item::with('category')->find($firstItemId);
             $catName     = strtolower($firstItem?->category?->name ?? '');
@@ -339,12 +328,10 @@ class PurchaseRequestController extends Controller
                     'subtotal'        => $detail['quantity'] * $detail['price'],
                 ]);
 
-                // Update qty_approved di PR detail
                 PurchaseRequestDetail::where('id', $detail['purchase_request_detail_id'])
                     ->update(['qty_approved' => $detail['quantity']]);
             }
 
-            // Update status PR
             $pr->update(['status' => 'completed']);
 
             DB::commit();
@@ -354,7 +341,6 @@ class PurchaseRequestController extends Controller
                 'message' => "PR {$pr->pr_number} berhasil dikonvert ke PO {$poNumber}.",
                 'data'    => ['po_number' => $poNumber, 'po_id' => $po->id],
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error convert PR to PO: ' . $e->getMessage());
@@ -362,7 +348,6 @@ class PurchaseRequestController extends Controller
         }
     }
 
-    // POST /purchase-requests/{id}/unpost
     public function unpost($id)
     {
         $pr = PurchaseRequest::findOrFail($id);
@@ -395,7 +380,6 @@ class PurchaseRequestController extends Controller
         ]);
     }
 
-    // GET /purchase-requests/list-for-rekap — daftar ringan (id + pr_number) untuk dropdown/autocomplete pilih rentang rekap
     public function listForRekap()
     {
         $prs = PurchaseRequest::orderBy('pr_number')->get(['id', 'pr_number']);
@@ -403,7 +387,6 @@ class PurchaseRequestController extends Controller
         return response()->json(['success' => true, 'data' => $prs]);
     }
 
-    // GET /purchase-requests/export-rekap — rekap Excel (No. PR, Supplier, Item, QTY, Harga) untuk klien Pembelian
     public function exportRekap(Request $request)
     {
         $request->validate([
@@ -414,7 +397,6 @@ class PurchaseRequestController extends Controller
         $prStart = $request->pr_start;
         $prEnd   = $request->pr_end;
 
-        // Kalau user kebalik pilih (awal > akhir), tukar otomatis daripada menolak
         if ($prStart > $prEnd) {
             [$prStart, $prEnd] = [$prEnd, $prStart];
         }
@@ -429,8 +411,6 @@ class PurchaseRequestController extends Controller
         $year  = now()->format('Y');
         $month = now()->format('m');
 
-        // Counter lanjut sepanjang tahun (tidak reset tiap awal bulan) — ambil
-        // nomor tertinggi yang pernah ada TAHUN ini, bukan cuma bulan ini.
         $last = PurchaseRequest::whereYear('created_at', $year)
             ->orderByRaw("CAST(SUBSTRING_INDEX(pr_number, '-', -1) AS UNSIGNED) DESC")
             ->first();
@@ -440,7 +420,6 @@ class PurchaseRequestController extends Controller
             $counter = intval($matches[1]) + 1;
         }
 
-        // Pastikan tidak duplikat dengan while loop
         $candidate = 'PR-' . $year . $month . '-' . str_pad($counter, 3, '0', STR_PAD_LEFT);
 
         while (PurchaseRequest::where('pr_number', $candidate)->exists()) {

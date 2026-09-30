@@ -10,7 +10,6 @@ class PurchaseOrder extends Model
 {
     use HasFactory, SoftDeletes;
 
-    // Memberitahu model kolom mana yang boleh diisi secara massal
     protected $fillable = [
         'created_by',
         'po_number',
@@ -56,21 +55,20 @@ class PurchaseOrder extends Model
         return in_array($this->currency, ['USD', 'EUR']);
     }
 
-    /**
-     * Relasi ke Supplier.
-     */
     public function supplier()
     {
         return $this->belongsTo(Supplier::class);
     }
+    public function purchaseRequest()
+    {
+        return $this->belongsTo(PurchaseRequest::class, 'pr_id');
+    }
+
     public function receipts()
     {
         return $this->hasMany(GoodsReceipt::class);
     }
 
-    /**
-     * Relasi ke Detail Pesanan.
-     */
     public function details()
     {
         return $this->hasMany(PurchaseOrderDetail::class);

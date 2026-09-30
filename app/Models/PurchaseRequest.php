@@ -14,6 +14,7 @@ class PurchaseRequest extends Model
         'so_id',
         'requested_by',
         'deadline',
+        'peruntukan',
         'notes',
         'status',
     ];

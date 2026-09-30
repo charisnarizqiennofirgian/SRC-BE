@@ -16,7 +16,6 @@ use App\Models\Item;
 
 class GoodsReceiptController extends Controller
 {
-    // GET /goods-receipts?purchase_order_id=X — daftar GR per PO
     public function index(Request $request)
     {
         $query = GoodsReceipt::with([
@@ -63,6 +62,7 @@ class GoodsReceiptController extends Controller
 
         $receipt->load([
             'purchaseOrder.supplier',
+            'purchaseOrder.purchaseRequest',
             'details.item.unit',
             'details.purchaseOrderDetail',
         ]);
@@ -92,6 +92,7 @@ class GoodsReceiptController extends Controller
                 'po_number'        => $po?->po_number,
                 'currency'         => $po?->currency ?: 'IDR',
                 'notes'            => $receipt->notes,
+                'peruntukan'       => $po?->purchaseRequest?->peruntukan,
                 'supplier_document_number' => $receipt->supplier_document_number,
                 'lines'            => $lines,
                 'total'            => round($lines->sum('amount'), 2),
@@ -119,7 +120,6 @@ class GoodsReceiptController extends Controller
         return $candidate;
     }
 
-    // DELETE /goods-receipts/{id} — batalkan GR (reverse stok)
     public function destroy($id)
     {
         $gr = GoodsReceipt::with([
@@ -128,7 +128,6 @@ class GoodsReceiptController extends Controller
             'purchaseOrder',
         ])->findOrFail($id);
 
-        // Cek apakah sudah ada faktur dari GR ini
         foreach ($gr->details as $detail) {
             if ($detail->purchaseBillDetail !== null) {
                 return response()->json([
@@ -145,7 +144,6 @@ class GoodsReceiptController extends Controller
             foreach ($gr->details as $detail) {
                 $warehouseId = $bufferWarehouse->id ?? 1;
 
-                // Reverse inventories table per grade
                 \App\Models\Inventory::decrementGradeStock(
                     itemId: $detail->item_id,
                     warehouseId: $warehouseId,
@@ -153,7 +151,6 @@ class GoodsReceiptController extends Controller
                     grade: $detail->grade,
                 );
 
-                // Reverse stok global item
                 if ($detail->item) {
                     $detail->item->decrement('stock', $detail->quantity_received);
                 }
@@ -175,11 +172,9 @@ class GoodsReceiptController extends Controller
                 ]);
             }
 
-            // Hard-delete detail lalu soft-delete GR header
             $gr->details()->delete();
             $gr->delete();
 
-            // Recalculate status PO
             $po     = $gr->purchaseOrder;
             $isKayu = $po->type === 'kayu';
             $this->updatePurchaseOrderStatus($po, $isKayu);
@@ -190,7 +185,6 @@ class GoodsReceiptController extends Controller
                 'success' => true,
                 'message' => "Penerimaan {$gr->receipt_number} berhasil dibatalkan dan stok telah dikembalikan.",
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -280,7 +274,6 @@ class GoodsReceiptController extends Controller
                         'user_id'          => Auth::id(),
                     ]);
 
-                    // Update inventories table per (item, warehouse, grade)
                     \App\Models\Inventory::incrementGlobalStock(
                         warehouseId: $warehouseId,
                         itemId: $detail['item_id'],
@@ -295,8 +288,6 @@ class GoodsReceiptController extends Controller
                 }
             }
 
-            // PO Kayu: status otomatis hanya Open → Diterima Sebagian; tutup manual via /tutup
-            // PO lain: tetap auto-close saat total diterima ≥ ordered
             $this->updatePurchaseOrderStatus($purchaseOrder, $isKayu);
 
             DB::commit();
@@ -306,7 +297,6 @@ class GoodsReceiptController extends Controller
                 'message' => 'Penerimaan barang berhasil dicatat dan stok telah diperbarui.',
                 'data'    => $goodsReceipt->load('details.item'),
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -316,7 +306,6 @@ class GoodsReceiptController extends Controller
         }
     }
 
-    // POST /goods-receipts/{po_id}/tutup — tutup PO Kayu secara manual
     public function tutup($poId)
     {
         $purchaseOrder = PurchaseOrder::findOrFail($poId);
@@ -368,8 +357,6 @@ class GoodsReceiptController extends Controller
         foreach ($receipts as $receipt) {
             if ($receipt->purchaseOrder && $receipt->purchaseOrder->details) {
                 foreach ($receipt->details as $grDetail) {
-                    // Kalau GR detail punya price sendiri (kayu RST), pakai itu.
-                    // Kalau tidak, fallback ke harga PO (perilaku lama, data lama tetap aman).
                     if ($grDetail->price !== null) {
                         continue;
                     }
@@ -402,7 +389,6 @@ class GoodsReceiptController extends Controller
             ->sum('quantity_received');
 
         if ($isKayu) {
-            // Kayu: tidak auto-Selesai; tutup manual via endpoint /tutup
             $purchaseOrder->status = $totalReceived > 0 ? 'Diterima Sebagian' : 'Open';
         } else {
             if ($totalReceived >= $totalOrdered) {
