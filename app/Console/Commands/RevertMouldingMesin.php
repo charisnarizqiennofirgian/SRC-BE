@@ -57,7 +57,6 @@ class RevertMouldingMesin extends Command
             $this->line("  - detail_id={$d->id} item={$d->item?->name} current_stage={$d->current_stage}");
         }
 
-
         $includeLegacy = !$this->option('detail');
 
         $mesinRecords = MesinProduction::where('ref_po_id', $po->id)
@@ -99,14 +98,12 @@ class RevertMouldingMesin extends Command
                 }
             }
 
-
             foreach ($mesinRecords as $mesin) {
                 $this->revertMesin($mesin, $warehouses);
             }
             foreach ($mouldingRecords as $moulding) {
                 $this->revertMoulding($moulding, $warehouses);
             }
-
 
             ProductionOrderDetail::whereIn('id', $detailIds)
                 ->whereIn('current_stage', ['moulding', 'mesin'])
@@ -238,7 +235,7 @@ class RevertMouldingMesin extends Command
             ->where('reference_id', $mesin->id)
             ->delete();
 
-        $mesin->delete(); // cascade hapus inputs/outputs/rejects
+        $mesin->delete();
     }
 
     private function revertMoulding(MouldingProduction $moulding, $warehouses)
@@ -283,7 +280,6 @@ class RevertMouldingMesin extends Command
             }
             $inv->decrement('qty_pcs', $reject->qty);
         }
-
 
         $outLogs = InventoryLog::where('reference_type', 'MouldingProduction')
             ->where('reference_id', $moulding->id)

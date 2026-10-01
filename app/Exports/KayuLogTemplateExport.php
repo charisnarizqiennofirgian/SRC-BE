@@ -40,8 +40,8 @@ class KayuLogTemplateExport implements FromArray, WithHeadings
                 'Jati',
                 'SKSHHK-001',
                 'KPL-001',
-                4.0, // Panjang (m)
-                40,  // Diameter (cm)
+                4.0,
+                40,
                 10,
                 0.502,
                 'A',

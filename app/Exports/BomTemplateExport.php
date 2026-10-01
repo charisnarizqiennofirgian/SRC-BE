@@ -26,18 +26,18 @@ class BomTemplateExport implements FromCollection, WithHeadings, WithStyles
     public function headings(): array
     {
         return [
-            'Kode Produk Utama',   // parent
-            'Nama Produk Utama',   // parent (referensi saja, matching tetap pakai kode)
-            'Kode Komponen',       // child
-            'Nama Komponen',       // child (referensi saja, matching tetap pakai kode)
-            'Jumlah per Produk',   // qty_per_induk
+            'Kode Produk Utama',
+            'Nama Produk Utama',
+            'Kode Komponen',
+            'Nama Komponen',
+            'Jumlah per Produk',
         ];
     }
 
     public function styles(Worksheet $sheet)
     {
         return [
-            1 => ['font' => ['bold' => true]], // Bold header
+            1 => ['font' => ['bold' => true]],
         ];
     }
 }
