@@ -55,6 +55,7 @@ use App\Http\Controllers\Api\RustikKomponenController;
 use App\Http\Controllers\Api\AssemblingProductionController;
 use App\Http\Controllers\Api\QcFinalController;
 use App\Http\Controllers\Api\AnyamController;
+use App\Http\Controllers\Api\ProductionCancellationController;
 use App\Http\Controllers\Api\PrototypeController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\ApAgingController;
@@ -374,6 +375,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/produksi/finishing/source-items', [FinishingController::class, 'sourceItems']);
         Route::post('/produksi/finishing/store', [FinishingController::class, 'store']);
     });
+    Route::middleware('permission:produksi-batal-transaksi')->prefix('production-cancellations')->group(function () {
+        Route::get('/stages',                     [ProductionCancellationController::class, 'stages']);
+        Route::get('/history',                    [ProductionCancellationController::class, 'history']);
+        Route::get('/documents',                  [ProductionCancellationController::class, 'index']);
+        Route::get('/documents/{documentNumber}', [ProductionCancellationController::class, 'show']);
+        Route::post('/documents/{documentNumber}/cancel', [ProductionCancellationController::class, 'cancel']);
+    });
+
 
     Route::middleware('permission:produksi-anyam')->prefix('produksi/anyam')->group(function () {
         Route::get('/available-pos',      [AnyamController::class, 'getAvailableProductionOrders']);

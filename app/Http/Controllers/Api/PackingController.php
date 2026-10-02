@@ -184,6 +184,7 @@ class PackingController extends Controller
                                     "items.components.{$cIndex}.finishing" => [
                                         "'{$cItemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$cQty}."
                                     ],
+                            'finishing'        => $cFinishing,
                                 ]);
                             }
                             $cInputItem->{$bucket} = $availableFinishing - $cQty;

@@ -23,6 +23,7 @@ class InventoryLog extends Model
         'division',
         'notes',
         'grade',
+        'finishing',
         'user_id',
     ];
 
