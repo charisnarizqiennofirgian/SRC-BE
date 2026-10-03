@@ -191,6 +191,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::delete('/{id}',                 [StockOpnameController::class, 'destroy']);
         Route::put('/{id}/details',            [StockOpnameController::class, 'saveDetails']);
         Route::post('/{id}/items',             [StockOpnameController::class, 'addItem']);
+        Route::post('/{id}/sync',              [StockOpnameController::class, 'syncItems']);
         Route::delete('/{id}/items/{detailId}',[StockOpnameController::class, 'removeItem']);
         Route::get('/{id}/export',             [StockOpnameController::class, 'export']);
         Route::post('/{id}/import',            [StockOpnameController::class, 'import']);

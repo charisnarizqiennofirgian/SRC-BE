@@ -52,6 +52,60 @@ class StockOpnameService
         return $rows->count();
     }
 
+    public function syncWarehouse(StockOpname $opname): array
+    {
+        $existing = $opname->details()->get();
+        $existingKeys = $existing->mapWithKeys(fn ($d) => [$d->item_id . '|' . ($d->grade ?? '') => true])->all();
+
+        $inventories = Inventory::with('item.category')
+            ->where('warehouse_id', $opname->warehouse_id)
+            ->where(function ($q) {
+                $q->where('qty_pcs', '>', 0)
+                    ->orWhere('qty_natural', '>', 0)
+                    ->orWhere('qty_warna', '>', 0);
+            })
+            ->whereHas('item')
+            ->get()
+            ->reject(fn (Inventory $inv) => isset($existingKeys[$inv->item_id . '|' . ($inv->grade ?? '')]));
+
+        $rows = $inventories->map(fn (Inventory $inv) => [
+            'stock_opname_id'    => $opname->id,
+            'item_id'            => $inv->item_id,
+            'grade'              => $inv->grade,
+            'row_type'           => StockOpnameDetail::rowTypeForCategory($inv->item->category?->name),
+            'is_manual'          => false,
+            'system_qty_pcs'     => (float) $inv->qty_pcs,
+            'system_qty_natural' => (float) $inv->qty_natural,
+            'system_qty_warna'   => (float) $inv->qty_warna,
+            'system_qty_m3'      => (float) $inv->qty_m3,
+            'created_at'         => now(),
+            'updated_at'         => now(),
+        ]);
+
+        foreach ($rows->chunk(500) as $chunk) {
+            StockOpnameDetail::insert($chunk->values()->all());
+        }
+
+        $map = $this->currentStockMap($opname->warehouse_id, $existing->pluck('item_id')->all());
+        $refreshed = 0;
+        foreach ($existing as $detail) {
+            $inv = $map[$detail->item_id . '|' . ($detail->grade ?? '')] ?? null;
+            $values = [
+                'system_qty_pcs'     => (float) ($inv->qty_pcs ?? 0),
+                'system_qty_natural' => (float) ($inv->qty_natural ?? 0),
+                'system_qty_warna'   => (float) ($inv->qty_warna ?? 0),
+                'system_qty_m3'      => (float) ($inv->qty_m3 ?? 0),
+            ];
+            $changed = collect($values)->contains(fn ($v, $k) => abs($v - (float) $detail->{$k}) > self::EPS);
+            if ($changed) {
+                $detail->update($values);
+                $refreshed++;
+            }
+        }
+
+        return ['added' => $rows->count(), 'refreshed' => $refreshed];
+    }
+
     public function currentStockMap(int $warehouseId, array $itemIds): array
     {
         $map = [];

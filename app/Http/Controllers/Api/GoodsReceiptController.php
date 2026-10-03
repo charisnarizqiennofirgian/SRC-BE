@@ -139,10 +139,21 @@ class GoodsReceiptController extends Controller
 
         DB::beginTransaction();
         try {
-            $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
+            $fallbackWarehouseId = $this->receiptWarehouseId($gr->purchaseOrder->type === 'kayu');
+            $receivedWarehouses = InventoryLog::where('reference_type', 'GoodsReceipt')
+                ->where('reference_id', $gr->id)
+                ->where('transaction_type', 'PURCHASE')
+                ->get(['item_id', 'grade', 'warehouse_id'])
+                ->mapWithKeys(fn ($log) => [$log->item_id . '|' . ($log->grade ?? '') => $log->warehouse_id]);
 
             foreach ($gr->details as $detail) {
-                $warehouseId = $bufferWarehouse->id ?? 1;
+                $warehouseId = $this->reversalWarehouseId(
+                    $detail->item_id,
+                    $detail->grade,
+                    (float) $detail->quantity_received,
+                    $receivedWarehouses[$detail->item_id . '|' . ($detail->grade ?? '')] ?? $fallbackWarehouseId,
+                    $fallbackWarehouseId,
+                );
 
                 \App\Models\Inventory::decrementGradeStock(
                     itemId: $detail->item_id,
@@ -228,7 +239,7 @@ class GoodsReceiptController extends Controller
                 'notes'                    => $validatedData['notes'] ?? null,
             ]);
 
-            $bufferWarehouse = Warehouse::where('code', 'BUFFER')->first();
+            $warehouseId = $this->receiptWarehouseId($isKayu);
 
             foreach ($validatedData['details'] as $detail) {
                 if ($detail['quantity_received'] > 0) {
@@ -255,8 +266,6 @@ class GoodsReceiptController extends Controller
                         'quantity' => $detail['quantity_received'],
                         'notes'    => 'Penerimaan dari PO #' . $purchaseOrder->po_number,
                     ]);
-
-                    $warehouseId = $bufferWarehouse->id ?? 1;
 
                     InventoryLog::create([
                         'date'             => $validatedData['receipt_date'],
@@ -379,6 +388,30 @@ class GoodsReceiptController extends Controller
         }
 
         return response()->json(['success' => true, 'data' => $receipts]);
+    }
+
+    private function receiptWarehouseId(bool $isKayu): int
+    {
+        $code = $isKayu ? 'BUFFER' : 'UMUM';
+
+        return Warehouse::where('code', $code)->value('id')
+            ?? Warehouse::where('code', 'BUFFER')->value('id')
+            ?? 1;
+    }
+
+    private function reversalWarehouseId(int $itemId, ?string $grade, float $qty, int $receivedWarehouseId, int $fallbackWarehouseId): int
+    {
+        foreach (array_unique([$receivedWarehouseId, $fallbackWarehouseId]) as $warehouseId) {
+            $available = (float) \App\Models\Inventory::where('item_id', $itemId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('grade', $grade)
+                ->value('qty_pcs');
+            if ($available >= $qty) {
+                return $warehouseId;
+            }
+        }
+
+        return $receivedWarehouseId;
     }
 
     private function updatePurchaseOrderStatus(PurchaseOrder $purchaseOrder, bool $isKayu = false)

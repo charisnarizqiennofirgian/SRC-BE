@@ -250,6 +250,20 @@ class StockOpnameController extends Controller
         return response()->json(['success' => true, 'message' => 'Item ditambahkan.', 'data' => $detail], 201);
     }
 
+    public function syncItems($id)
+    {
+        $opname = StockOpname::findOrFail($id);
+        $this->ensureDraft($opname);
+
+        $result = DB::transaction(fn () => $this->service->syncWarehouse(StockOpname::lockForUpdate()->findOrFail($id)));
+
+        return response()->json([
+            'success' => true,
+            'message' => "Sinkron selesai: {$result['added']} item baru ditambahkan, {$result['refreshed']} stok sistem diperbarui.",
+            'data'    => $result,
+        ]);
+    }
+
     public function removeItem($id, $detailId)
     {
         $opname = StockOpname::findOrFail($id);
