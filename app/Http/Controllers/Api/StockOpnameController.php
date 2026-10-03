@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Exports\StockOpnameSheetExport;
 use App\Http\Controllers\Controller;
+use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Item;
 use App\Models\StockOpname;
 use App\Models\StockOpnameDetail;
+use App\Models\Unit;
 use App\Services\StockOpnameService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -250,6 +252,87 @@ class StockOpnameController extends Controller
         return response()->json(['success' => true, 'message' => 'Item ditambahkan.', 'data' => $detail], 201);
     }
 
+    public function newItemOptions()
+    {
+        $categories = Category::orderBy('name')->get(['id', 'name'])
+            ->filter(fn ($c) => $this->canCreateItemInCategory($c->name))
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'categories' => $categories,
+                'units'      => Unit::orderBy('name')->get(['id', 'name']),
+            ],
+        ]);
+    }
+
+    public function createItem(Request $request, $id)
+    {
+        $opname = StockOpname::findOrFail($id);
+        $this->ensureDraft($opname);
+
+        $data = $request->validate([
+            'name'        => ['required', 'string', 'max:255'],
+            'code'        => ['nullable', 'string', 'max:255', 'unique:items,code'],
+            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'unit_id'     => ['required', 'integer', 'exists:units,id'],
+        ], [
+            'name.required'        => 'Nama barang wajib diisi.',
+            'code.unique'          => 'Kode barang sudah digunakan.',
+            'category_id.required' => 'Kategori wajib dipilih.',
+            'unit_id.required'     => 'Satuan wajib dipilih.',
+        ]);
+
+        $name = preg_replace('/\s+/', ' ', trim($data['name']));
+        $code = isset($data['code']) && trim($data['code']) !== '' ? trim($data['code']) : null;
+
+        $category = Category::findOrFail($data['category_id']);
+        if (!$this->canCreateItemInCategory($category->name)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Barang kategori {$category->name} tidak bisa dibuat dari stok opname. Buat lewat master data.",
+            ], 422);
+        }
+
+        $existing = Item::whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)])->first(['id', 'code', 'name']);
+        if ($existing) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barang dengan nama ini sudah terdaftar' . ($existing->code ? " (kode {$existing->code})" : '') . '. Cari lewat pencarian lalu tambahkan.',
+            ], 422);
+        }
+
+        $detail = DB::transaction(function () use ($opname, $name, $code, $category, $data) {
+            $item = Item::create([
+                'name'        => $name,
+                'code'        => $code,
+                'category_id' => $category->id,
+                'unit_id'     => $data['unit_id'],
+                'stock'       => 0,
+            ]);
+
+            return $opname->details()->create([
+                'item_id'            => $item->id,
+                'grade'              => null,
+                'row_type'           => StockOpnameDetail::TYPE_PCS,
+                'is_manual'          => true,
+                'system_qty_pcs'     => 0,
+                'system_qty_natural' => 0,
+                'system_qty_warna'   => 0,
+                'system_qty_m3'      => 0,
+            ]);
+        });
+
+        Item::clearMaterialsCache();
+
+        return response()->json([
+            'success' => true,
+            'message' => "Barang baru \"{$name}\" dibuat dan ditambahkan ke opname.",
+            'data'    => $detail,
+        ], 201);
+    }
+
     public function syncItems($id)
     {
         $opname = StockOpname::findOrFail($id);
@@ -402,6 +485,12 @@ class StockOpnameController extends Controller
         $opname->delete();
 
         return response()->json(['success' => true, 'message' => 'Stok opname draft dihapus.']);
+    }
+
+    private function canCreateItemInCategory(?string $categoryName): bool
+    {
+        return StockOpnameDetail::rowTypeForCategory($categoryName) === StockOpnameDetail::TYPE_PCS
+            && !str_contains(strtolower($categoryName ?? ''), 'produk jadi');
     }
 
     private function ensureDraft(StockOpname $opname): void

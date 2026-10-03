@@ -187,11 +187,13 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/',                        [StockOpnameController::class, 'index']);
         Route::post('/',                       [StockOpnameController::class, 'store']);
         Route::get('/items/search',            [StockOpnameController::class, 'searchItems']);
+        Route::get('/items/new-options',       [StockOpnameController::class, 'newItemOptions']);
         Route::get('/{id}',                    [StockOpnameController::class, 'show']);
         Route::delete('/{id}',                 [StockOpnameController::class, 'destroy']);
         Route::put('/{id}/details',            [StockOpnameController::class, 'saveDetails']);
         Route::post('/{id}/items',             [StockOpnameController::class, 'addItem']);
         Route::post('/{id}/sync',              [StockOpnameController::class, 'syncItems']);
+        Route::post('/{id}/items/new',         [StockOpnameController::class, 'createItem']);
         Route::delete('/{id}/items/{detailId}',[StockOpnameController::class, 'removeItem']);
         Route::get('/{id}/export',             [StockOpnameController::class, 'export']);
         Route::post('/{id}/import',            [StockOpnameController::class, 'import']);
