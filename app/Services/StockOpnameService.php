@@ -137,6 +137,17 @@ class StockOpnameService
                 ->orderBy('id')
                 ->get();
 
+            $deletedItems = Item::onlyTrashed()
+                ->whereIn('id', $details->pluck('item_id')->unique())
+                ->get(['code', 'name']);
+            if ($deletedItems->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'details' => ['Ada barang yang sudah dihapus dari master tapi masih dihitung di opname: '
+                        . $deletedItems->map(fn ($i) => trim(($i->code ? $i->code . ' - ' : '') . $i->name))->implode(', ')
+                        . '. Hapus baris tersebut dari opname (pindahkan hitungannya ke barang yang benar) lalu posting ulang.'],
+                ]);
+            }
+
             $itemsWithRows = Inventory::whereIn('item_id', $details->pluck('item_id')->unique())
                 ->distinct()
                 ->pluck('item_id')

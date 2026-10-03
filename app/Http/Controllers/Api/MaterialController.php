@@ -582,6 +582,20 @@ class MaterialController extends Controller
 
     public function destroy(Item $material)
     {
+        $draftOpnames = \App\Models\StockOpnameDetail::where('item_id', $material->id)
+            ->whereHas('stockOpname', fn ($q) => $q->where('status', \App\Models\StockOpname::STATUS_DRAFT))
+            ->with('stockOpname:id,opname_number')
+            ->get()
+            ->pluck('stockOpname.opname_number')
+            ->unique();
+        if ($draftOpnames->isNotEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barang ini masih ada di stok opname draft ' . $draftOpnames->implode(', ')
+                    . '. Hapus dulu barisnya dari stok opname (tombol hapus di baris tersebut), baru hapus dari master.',
+            ], 422);
+        }
+
         try {
             $material->delete();
             $this->clearMaterialsCache();

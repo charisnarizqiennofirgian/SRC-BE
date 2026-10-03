@@ -61,6 +61,16 @@ class CekStockOpname extends Command
                 $this->line("   {$m->code} | {$m->name} | " . ($m->qty_pcs + 0));
             }
 
+            $deletedRows = DB::table('stock_opname_details as d')
+                ->join('items as it', 'it.id', '=', 'd.item_id')
+                ->where('d.stock_opname_id', $opname->id)
+                ->whereNotNull('it.deleted_at')
+                ->get(['it.code', 'it.name', 'd.real_qty_pcs']);
+            $this->line('Baris yang barangnya sudah DIHAPUS dari master: ' . $deletedRows->count());
+            foreach ($deletedRows as $r) {
+                $this->line("   {$r->code} | {$r->name} | REAL: " . ($r->real_qty_pcs === null ? '-' : $r->real_qty_pcs + 0));
+            }
+
             if ($this->option('sync')) {
                 $result = DB::transaction(fn () => app(StockOpnameService::class)
                     ->syncWarehouse(StockOpname::lockForUpdate()->find($opname->id)));

@@ -101,7 +101,11 @@ class StockOpnameController extends Controller
         $opname = StockOpname::with(['warehouse:id,code,name', 'creator:id,name', 'poster:id,name'])->findOrFail($id);
 
         $details = $opname->details()
-            ->with(['item:id,code,name,category_id,unit_id', 'item.category:id,name', 'item.unit:id,name'])
+            ->with([
+                'item' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name', 'category_id', 'unit_id', 'deleted_at'),
+                'item.category:id,name',
+                'item.unit:id,name',
+            ])
             ->orderBy('id')
             ->get();
 
@@ -129,6 +133,7 @@ class StockOpnameController extends Controller
                 'grade'                 => $d->grade,
                 'row_type'              => $d->row_type,
                 'is_manual'             => $d->is_manual,
+                'item_deleted'          => $d->item?->deleted_at !== null,
                 'system_qty_pcs'        => $d->system_qty_pcs,
                 'system_qty_natural'    => $d->system_qty_natural,
                 'system_qty_warna'      => $d->system_qty_warna,
@@ -353,10 +358,11 @@ class StockOpnameController extends Controller
         $this->ensureDraft($opname);
 
         $detail = $opname->details()->findOrFail($detailId);
-        if (!$detail->is_manual) {
+        $itemDeleted = Item::onlyTrashed()->whereKey($detail->item_id)->exists();
+        if (!$detail->is_manual && !$itemDeleted) {
             return response()->json([
                 'success' => false,
-                'message' => 'Hanya item yang ditambahkan manual yang bisa dihapus. Kosongkan kolom REAL kalau tidak dihitung.',
+                'message' => 'Hanya item yang ditambahkan manual atau yang sudah dihapus dari master yang bisa dihapus. Kosongkan kolom REAL kalau tidak dihitung.',
             ], 422);
         }
         $detail->delete();
@@ -368,7 +374,11 @@ class StockOpnameController extends Controller
     {
         $opname = StockOpname::with('warehouse:id,code,name')->findOrFail($id);
         $details = $opname->details()
-            ->with(['item:id,code,name,category_id,unit_id', 'item.category:id,name', 'item.unit:id,name'])
+            ->with([
+                'item' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name', 'category_id', 'unit_id', 'deleted_at'),
+                'item.category:id,name',
+                'item.unit:id,name',
+            ])
             ->orderBy('id')
             ->get();
 
