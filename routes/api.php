@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\StockReportController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\StockOpnameController;
+use App\Http\Controllers\Api\AssetController;
 use App\Http\Controllers\Api\PurchaseOrderController;
 use App\Http\Controllers\Api\PurchaseOrderRekapController;
 use App\Http\Controllers\Api\GoodsReceiptController;
@@ -198,6 +199,19 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/{id}/export',             [StockOpnameController::class, 'export']);
         Route::post('/{id}/import',            [StockOpnameController::class, 'import']);
         Route::post('/{id}/post',              [StockOpnameController::class, 'post']);
+    });
+
+    Route::middleware('permission:stok-inventaris')->prefix('assets')->group(function () {
+        Route::get('/options',                          [AssetController::class, 'options']);
+        Route::get('/export',                           [AssetController::class, 'export']);
+        Route::get('/',                                 [AssetController::class, 'index']);
+        Route::post('/',                                [AssetController::class, 'store']);
+        Route::get('/{id}',                             [AssetController::class, 'show']);
+        Route::put('/{id}',                             [AssetController::class, 'update']);
+        Route::delete('/{id}',                          [AssetController::class, 'destroy']);
+        Route::post('/{id}/services',                   [AssetController::class, 'storeService']);
+        Route::put('/{id}/services/{recordId}',         [AssetController::class, 'updateService']);
+        Route::delete('/{id}/services/{recordId}',      [AssetController::class, 'destroyService']);
     });
 
     Route::middleware('permission:pembelian-purchase-request')->prefix('purchase-requests')->group(function () {

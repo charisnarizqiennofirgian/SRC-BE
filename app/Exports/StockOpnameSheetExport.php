@@ -140,7 +140,8 @@ class StockOpnameSheetExport implements FromArray, WithEvents, WithTitle, WithCo
                 $sheet->freezePane('A' . ($header + 1));
                 $sheet->setAutoFilter("A{$header}:{$lastCol}{$lastRow}");
                 $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd($header, $header);
-                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+                $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_PORTRAIT);
+                $sheet->getPageSetup()->setPaperSize(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_A4);
                 $sheet->getPageSetup()->setFitToWidth(1)->setFitToHeight(0);
             },
         ];

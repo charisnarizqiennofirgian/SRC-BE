@@ -47,6 +47,7 @@ class PermissionsSeeder extends Seeder
             'stok-laporan-mutasi',
             'stok-monitoring-produksi',
             'stok-opname',
+            'stok-inventaris',
 
             // Produksi
             'produksi-sawmill',
