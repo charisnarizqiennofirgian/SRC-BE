@@ -544,11 +544,19 @@ class StockOpnameController extends Controller
         if ($value === '' || $value === '-') {
             return null;
         }
-        $value = str_replace(' ', '', $value);
-        if (str_contains($value, ',') && !str_contains($value, '.')) {
-            $value = str_replace(',', '.', $value);
+        $value = preg_replace('/\s+/', '', $value);
+        $commas = substr_count($value, ',');
+        $dots = substr_count($value, '.');
+        if ($commas && $dots) {
+            $value = strrpos($value, ',') > strrpos($value, '.')
+                ? str_replace(',', '.', str_replace('.', '', $value))
+                : str_replace(',', '', $value);
+        } elseif ($commas) {
+            $value = $commas > 1 ? str_replace(',', '', $value) : str_replace(',', '.', $value);
+        } elseif ($dots > 1) {
+            $value = str_replace('.', '', $value);
         }
-        if (!is_numeric($value) || (float) $value < 0) {
+        if (!preg_match('/^(\d+\.?\d*|\.\d+)$/', $value)) {
             return false;
         }
 

@@ -6,6 +6,7 @@ use App\Models\Asset;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use Maatwebsite\Excel\Concerns\WithEvents;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Events\AfterSheet;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -13,7 +14,7 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 
-class AssetExport implements FromArray, WithEvents, WithTitle, WithColumnWidths
+class AssetExport implements FromArray, WithEvents, WithTitle, WithColumnWidths, WithStrictNullComparison
 {
     const HEADER_ROW = 3;
 
