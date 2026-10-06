@@ -15,6 +15,7 @@ use App\Models\ProductionOrder;
 use App\Models\ProductionOrderDetail;
 use App\Models\Warehouse;
 use App\Services\ProductionOrderProgressService;
+use App\Services\StageCompletionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -129,7 +130,10 @@ class MouldingController extends Controller
             ? $po->salesOrder->details->keyBy('id')
             : collect();
 
-        $mapped = $details->map(fn($d) => [
+        $completion = app(StageCompletionService::class);
+        $details->load('mouldingCompletedBy');
+
+        $mapped = $details->map(fn($d) => array_merge([
             'id'            => $d->id,
             'item_id'       => $d->item_id,
             'item_name'     => $d->item?->name
@@ -141,7 +145,7 @@ class MouldingController extends Controller
             'qty_planned'   => $d->qty_planned,
             'current_stage' => $d->current_stage,
             'moulding_done' => $d->current_stage === 'moulding',
-        ]);
+        ], $completion->summary($d, 'moulding')));
 
         return response()->json(['success' => true, 'data' => $mapped]);
     }
@@ -173,6 +177,8 @@ class MouldingController extends Controller
         $detail = ProductionOrderDetail::where('id', $data['production_order_detail_id'])
             ->where('production_order_id', $data['ref_po_id'])
             ->firstOrFail();
+
+        app(StageCompletionService::class)->ensureNotCompleted($detail->load('item'), 'moulding');
 
         return DB::transaction(function () use ($data, $detail) {
 
@@ -406,6 +412,30 @@ class MouldingController extends Controller
         return response()->json([
             'success' => true,
             'message' => "Semua produk ({$totalDetails}) selesai moulding. PO {$productionOrder->po_number} lanjut ke Mesin.",
+        ]);
+    }
+
+    public function selesaiProduk(Request $request, StageCompletionService $completion, $detailId)
+    {
+        $detail = ProductionOrderDetail::with('item')->findOrFail($detailId);
+        $result = $completion->markCompleted($detail, 'moulding', Auth::id());
+
+        $message = "{$result['detail']->item?->name} ditandai Selesai Moulding.";
+        if ($result['po_advanced']) {
+            $message .= ' Semua produk di PO ini sudah selesai Moulding, PO lanjut ke tahap berikutnya.';
+        }
+
+        return response()->json(['success' => true, 'message' => $message]);
+    }
+
+    public function batalSelesaiProduk(Request $request, StageCompletionService $completion, $detailId)
+    {
+        $detail = ProductionOrderDetail::with('item')->findOrFail($detailId);
+        $detail = $completion->unmarkCompleted($detail, 'moulding');
+
+        return response()->json([
+            'success' => true,
+            'message' => "Status Selesai Moulding untuk {$detail->item?->name} dibatalkan.",
         ]);
     }
 }

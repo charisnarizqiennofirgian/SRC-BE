@@ -334,6 +334,15 @@ class ProductionCancellationService
             $blockers[] = "PO {$po->po_number} sudah berstatus selesai (completed). Transaksinya tidak bisa dibatalkan.";
         }
 
+        if (isset(StageCompletionService::STAGES[$stage]) && !empty($header->production_order_detail_id)) {
+            $completedAt = DB::table('production_order_details')
+                ->where('id', $header->production_order_detail_id)
+                ->value("{$stage}_completed_at");
+            if ($completedAt) {
+                $blockers[] = "Produk di dokumen ini sudah ditandai Selesai {$config['label']}. Batalkan status selesai dulu di menu {$config['label']} sebelum membatalkan transaksinya.";
+            }
+        }
+
         $inventoryDeltas  = [];
         $itemBucketDeltas = [];
         $itemStockDeltas  = [];

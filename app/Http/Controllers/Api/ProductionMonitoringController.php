@@ -538,9 +538,11 @@ class ProductionMonitoringController extends Controller
                         'qty_moulding'      => $pipelineRemaining['moulding'],
                         'moulding_components' => $mouldingComponents,
                         'moulding_bom_checklist' => $mouldingBomChecklist,
+                        'moulding_selesai'  => $matchedPoDetail?->moulding_completed_at !== null,
                         'qty_mesin'         => $pipelineRemaining['mesin'],
                         'mesin_components'  => $mesinComponents,
                         'mesin_bom_checklist' => $mesinBomChecklist,
+                        'mesin_selesai'     => $matchedPoDetail?->mesin_completed_at !== null,
 
                         'qty_ruskomp'       => $pipelineRemaining['ruskomp'],
                         'qty_assembling'    => $pipelineRemaining['assembling'],

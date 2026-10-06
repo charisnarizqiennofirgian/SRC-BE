@@ -16,6 +16,7 @@ use App\Models\ProductionOrder;
 use App\Models\ProductionOrderDetail;
 use App\Models\Warehouse;
 use App\Services\ProductionOrderProgressService;
+use App\Services\StageCompletionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -61,10 +62,12 @@ class OperatorMesinController extends Controller
     {
         ProductionOrder::findOrFail($poId);
 
+        $completion = app(StageCompletionService::class);
+
         $details = ProductionOrderDetail::where('production_order_id', $poId)
-            ->with('item')
+            ->with(['item', 'mesinCompletedBy'])
             ->get()
-            ->map(fn($d) => [
+            ->map(fn($d) => array_merge([
                 'id'            => $d->id,
                 'item_id'       => $d->item_id,
                 'item_name'     => $d->item?->name ?? '-',
@@ -72,7 +75,7 @@ class OperatorMesinController extends Controller
                 'qty_planned'   => $d->qty_planned,
                 'current_stage' => $d->current_stage,
                 'mesin_done'    => $d->current_stage === 'mesin',
-            ]);
+            ], $completion->summary($d, 'mesin')));
 
         return response()->json(['success' => true, 'data' => $details]);
     }
@@ -139,6 +142,8 @@ class OperatorMesinController extends Controller
         $detail = ProductionOrderDetail::where('id', $data['production_order_detail_id'])
             ->where('production_order_id', $data['ref_po_id'])
             ->firstOrFail();
+
+        app(StageCompletionService::class)->ensureNotCompleted($detail->load('item'), 'mesin');
 
         return DB::transaction(function () use ($data, $detail) {
 
@@ -411,6 +416,30 @@ class OperatorMesinController extends Controller
         return response()->json([
             'success' => true,
             'message' => "Semua produk ({$totalDetails}) selesai proses Mesin. PO {$productionOrder->po_number} lanjut ke Assembling.",
+        ]);
+    }
+
+    public function selesaiProduk(Request $request, StageCompletionService $completion, $detailId)
+    {
+        $detail = ProductionOrderDetail::with('item')->findOrFail($detailId);
+        $result = $completion->markCompleted($detail, 'mesin', Auth::id());
+
+        $message = "{$result['detail']->item?->name} ditandai Selesai Mesin.";
+        if ($result['po_advanced']) {
+            $message .= ' Semua produk di PO ini sudah selesai Mesin, PO lanjut ke tahap berikutnya.';
+        }
+
+        return response()->json(['success' => true, 'message' => $message]);
+    }
+
+    public function batalSelesaiProduk(Request $request, StageCompletionService $completion, $detailId)
+    {
+        $detail = ProductionOrderDetail::with('item')->findOrFail($detailId);
+        $detail = $completion->unmarkCompleted($detail, 'mesin');
+
+        return response()->json([
+            'success' => true,
+            'message' => "Status Selesai Mesin untuk {$detail->item?->name} dibatalkan.",
         ]);
     }
 }

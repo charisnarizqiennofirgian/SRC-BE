@@ -19,6 +19,15 @@ class ProductionOrderDetail extends Model
         'qty_produced',
         'current_stage',
         'initial_stock_snapshot',
+        'moulding_completed_at',
+        'moulding_completed_by',
+        'mesin_completed_at',
+        'mesin_completed_by',
+    ];
+
+    protected $casts = [
+        'moulding_completed_at' => 'datetime',
+        'mesin_completed_at'    => 'datetime',
     ];
 
     public function productionOrder()
@@ -34,5 +43,15 @@ class ProductionOrderDetail extends Model
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function mouldingCompletedBy()
+    {
+        return $this->belongsTo(User::class, 'moulding_completed_by');
+    }
+
+    public function mesinCompletedBy()
+    {
+        return $this->belongsTo(User::class, 'mesin_completed_by');
     }
 }
