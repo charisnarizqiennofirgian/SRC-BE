@@ -42,15 +42,15 @@ class KomponenTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'ETHIMO',
                 'PATIO TOP DINING TABLE',
                 'JATI',
-                45,         // t
-                50,         // l
-                800,        // p
-                2,          // qty_set
-                10,         // qty_natural
-                5,          // qty_warna
-                0.0270,     // m3_total (isi ini kalau dari Moulding)
-                0.0000,     // m3_natural (kosong)
-                0.0000,     // m3_warna (kosong)
+                45,
+                50,
+                800,
+                2,
+                10,
+                5,
+                0.0270,
+                0.0000,
+                0.0000,
                 'MOULDING',
             ],
             [
@@ -67,9 +67,9 @@ class KomponenTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 2,
                 8,
                 4,
-                0.0000,     // m3_total (kosong)
-                0.0160,     // m3_natural (isi ini kalau dari Mesin)
-                0.0080,     // m3_warna (isi ini kalau dari Mesin)
+                0.0000,
+                0.0160,
+                0.0080,
                 'MESIN',
             ],
         ];

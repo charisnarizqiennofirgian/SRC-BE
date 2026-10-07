@@ -12,21 +12,21 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
     {
         return [
             [
-                'K-JTI-001',      // kode_barang
-                'KAYU JATI RST',  // nama_dasar
-                'TEAK',           // jenis
-                'A',              // kualitas
-                'PLANK',          // bentuk
-                50,               // tebal_mm
-                80,               // lebar_mm
-                1000,             // panjang_mm
-                48,               // cutting_tebal_mm
-                78,               // cutting_lebar_mm
-                998,              // cutting_panjang_mm
-                20,               // stok_awal
-                'Pieces',         // satuan (harus sama dengan master Unit)
-                'SANWIL',         // gudang (kode gudang contoh)
-                'RAK-A1',         // no_rak
+                'K-JTI-001',
+                'KAYU JATI RST',
+                'TEAK',
+                'A',
+                'PLANK',
+                50,
+                80,
+                1000,
+                48,
+                78,
+                998,
+                20,
+                'Pieces',
+                'SANWIL',
+                'RAK-A1',
             ],
             [
                 'K-MRN-001',
@@ -37,13 +37,13 @@ class KayuTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 40,
                 60,
                 2000,
-                38,               // cutting_tebal_mm
-                58,               // cutting_lebar_mm
-                1998,             // cutting_panjang_mm
+                38,
+                58,
+                1998,
                 15,
                 'Pieces',
                 'SANWIL',
-                'RAK-B2',         // no_rak
+                'RAK-B2',
             ],
         ];
     }

@@ -39,7 +39,6 @@ class PurchaseRequestRekapExport implements FromArray, WithHeadings, WithEvents
             $priceByItemId = $po ? $po->details->pluck('price', 'item_id') : collect();
             $supplierName  = $po->supplier->name ?? '-';
 
-            // Tiap baris detail PR ditampilkan apa adanya (tidak digabung), walau item/PR-nya sama
             foreach ($pr->details as $detail) {
                 $itemName = $detail->item->name ?? ('Item #' . $detail->item_id);
                 $qty      = (float) $detail->qty_approved;
@@ -62,7 +61,6 @@ class PurchaseRequestRekapExport implements FromArray, WithHeadings, WithEvents
 
         $rows[] = ['', '', "TOTAL KESELURUHAN ({$this->prStart} s/d {$this->prEnd})", $this->grandTotalQty, '', round($this->grandTotalHarga, 2)];
 
-        // +1 karena baris heading menempati row 1 di sheet
         $this->lastDataRow = count($rows) + 1;
 
         return $rows;

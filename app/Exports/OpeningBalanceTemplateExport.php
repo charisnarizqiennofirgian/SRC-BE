@@ -18,8 +18,8 @@ class OpeningBalanceTemplateExport implements FromArray, WithHeadings, WithTitle
             ->map(fn($a) => [
                 $a->code,
                 $a->name,
-                0, // SALDO AKHIR DEBIT — isi jika akun ini bersaldo debit
-                0, // SALDO AKHIR KREDIT — isi jika akun ini bersaldo kredit
+                0,
+                0,
             ])
             ->toArray();
     }
