@@ -17,13 +17,16 @@ use Illuminate\Support\Facades\Auth;
 
 class MaterialUsageController extends Controller
 {
-    const CONSUMABLE_CATEGORY_IDS = [
-    
-        3,  // Bahan Operasional
-        4,  // Karton Box
-        
-    
-    ];
+    const CONSUMABLE_CATEGORY_KEYWORDS = ['bahan', 'karton'];
+
+    private function consumableCategoryIds()
+    {
+        return Category::where(function ($query) {
+            foreach (self::CONSUMABLE_CATEGORY_KEYWORDS as $keyword) {
+                $query->orWhereRaw('LOWER(name) LIKE ?', ['%' . $keyword . '%']);
+            }
+        })->pluck('id');
+    }
 
     public function getConsumableItems(Request $request): JsonResponse
     {
@@ -36,7 +39,7 @@ class MaterialUsageController extends Controller
             if ($request->filled('category_id')) {
                 $query->where('category_id', $request->category_id);
             } else {
-                $query->whereIn('category_id', self::CONSUMABLE_CATEGORY_IDS);
+                $query->whereIn('category_id', $this->consumableCategoryIds());
             }
 
             if ($request->filled('search')) {
@@ -78,7 +81,7 @@ class MaterialUsageController extends Controller
     public function getConsumableCategories(): JsonResponse
     {
         try {
-            $categories = Category::whereIn('id', self::CONSUMABLE_CATEGORY_IDS)
+            $categories = Category::whereIn('id', $this->consumableCategoryIds())
                 ->select('id', 'name')
                 ->orderBy('name')
                 ->get();
@@ -195,7 +198,6 @@ class MaterialUsageController extends Controller
                 'message' => "Berhasil mencatat pemakaian {$request->qty} {$item->unit->name} {$item->name} untuk divisi {$request->division}.",
                 'data' => $primaryLog
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal menyimpan pemakaian bahan: ' . $e->getMessage());
@@ -247,12 +249,6 @@ class MaterialUsageController extends Controller
         }
     }
 
-    /**
-     * Kurangi qty_pcs FIFO lintas SEMUA gudang tempat item ini benar-benar
-     * punya stok (bukan gudang divisi pemakai - divisi cuma label pelapor,
-     * bukan lokasi fisik barang). Return [warehouse_id => qty_deducted]
-     * supaya InventoryLog dicatat ke gudang yang benar-benar berkurang.
-     */
     private function decrementInventoryFifo(int $itemId, float $qty): array
     {
         $inventories = Inventory::where('item_id', $itemId)
@@ -269,7 +265,6 @@ class MaterialUsageController extends Controller
         $remaining = $qty;
         $deductedByWarehouse = [];
 
-        /** @var Inventory $inventory */
         foreach ($inventories as $inventory) {
             if ($remaining <= 0) break;
 
