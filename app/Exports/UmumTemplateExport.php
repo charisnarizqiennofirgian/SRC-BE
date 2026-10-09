@@ -8,10 +8,6 @@ use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 
 class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
 {
-    /**
-     * Data contoh untuk template Umum
-     * @return array
-     */
     public function array(): array
     {
         return [
@@ -21,8 +17,8 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'Bahan Baku',
                 'Kg',
                 50,
-                'UMUM',  // gudang_awal
-                0,       // harga
+                'UMUM',
+                0,
             ],
             [
                 'U-002',
@@ -30,8 +26,8 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'Bahan Kimia',
                 'Liter',
                 20,
-                'UMUM',  // gudang_awal
-                0,       // harga
+                'UMUM',
+                0,
             ],
             [
                 'U-003',
@@ -39,16 +35,12 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 'Bahan Finishing',
                 'Lembar',
                 100,
-                'UMUM',  // gudang_awal
-                0,       // harga
+                'UMUM',
+                0,
             ],
         ];
     }
 
-    /**
-     * Header kolom untuk Upload Umum
-     * @return array
-     */
     public function headings(): array
     {
         return [

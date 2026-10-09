@@ -29,7 +29,7 @@ class AuthController extends Controller
 
         $cacheKey = 'user.' . md5($request->email);
         $user = Cache::remember($cacheKey, 300, function () use ($request) {
-            return User::with('roles.permissions')->where('email', $request->email)->first();  // ✅ LOAD PERMISSIONS
+            return User::with('roles.permissions')->where('email', $request->email)->first();
         });
 
         if (!$user || !Hash::check($request->password, $user->password)) {
@@ -46,9 +46,7 @@ class AuthController extends Controller
 
         Cache::put('user.' . $user->id, $user, 3600);
 
-
         $permissions = $this->getUserPermissions($user);
-
 
         $dashboardRoute = $this->getDashboardRouteByRole($user->roles->pluck('name')->toArray());
 
@@ -78,14 +76,11 @@ class AuthController extends Controller
         ], 200);
     }
 
-
     private function getUserPermissions(User $user): array
     {
-
         if ($user->hasRole('super-admin')) {
             return ['*'];
         }
-
 
         $permissions = [];
         foreach ($user->roles as $role) {
@@ -94,14 +89,11 @@ class AuthController extends Controller
             }
         }
 
-
         return array_values(array_unique($permissions));
     }
 
-
     private function getDashboardRouteByRole(array $roles): string
     {
-
         if (in_array('super-admin', $roles) || in_array('admin', $roles)) {
             return '/admin';
         }
@@ -109,7 +101,6 @@ class AuthController extends Controller
         if (in_array('manager', $roles)) {
             return '/manager/dashboard';
         }
-
 
         return '/dashboard';
     }
