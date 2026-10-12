@@ -81,6 +81,11 @@ class GoodsReceiptController extends Controller
             ];
         })->values();
 
+        $subtotal = round($lines->sum('amount'), 2);
+        $ppnPercentage = (float) ($po?->ppn_percentage ?? 0);
+        $ppnRate = $ppnPercentage == 11.12 ? 11 : $ppnPercentage;
+        $ppnAmount = round($subtotal * $ppnRate / 100, 2);
+
         return response()->json([
             'success' => true,
             'data'    => [
@@ -95,7 +100,10 @@ class GoodsReceiptController extends Controller
                 'peruntukan'       => $po?->purchaseRequest?->peruntukan,
                 'supplier_document_number' => $receipt->supplier_document_number,
                 'lines'            => $lines,
-                'total'            => round($lines->sum('amount'), 2),
+                'subtotal'         => $subtotal,
+                'ppn_percentage'   => $ppnPercentage,
+                'ppn_amount'       => $ppnAmount,
+                'total'            => round($subtotal + $ppnAmount, 2),
             ],
         ]);
     }
