@@ -19,6 +19,7 @@ class GoodsReceiptController extends Controller
     public function index(Request $request)
     {
         $query = GoodsReceipt::with([
+            'purchaseOrder:id,other_cost,other_cost_description',
             'details.item:id,name,code',
             'details.purchaseBillDetail:id,goods_receipt_detail_id,purchase_bill_id',
         ]);
@@ -27,12 +28,17 @@ class GoodsReceiptController extends Controller
             $query->where('purchase_order_id', $request->purchase_order_id);
         }
 
-        $receipts = $query->latest()->get()->map(fn($gr) => [
+        $receipts = $query->latest()->get();
+        $firstReceiptIds = $this->firstReceiptIds($receipts->pluck('purchase_order_id')->unique());
+
+        $receipts = $receipts->map(fn($gr) => [
             'id'                       => $gr->id,
             'receipt_number'           => $gr->receipt_number,
             'receipt_date'             => $gr->receipt_date ? \Carbon\Carbon::parse($gr->receipt_date)->toDateString() : null,
             'supplier_document_number' => $gr->supplier_document_number,
             'notes'                    => $gr->notes,
+            'other_cost'               => $firstReceiptIds->contains($gr->id) ? (float) ($gr->purchaseOrder?->other_cost ?? 0) : 0,
+            'other_cost_description'   => $firstReceiptIds->contains($gr->id) ? $gr->purchaseOrder?->other_cost_description : null,
             'is_billed'                => $gr->details->some(fn($d) => $d->purchaseBillDetail !== null),
             'details'                  => $gr->details->map(fn($d) => [
                 'id'                => $d->id,
@@ -85,6 +91,8 @@ class GoodsReceiptController extends Controller
         $ppnPercentage = (float) ($po?->ppn_percentage ?? 0);
         $ppnRate = $ppnPercentage == 11.12 ? 11 : $ppnPercentage;
         $ppnAmount = round($subtotal * $ppnRate / 100, 2);
+        $isFirstReceipt = $this->firstReceiptIds(collect([$receipt->purchase_order_id]))->contains($receipt->id);
+        $otherCost = $isFirstReceipt ? round((float) ($po?->other_cost ?? 0), 2) : 0;
 
         return response()->json([
             'success' => true,
@@ -103,9 +111,22 @@ class GoodsReceiptController extends Controller
                 'subtotal'         => $subtotal,
                 'ppn_percentage'   => $ppnPercentage,
                 'ppn_amount'       => $ppnAmount,
-                'total'            => round($subtotal + $ppnAmount, 2),
+                'other_cost'       => $otherCost,
+                'other_cost_description' => $otherCost > 0 ? $po?->other_cost_description : null,
+                'total'            => round($subtotal + $ppnAmount + $otherCost, 2),
             ],
         ]);
+    }
+
+    private function firstReceiptIds($purchaseOrderIds)
+    {
+        return GoodsReceipt::whereIn('purchase_order_id', $purchaseOrderIds)
+            ->orderBy('receipt_date')
+            ->orderBy('id')
+            ->get(['id', 'purchase_order_id'])
+            ->groupBy('purchase_order_id')
+            ->map(fn ($rows) => $rows->first()->id)
+            ->values();
     }
 
     private function generateBpbNumber($date): string
