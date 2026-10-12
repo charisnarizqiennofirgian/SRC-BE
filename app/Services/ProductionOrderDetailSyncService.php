@@ -14,7 +14,9 @@ class ProductionOrderDetailSyncService
 {
     public function sync(ProductionOrder $productionOrder, SalesOrder $salesOrder): array
     {
-        $existingByItem = $productionOrder->details()->get()->groupBy('item_id');
+        $existingByItem = $productionOrder->details()->orderBy('id')->get()
+            ->sortByDesc(fn ($detail) => $this->hasActivity($detail))
+            ->groupBy('item_id');
         $soDetails = $salesOrder->details()->get();
 
         $result = [

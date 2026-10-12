@@ -66,12 +66,18 @@ class SyncStaleProductionOrderDetails extends Command
             }
         }
 
+        $duplicatePoIds = ProductionOrderDetail::whereNotNull('sales_order_detail_id')
+            ->groupBy('production_order_id', 'sales_order_detail_id')
+            ->havingRaw('COUNT(*) > 1')
+            ->pluck('production_order_id')
+            ->unique();
+
         $query = ProductionOrder::whereHas('salesOrder')
-            ->whereHas('details', function ($q) {
-                $q->where(function ($q2) {
+            ->where(function ($q) use ($duplicatePoIds) {
+                $q->whereHas('details', function ($q2) {
                     $q2->whereNull('sales_order_detail_id')
                         ->orWhereDoesntHave('salesOrderDetail');
-                });
+                })->orWhereIn('id', $duplicatePoIds);
             })
             ->with('salesOrder');
 
@@ -81,7 +87,7 @@ class SyncStaleProductionOrderDetails extends Command
 
         $productionOrders = $query->orderBy('id')->get();
 
-        $this->info("PO dengan detail basi: {$productionOrders->count()}");
+        $this->info("PO dengan detail basi/dobel: {$productionOrders->count()}");
 
         if ($productionOrders->isEmpty()) {
             $this->info('Tidak ada yang perlu diperbaiki.');
