@@ -72,12 +72,20 @@ class SyncStaleProductionOrderDetails extends Command
             ->pluck('production_order_id')
             ->unique();
 
+        $qtyMismatchPoIds = DB::table('production_order_details as pod')
+            ->join('sales_order_details as sod', 'sod.id', '=', 'pod.sales_order_detail_id')
+            ->whereNull('sod.deleted_at')
+            ->whereRaw('ABS(pod.qty_planned - sod.quantity) > 0.0001')
+            ->distinct()
+            ->pluck('pod.production_order_id');
+
         $query = ProductionOrder::whereHas('salesOrder')
-            ->where(function ($q) use ($duplicatePoIds) {
+            ->where(function ($q) use ($duplicatePoIds, $qtyMismatchPoIds) {
                 $q->whereHas('details', function ($q2) {
                     $q2->whereNull('sales_order_detail_id')
                         ->orWhereDoesntHave('salesOrderDetail');
-                })->orWhereIn('id', $duplicatePoIds);
+                })->orWhereIn('id', $duplicatePoIds)
+                  ->orWhereIn('id', $qtyMismatchPoIds);
             })
             ->with('salesOrder');
 
@@ -87,7 +95,7 @@ class SyncStaleProductionOrderDetails extends Command
 
         $productionOrders = $query->orderBy('id')->get();
 
-        $this->info("PO dengan detail basi/dobel: {$productionOrders->count()}");
+        $this->info("PO dengan detail basi/dobel/qty beda: {$productionOrders->count()}");
 
         if ($productionOrders->isEmpty()) {
             $this->info('Tidak ada yang perlu diperbaiki.');
@@ -103,6 +111,9 @@ class SyncStaleProductionOrderDetails extends Command
                 $this->newLine();
                 $this->info("{$productionOrder->salesOrder->so_number} | PO id={$productionOrder->id} \"{$productionOrder->po_number}\" (status {$productionOrder->status})");
                 $this->line("  FK di-repoint: {$sync['repointed']}");
+                foreach ($sync['requantified'] as $change) {
+                    $this->line("  ~ qty    : POD {$change['detail']->id} [{$change['detail']->item_id}] " . ($change['detail']->item?->name ?? '-') . " {$change['from']} -> {$change['to']}");
+                }
 
                 foreach ($sync['added'] as $detail) {
                     $this->line("  + ditambah: [{$detail->item_id}] " . ($detail->item?->name ?? '-') . " qty {$detail->qty_planned}");

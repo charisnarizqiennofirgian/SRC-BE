@@ -21,6 +21,7 @@ class ProductionOrderDetailSyncService
 
         $result = [
             'repointed' => 0,
+            'requantified' => [],
             'added'     => [],
             'removed'   => [],
             'blocked'   => [],
@@ -36,6 +37,14 @@ class ProductionOrderDetailSyncService
                 if ((int) $existingMatch->sales_order_detail_id !== (int) $detail->id) {
                     $existingMatch->update(['sales_order_detail_id' => $detail->id]);
                     $result['repointed']++;
+                }
+                if (abs((float) $existingMatch->qty_planned - (float) $detail->quantity) > 0.0001) {
+                    $result['requantified'][] = [
+                        'detail' => $existingMatch,
+                        'from'   => (float) $existingMatch->qty_planned,
+                        'to'     => (float) $detail->quantity,
+                    ];
+                    $existingMatch->update(['qty_planned' => $detail->quantity]);
                 }
                 continue;
             }
