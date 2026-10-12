@@ -58,6 +58,7 @@ class StockReportController extends Controller
                 'items.no_kapling',
                 'items.mutu',
                 'items.price',
+                'items.merk',
                 'items.buyer_name',
                 'items.model',
                 'items.jenis_karton',
@@ -83,6 +84,7 @@ class StockReportController extends Controller
                         ->orWhere('items.code', 'like', "%{$search}%")
                         ->orWhere('items.buyer_name', 'like', "%{$search}%")
                         ->orWhere('items.nama_produk', 'like', "%{$search}%")
+                        ->orWhere('items.merk', 'like', "%{$search}%")
                         ->orWhereRaw('LOWER(items.specifications) LIKE ?', ['%' . strtolower($search) . '%']);
                 });
             }

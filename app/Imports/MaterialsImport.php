@@ -215,6 +215,12 @@ class MaterialsImport implements ToCollection, WithHeadingRow
                         $item->tpk = null;
                         $item->diameter = null;
                         $item->panjang = null;
+
+                    if ($row->has('merk')) {
+                        $merk = trim((string) ($row['merk'] ?? ''));
+                        $item->merk = $merk !== '' ? $merk : null;
+                    }
+
                         $item->kubikasi = null;
                     }
 

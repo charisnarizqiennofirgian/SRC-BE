@@ -102,6 +102,7 @@ class PermissionsSeeder extends Seeder
             'dokumen-lihat',
             'dokumen-upload',
             'dokumen-hapus',
+            'dokumen-so',
         ];
 
         foreach ($permissions as $permission) {

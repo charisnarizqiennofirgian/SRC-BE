@@ -61,6 +61,7 @@ use App\Http\Controllers\Api\PrototypeController;
 use App\Http\Controllers\Api\ArAgingController;
 use App\Http\Controllers\Api\ApAgingController;
 use App\Http\Controllers\Api\DokumenController;
+use App\Http\Controllers\Api\DokumenSalesOrderController;
 
 
 
@@ -526,6 +527,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::middleware('permission:keuangan-neraca')->get('balance-sheet', [BalanceSheetController::class, 'index']);
 
     Route::prefix('dokumen')->group(function () {
+        Route::middleware('permission:dokumen-so')->prefix('sales-orders')->group(function () {
+            Route::get('/',                [DokumenSalesOrderController::class, 'index']);
+            Route::get('/pending',         [DokumenSalesOrderController::class, 'pending']);
+            Route::get('/{id}',            [DokumenSalesOrderController::class, 'show']);
+            Route::get('/{id}/history',    [DokumenSalesOrderController::class, 'history']);
+            Route::post('/{id}/printed',   [DokumenSalesOrderController::class, 'printed']);
+            Route::post('/{id}/withdrawn', [DokumenSalesOrderController::class, 'withdrawn']);
+        });
         Route::middleware('permission:dokumen-lihat')->group(function () {
             Route::get('/',              [DokumenController::class, 'index']);
             Route::get('/{id}/download', [DokumenController::class, 'download']);

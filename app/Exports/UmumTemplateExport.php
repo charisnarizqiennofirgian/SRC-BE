@@ -19,6 +19,7 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 50,
                 'UMUM',
                 0,
+                '',
             ],
             [
                 'U-002',
@@ -28,6 +29,7 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 20,
                 'UMUM',
                 0,
+                'Crossbond',
             ],
             [
                 'U-003',
@@ -37,6 +39,7 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
                 100,
                 'UMUM',
                 0,
+                'Nikken',
             ],
         ];
     }
@@ -51,6 +54,7 @@ class UmumTemplateExport implements FromArray, WithHeadings, ShouldAutoSize
             'stok_awal',
             'gudang_awal',
             'harga',
+            'merk',
         ];
     }
 }

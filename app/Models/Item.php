@@ -68,6 +68,7 @@ class Item extends Model
         'm3_warna',
         'mutu',
         'price',
+        'merk',
     ];
 
     protected $casts = [
