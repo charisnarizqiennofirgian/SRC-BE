@@ -8,6 +8,8 @@ use App\Models\Item;
 use App\Models\Inventory;
 use App\Models\Warehouse;
 use App\Models\StockMovement;
+use App\Models\InventoryLog;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
@@ -68,7 +70,6 @@ class StockAdjustmentController extends Controller
                 ], 422);
             }
 
-            // ── KOMPONEN: update qty_natural + qty_warna ─────────────────────
             if ($isKomponen) {
                 $adjNatural = (float) ($request->adj_natural ?? 0);
                 $adjWarna   = (float) ($request->adj_warna   ?? 0);
@@ -90,7 +91,6 @@ class StockAdjustmentController extends Controller
                 $item->stock       = $newNatural + $newWarna;
                 $item->save();
 
-                // ── Sync inventories agar StockIndex total qty ikut berubah ──
                 if ($totalAdj != 0) {
                     $warehouseId = $request->filled('warehouse_id')
                         ? (int) $request->warehouse_id
@@ -108,7 +108,6 @@ class StockAdjustmentController extends Controller
                         $inventory->qty_warna   = max(0, (float) $inventory->qty_warna + $adjWarna);
                         $inventory->save();
                     } elseif ($warehouseId && $totalAdj > 0) {
-                        // Belum ada entry → buat baru
                         Inventory::create([
                             'item_id'      => $item->id,
                             'warehouse_id' => $warehouseId,
@@ -139,42 +138,52 @@ class StockAdjustmentController extends Controller
                 ], 201);
             }
 
-            // ── NON-KOMPONEN: behaviour lama ──────────────────────────────────
             $quantity = (float) $request->quantity;
             $type = $request->type;
             $movementQuantity = ($type === 'Stok Keluar') ? -$quantity : $quantity;
 
-            StockMovement::create([
+            $notes = $request->notes ?? 'Penyesuaian manual dari admin.';
+
+            $movement = StockMovement::create([
                 'item_id'  => $item->id,
                 'type'     => $type,
                 'quantity' => $movementQuantity,
-                'notes'    => $request->notes ?? 'Penyesuaian manual dari admin.',
+                'notes'    => $notes,
             ]);
 
             $item->increment('stock', $movementQuantity);
             $item->refresh();
 
             if ($request->filled('warehouse_id')) {
-                // Gudang eksplisit dari user (wajib untuk Produk Jadi — lihat guard di atas;
-                // opsional untuk kategori lain) selalu diprioritaskan, tidak lagi dipaksa ke Packing.
-                $inventory = Inventory::firstOrCreate(
-                    ['warehouse_id' => (int) $request->warehouse_id, 'item_id' => $item->id],
-                    ['qty_pcs' => 0, 'qty_m3' => 0]
-                );
-                $newQty = (float) $inventory->qty_pcs + $movementQuantity;
-                $inventory->update(['qty_pcs' => max(0, $newQty)]);
+                $this->adjustWarehouseStock($item, (int) $request->warehouse_id, $movementQuantity, $movement->id, $notes);
             } elseif ($item->type === Item::TYPE_FINISHED_GOOD) {
-                // Fallback lama: item Produk Jadi tanpa gudang eksplisit (mis. dipanggil dari luar UI ini)
                 $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                 if (!$packingWarehouseId) {
                     throw new \Exception('Gudang Packing tidak ditemukan. Pastikan warehouse dengan code PACKING sudah ada di master data.');
                 }
-                $inventory = Inventory::firstOrCreate(
-                    ['warehouse_id' => $packingWarehouseId, 'item_id' => $item->id],
-                    ['qty_pcs' => 0, 'qty_m3' => 0]
-                );
-                $newQty = $inventory->qty_pcs + $movementQuantity;
-                $inventory->update(['qty_pcs' => max(0, $newQty)]);
+                $this->adjustWarehouseStock($item, $packingWarehouseId, $movementQuantity, $movement->id, $notes);
+            } elseif ($movementQuantity > 0) {
+                $warehouseId = Inventory::where('item_id', $item->id)->orderByDesc('qty_pcs')->value('warehouse_id')
+                    ?? Warehouse::where('code', 'UMUM')->value('id');
+                if ($warehouseId) {
+                    $this->adjustWarehouseStock($item, (int) $warehouseId, $movementQuantity, $movement->id, $notes);
+                }
+            } else {
+                $remaining = -$movementQuantity;
+                $rows = Inventory::where('item_id', $item->id)
+                    ->where('qty_pcs', '>', 0)
+                    ->orderByDesc('qty_pcs')
+                    ->lockForUpdate()
+                    ->get();
+                foreach ($rows as $row) {
+                    if ($remaining <= 0) {
+                        break;
+                    }
+                    $take = min($remaining, (float) $row->qty_pcs);
+                    $row->decrement('qty_pcs', $take);
+                    $this->logAdjustment($item, $row->warehouse_id, -$take, $movement->id, $notes);
+                    $remaining -= $take;
+                }
             }
 
             DB::commit();
@@ -184,7 +193,6 @@ class StockAdjustmentController extends Controller
                 'message'   => 'Penyesuaian stok berhasil disimpan.',
                 'new_stock' => $item->stock
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal melakukan penyesuaian stok: ' . $e->getMessage());
@@ -198,7 +206,47 @@ class StockAdjustmentController extends Controller
         }
     }
 
-    /* ================== UMUM (Bahan Operasional & Penolong) ================== */
+    private function adjustWarehouseStock(Item $item, int $warehouseId, float $qty, int $movementId, string $notes): void
+    {
+        $inventory = Inventory::where('warehouse_id', $warehouseId)
+            ->where('item_id', $item->id)
+            ->lockForUpdate()
+            ->first()
+            ?? Inventory::create([
+                'warehouse_id' => $warehouseId,
+                'item_id'      => $item->id,
+                'qty_pcs'      => 0,
+                'qty_m3'       => 0,
+            ]);
+
+        $before = (float) $inventory->qty_pcs;
+        $after  = max(0, $before + $qty);
+        $inventory->update(['qty_pcs' => $after]);
+
+        $this->logAdjustment($item, $warehouseId, $after - $before, $movementId, $notes);
+    }
+
+    private function logAdjustment(Item $item, int $warehouseId, float $qty, int $movementId, string $notes): void
+    {
+        if ($qty == 0) {
+            return;
+        }
+
+        InventoryLog::create([
+            'date'             => now()->toDateString(),
+            'time'             => now()->toTimeString(),
+            'item_id'          => $item->id,
+            'warehouse_id'     => $warehouseId,
+            'qty'              => abs($qty),
+            'direction'        => $qty > 0 ? 'IN' : 'OUT',
+            'transaction_type' => InventoryLog::TYPE_ADJUSTMENT,
+            'reference_type'   => 'StockAdjustment',
+            'reference_id'     => $movementId,
+            'reference_number' => 'ADJ-' . $item->code,
+            'notes'            => $notes,
+            'user_id'          => Auth::id(),
+        ]);
+    }
 
     public function downloadTemplateUmum()
     {
@@ -273,7 +321,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal UMUM berhasil. Master data dan stok telah diperbarui.'
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -284,7 +331,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Umum: ' . $e->getMessage());
@@ -297,8 +343,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== KARTON BOX ================== */
 
     public function downloadTemplateKartonBox()
     {
@@ -373,7 +417,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal Karton Box berhasil. Master data dan stok telah diperbarui.'
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -384,7 +427,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Karton Box: ' . $e->getMessage());
@@ -397,8 +439,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== KOMPONEN ================== */
 
     public function downloadTemplateKomponen()
     {
@@ -459,7 +499,6 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
@@ -482,7 +521,6 @@ class StockAdjustmentController extends Controller
                 'imported_count' => $import->importedCount,
                 'skipped'        => $import->skipped,
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -493,7 +531,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Komponen: ' . $e->getMessage());
@@ -506,8 +543,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== KAYU LOG ================== */
 
     public function uploadSaldoAwalKayu(Request $request)
     {
@@ -551,7 +586,6 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
@@ -566,7 +600,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal kayu berhasil. Master data dan stok telah diperbarui.'
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -577,7 +610,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Kayu Log: ' . $e->getMessage());
@@ -607,8 +639,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== KAYU RST ================== */
 
     public function downloadTemplateKayuRst()
     {
@@ -669,7 +699,6 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
@@ -684,7 +713,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal kayu RST berhasil. Master data dan stok telah diperbarui.'
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -695,7 +723,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Kayu RST: ' . $e->getMessage());
@@ -708,8 +735,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== PRODUK JADI ================== */
 
     public function downloadProdukJadiTemplate()
     {
@@ -770,7 +795,6 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
@@ -785,7 +809,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal produk jadi berhasil. Master data dan stok telah diperbarui.'
             ], 201);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
             DB::rollBack();
             $failures = $e->failures();
@@ -796,7 +819,6 @@ class StockAdjustmentController extends Controller
                 'message' => 'Data di Excel tidak valid.',
                 'errors' => $failures,
             ], 422);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Saldo Awal Produk Jadi: ' . $e->getMessage());
@@ -809,8 +831,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== BOM PRODUK ================== */
 
     public function downloadTemplateBom()
     {
@@ -861,7 +881,6 @@ class StockAdjustmentController extends Controller
 
         DB::beginTransaction();
         try {
-
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
             $readerType = $extension === 'xlsx' ? \Maatwebsite\Excel\Excel::XLSX : \Maatwebsite\Excel\Excel::XLS;
@@ -895,8 +914,6 @@ class StockAdjustmentController extends Controller
             ], 500);
         }
     }
-
-    /* ================== JEBLOSAN ================== */
 
     public function downloadTemplateJeblosan()
     {
@@ -957,7 +974,6 @@ class StockAdjustmentController extends Controller
                 'success' => true,
                 'message' => 'Upload saldo awal Jeblosan berhasil.'
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal upload Jeblosan: ' . $e->getMessage());
