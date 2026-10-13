@@ -285,6 +285,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('/', [DeliveryOrderController::class, 'confirmFromProduction']);
         Route::get('/{id}', [DeliveryOrderController::class, 'showForProduction']);
         Route::put('/{id}', [DeliveryOrderController::class, 'updateFromProduction']);
+        Route::put('/{id}/remarks', [DeliveryOrderController::class, 'updateRemarksFromProduction']);
     });
 
     Route::middleware('permission:penjualan-invoice')->prefix('sales-invoices')->group(function () {

@@ -20,12 +20,6 @@ use Illuminate\Support\Facades\Log;
 
 class DeliveryOrderController extends Controller
 {
-    /**
-     * Tempel daftar SO unik yang terlibat di DO ini (via delivery_order_details ->
-     * sales_order_detail -> sales_order) sebagai attribute 'sales_orders' — dipakai frontend
-     * untuk menampilkan badge multi-SO. sales_order_id/salesOrder (tunggal) tetap ada sebagai
-     * SO "utama" untuk kompatibilitas tampilan lama.
-     */
     private function attachSalesOrdersInfo(DeliveryOrder $deliveryOrder): DeliveryOrder
     {
         $deliveryOrder->loadMissing('details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency');
@@ -115,11 +109,6 @@ class DeliveryOrderController extends Controller
         }
     }
 
-    /**
-     * Validasi stok per TOTAL item_id (bukan per baris) — 1 item bisa muncul di beberapa baris
-     * kalau mode Air Freight dipecah per crate/box (lihat FormPengiriman.vue), jadi harus
-     * dijumlah dulu sebelum dibandingkan ke stok tersedia.
-     */
     private function validateStockForDetails(array $details, int $packingWarehouseId): void
     {
         $shippedByItem = [];
@@ -147,10 +136,46 @@ class DeliveryOrderController extends Controller
         }
     }
 
-    /**
-     * Hitung nw/gw/m3/wood per baris (fallback ke master item kalau baris tidak isi sendiri)
-     * beserta total-nya — dipakai bareng oleh store() dan update().
-     */
+    private function normalizeRemark($remark): ?string
+    {
+        $remark = trim((string) $remark);
+        return $remark === '' ? null : mb_substr($remark, 0, 255);
+    }
+
+    private function applyDetailRemarks(DeliveryOrder $do, $remarks): void
+    {
+        if (is_string($remarks)) {
+            $remarks = json_decode($remarks, true);
+        }
+        foreach ((array) $remarks as $row) {
+            if (!isset($row['id'])) {
+                continue;
+            }
+            DeliveryOrderDetail::where('id', $row['id'])
+                ->where('delivery_order_id', $do->id)
+                ->update(['remark' => $this->normalizeRemark($row['remark'] ?? null)]);
+        }
+    }
+
+    public function updateRemarksFromProduction(Request $request, $id)
+    {
+        $request->validate([
+            'details'          => 'required|array',
+            'details.*.id'     => 'required|integer',
+            'details.*.remark' => 'nullable|string|max:255',
+        ]);
+
+        $do = DeliveryOrder::findOrFail($id);
+
+        DB::transaction(fn () => $this->applyDetailRemarks($do, $request->details));
+
+        return response()->json([
+            'success' => true,
+            'message' => "Keterangan DO {$do->do_number} berhasil disimpan.",
+            'data'    => $do->load('details:id,delivery_order_id,item_name,quantity_boxes,quantity_shipped,remark'),
+        ]);
+    }
+
     private function calculateDetailTotals(array $detail, Item $item): array
     {
         $nwPerBox    = $detail['nw_per_box'] ?? $item->nw_per_box ?? null;
@@ -168,6 +193,7 @@ class DeliveryOrderController extends Controller
             'quantity_boxes'         => $quantityBoxes,
             'quantity_shipped'       => $quantityShipped,
             'quantity_crates'        => $detail['quantity_crates'] ?? null,
+            'remark'                 => $this->normalizeRemark($detail['remark'] ?? null),
             'total_nw'               => ($nwPerBox && $quantityBoxes) ? $nwPerBox * $quantityBoxes : null,
             'total_gw'               => ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null,
             'total_m3'               => ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null,
@@ -195,9 +221,6 @@ class DeliveryOrderController extends Controller
                 'shipment_mode' => 'nullable|in:SEA,AIR',
             ]);
 
-            // Pengiriman bisa menggabungkan beberapa SO sekaligus (mis. kirim tablet dari SO-001
-            // + kursi dari SO-005 dalam satu DO). sales_order_ids dikirim sebagai array/JSON;
-            // fallback ke sales_order_id tunggal untuk kompatibilitas kalau ada caller lama.
             $salesOrderIds = $request->sales_order_ids;
             if (is_string($salesOrderIds)) {
                 $salesOrderIds = json_decode($salesOrderIds, true);
@@ -312,7 +335,6 @@ class DeliveryOrderController extends Controller
                 'message' => 'Delivery Order berhasil dibuat dengan status DRAFT. Stok belum berkurang.',
                 'data' => $deliveryOrder
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollback();
             return response()->json([
@@ -322,17 +344,6 @@ class DeliveryOrderController extends Controller
         }
     }
 
-    /**
-     * Dipakai PPIC lewat menu "Konfirmasi Pengiriman" — versi ringkas dari alur Sales:
-     * PPIC cuma tahu barang & qty yang benar-benar dimuat, tidak isi dokumen ekspor
-     * (buyer/incoterm/BL/forwarder dst — field itu dibiarkan kosong di sini, tetap
-     * kerjaan Sales lewat menu Daftar Pengiriman yang sama, record yang sama).
-     * Reuse store()+ship() apa adanya (bukan re-implementasi) supaya validasi & efek
-     * sampingnya (potong stok, update quantity_shipped, auto-hide dashboard) identik
-     * dengan alur Sales biasa — store() bikin DRAFT dulu, ship() langsung dipanggil
-     * setelahnya supaya sekali PPIC konfirmasi, DO langsung SHIPPED (bukan nyangkut
-     * draft menunggu Sales sadar & klik Kirim manual — itu gap yang mau ditutup).
-     */
     public function confirmFromProduction(Request $request)
     {
         $storeResponse = $this->store($request);
@@ -347,9 +358,6 @@ class DeliveryOrderController extends Controller
         $shipData = json_decode($shipResponse->getContent(), true);
 
         if (!($shipData['success'] ?? false)) {
-            // DO sudah tersimpan sebagai DRAFT (stok belum berkurang), tapi gagal
-            // dikonfirmasi terkirim — jangan dianggap hilang, tetap ada di sistem
-            // dan bisa diselesaikan manual lewat menu Daftar Pengiriman (Sales).
             return response()->json([
                 'success' => false,
                 'message' => 'Data tersimpan sebagai draft, tapi gagal dikonfirmasi terkirim: '
@@ -623,7 +631,6 @@ class DeliveryOrderController extends Controller
                     ->where('warehouse_id', $packingWarehouseId)
                     ->sum('qty_pcs');
 
-                // Fallback ke items.stock jika inventories PACKING belum terisi
                 $useItemStockFallback = $inventoryStock <= 0;
                 $effectiveStock = $useItemStockFallback ? (float) $item->stock : $inventoryStock;
 
@@ -632,7 +639,6 @@ class DeliveryOrderController extends Controller
                 }
 
                 if (!$useItemStockFallback) {
-                    // Normal: kurangi dari inventories
                     $inventories = Inventory::where('item_id', $detail->item_id)
                         ->where('warehouse_id', $packingWarehouseId)
                         ->where('qty_pcs', '>', 0)
@@ -641,14 +647,12 @@ class DeliveryOrderController extends Controller
 
                     $remaining = $detail->quantity_shipped;
                     foreach ($inventories as $inv) {
-                        /** @var Inventory $inv */
                         if ($remaining <= 0) break;
                         $toTake = min($remaining, $inv->qty_pcs);
                         $inv->decrement('qty_pcs', $toTake);
                         $remaining -= $toTake;
                     }
                 } else {
-                    // Fallback: stok ada di items.stock, sync ke inventories sekalian
                     $inv = Inventory::firstOrCreate(
                         ['warehouse_id' => $packingWarehouseId, 'item_id' => $detail->item_id],
                         ['qty_pcs' => 0, 'qty_m3' => 0]
@@ -656,10 +660,6 @@ class DeliveryOrderController extends Controller
                     $inv->update(['qty_pcs' => max(0, (float) $item->stock - $detail->quantity_shipped)]);
                 }
 
-                // Selalu kurangi items.stock agar tetap sinkron — di-floor ke 0 (bukan decrement()
-                // polos) supaya kalau items.stock kebetulan sudah desync/tertinggal dari inventories
-                // riil (mis. dari insiden lama), field ini tidak ikut minus. decrement() polos di sini
-                // sebelumnya bisa bikin items.stock negatif walau stok fisik di gudang sudah benar 0.
                 $item->update(['stock' => max(0, (float) $item->stock - $detail->quantity_shipped)]);
 
                 StockMovement::create([
@@ -684,12 +684,6 @@ class DeliveryOrderController extends Controller
                     'user_id' => Auth::id(),
                 ]);
 
-                // withTrashed() penting: kalau SO diedit setelah DO ini dibuat (sebelum ship()
-                // dipanggil), baris sales_order_details lama sudah soft-deleted dan find() biasa
-                // akan selalu balik null — quantity_shipped jadi tidak pernah ke-increment sama
-                // sekali tanpa ada error yang kelihatan. Self-heal: kalau ternyata trashed, cari
-                // padanan aktif (sales_order_id + item_id sama) dan repoint FK di baris ini juga,
-                // supaya ship() berikutnya tidak kena masalah yang sama lagi.
                 $soDetail = SalesOrderDetail::withTrashed()->find($detail->sales_order_detail_id);
                 if ($soDetail && $soDetail->trashed()) {
                     $activeSibling = SalesOrderDetail::where('sales_order_id', $soDetail->sales_order_id)
@@ -709,8 +703,6 @@ class DeliveryOrderController extends Controller
             $deliveryOrder->status = 'SHIPPED';
             $deliveryOrder->save();
 
-            // DO bisa gabungan beberapa SO — update status TIAP SO yang terlibat berdasarkan
-            // sisa detail SO itu sendiri, bukan cuma satu SO "utama" di header.
             $salesOrderIds = $deliveryOrder->details
                 ->pluck('salesOrderDetail.sales_order_id')
                 ->filter()
@@ -740,7 +732,6 @@ class DeliveryOrderController extends Controller
                 'message' => 'Barang berhasil dikirim! Status: SHIPPED, Stok telah berkurang.',
                 'data' => $deliveryOrder
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -792,7 +783,6 @@ class DeliveryOrderController extends Controller
                 'message' => 'Barang berhasil dikonfirmasi diterima customer. Status: DELIVERED. Siap untuk di-invoice!',
                 'data' => $deliveryOrder
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -818,11 +808,6 @@ class DeliveryOrderController extends Controller
 
             $deliveryOrders = $query->orderBy('delivery_date', 'desc')->get();
 
-            // DO gabungan bisa hasilkan >1 invoice (1 per SO yang terlibat — lihat
-            // InvoiceService::createInvoicesFromDeliveryOrder), jadi "belum di-invoice" dicek
-            // per baris detail (via delivery_order_detail_id di sales_invoice_details), bukan
-            // per DO — supaya DO yang sebagian SO-nya sudah di-invoice tetap muncul kalau masih
-            // ada SO lain dalam DO yang sama yang belum.
             $allDetailIds = $deliveryOrders->pluck('details')->flatten()->pluck('id');
             $invoicedDetailIds = $allDetailIds->isEmpty()
                 ? collect()
@@ -834,8 +819,6 @@ class DeliveryOrderController extends Controller
                 ->map(fn ($do) => $this->attachSalesOrdersInfo($do))
                 ->values();
 
-            // current_unit_price — lihat SalesOrderDetail::resolveCurrent(); dipakai preview
-            // InvoiceCreate.vue supaya tidak menampilkan harga 0/usang sebelum invoice dibuat.
             $deliveryOrders->each(function ($do) {
                 $do->details->each(function ($detail) {
                     $frozenSoDetail = $detail->salesOrderDetail;
@@ -866,10 +849,6 @@ class DeliveryOrderController extends Controller
                 'details.salesOrderDetail.salesOrder:id,so_number,buyer_id,currency'
             ])->findOrFail($id);
 
-            // current_stock dihitung sama seperti getOpenSalesOrders() — stok gudang PACKING
-            // dulu, fallback ke items.stock. Dipakai frontend (mode edit) untuk validasi qty
-            // kirim; kalau cuma pakai items.stock langsung, item finished_good yang kolom
-            // stock-nya tidak sinkron akan salah tampil "stok 0" padahal barangnya ada di PACKING.
             $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
             $deliveryOrder->details->each(function ($detail) use ($packingWarehouseId) {
                 $packingStock = (float) Inventory::where('item_id', $detail->item_id)
@@ -880,11 +859,8 @@ class DeliveryOrderController extends Controller
                     : (float) ($detail->item->stock ?? 0);
             });
 
-            // current_unit_price — lihat SalesOrderDetail::resolveCurrent() untuk kenapa ini
-            // perlu (sales_order_detail_id di DO bisa nyangkut ke baris SO detail yang sudah
-            // soft-deleted/usang kalau SO diedit setelah DO dibuat).
             $deliveryOrder->details->each(function ($detail) {
-                $frozenSoDetail = $detail->salesOrderDetail; // relasi withTrashed()
+                $frozenSoDetail = $detail->salesOrderDetail;
                 $currentSoDetail = $frozenSoDetail
                     ? SalesOrderDetail::resolveCurrent($frozenSoDetail->sales_order_id, $detail->item_id)
                     : null;
@@ -993,6 +969,10 @@ class DeliveryOrderController extends Controller
                 $do->save();
             }
 
+            if ($isShipped && $request->has('detail_remarks')) {
+                $this->applyDetailRemarks($do, $request->detail_remarks);
+            }
+
             if (!$isShipped && $request->has('details')) {
                 $details = $request->details;
                 if (is_string($details)) {
@@ -1004,9 +984,6 @@ class DeliveryOrderController extends Controller
                     $this->validateStockForDetails($details, $packingWarehouseId);
                 }
 
-                // Sync penuh: baris yang sudah ada di-update, baris baru (tanpa 'id' — mis.
-                // pecahan crate/box baru yang ditambah admin saat edit) dibuat, baris yang
-                // sudah tidak ada lagi di payload (dihapus admin) dihapus dari DB.
                 $keptDetailIds = [];
 
                 foreach ($details as $detail) {
@@ -1027,6 +1004,7 @@ class DeliveryOrderController extends Controller
                             'quantity_shipped' => $quantityShipped,
                             'quantity_boxes' => $quantityBoxes,
                             'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
+                            'remark' => array_key_exists('remark', $detail) ? $this->normalizeRemark($detail['remark']) : $doDetail->remark,
                             'nw_per_box' => $nwPerBox,
                             'gw_per_box' => $gwPerBox,
                             'm3_per_carton' => $m3PerCarton,
