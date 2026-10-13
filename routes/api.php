@@ -464,7 +464,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('/sample', [ProductionMonitoringController::class, 'sampleIndex']);
         Route::get('/detail', [ProductionMonitoringController::class, 'detail']);
         Route::get('/export-excel', [ProductionMonitoringController::class, 'exportExcel']);
-        Route::post('/detail/{productionOrderDetailId}/refresh-stock', [ProductionMonitoringController::class, 'refreshInitialStock']);
+        Route::get('/detail/{productionOrderDetailId}/stock-info', [ProductionMonitoringController::class, 'initialStockInfo']);
         Route::post('/detail/{productionOrderDetailId}/set-stock-manual', [ProductionMonitoringController::class, 'setInitialStockManual']);
         Route::get('/detail/{productionOrderDetailId}/gudang-source-items', [ProductionMonitoringController::class, 'gudangSourceItems']);
         Route::post('/detail/{productionOrderDetailId}/ambil-dari-gudang', [ProductionMonitoringController::class, 'ambilDariGudang']);

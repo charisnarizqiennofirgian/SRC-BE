@@ -8,6 +8,7 @@ use App\Models\ProductionOrderDetail;
 use App\Models\SalesOrder;
 use App\Models\InventoryLog;
 use App\Models\Warehouse;
+use App\Services\InitialStockClaimService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -41,23 +42,6 @@ class ProductionMonitoringController extends Controller
                 ->toArray();
         }
         return $poIds;
-    }
-
-    private function canRefreshInitialStock(?ProductionOrderDetail $poDetail, array $rawQty): bool
-    {
-        if (!$poDetail) {
-            return false;
-        }
-
-        if (!empty($poDetail->current_stage)) {
-            return false;
-        }
-
-        if ((float) $poDetail->qty_produced > 0) {
-            return false;
-        }
-
-        return array_sum($rawQty) <= 0;
     }
 
     private function waterfallAllocate($detailsForItem, float $totalQty, string $targetField = 'quantity'): array
@@ -496,7 +480,6 @@ class ProductionMonitoringController extends Controller
                     $pipelineRemaining = $this->applyPipelineRemaining($rawQtyForPipeline);
 
                     $stok = (float) ($matchedPoDetail->initial_stock_snapshot ?? 0);
-                    $stokUpdatable = $this->canRefreshInitialStock($matchedPoDetail, $rawQtyForPipeline);
 
                     if (!array_key_exists($itemId, $itemTypeCache)) {
                         $itemTypeCache[$itemId] = \App\Models\Item::where('id', $itemId)->value('type');
@@ -527,7 +510,6 @@ class ProductionMonitoringController extends Controller
                         'item_code'         => $detail->item?->code ?? '-',
                         'target'            => $target,
                         'stok'              => $stok,
-                        'stok_updatable'    => $stokUpdatable,
                         'delivery_date'     => $detail->delivery_date
                                                 ? Carbon::parse($detail->delivery_date)->format('d/m/Y')
                                                 : '-',
@@ -582,7 +564,6 @@ class ProductionMonitoringController extends Controller
                 'data'     => $result,
                 'total_so' => $salesOrders->count(),
             ]);
-
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
@@ -798,7 +779,6 @@ class ProductionMonitoringController extends Controller
                             }
                         }
 
-
                         $rawQtyForPipelineSample = [
                             'moulding'  => $itemQtyMoulding,
                             'prototype' => $itemQtyPrototype,
@@ -809,7 +789,6 @@ class ProductionMonitoringController extends Controller
                         $pipelineRemainingSample = $this->applyPipelineRemaining($rawQtyForPipelineSample);
 
                         $stokSample = (float) ($detail->initial_stock_snapshot ?? 0);
-                        $stokUpdatableSample = $this->canRefreshInitialStock($detail, $rawQtyForPipelineSample);
 
                         $items[] = [
                             'detail_id'         => $detail->id,
@@ -819,7 +798,6 @@ class ProductionMonitoringController extends Controller
                             'item_code'         => $detail->item?->code ?? '-',
                             'target'            => $target,
                             'stok'              => $stokSample,
-                            'stok_updatable'    => $stokUpdatableSample,
                             'delivery_date'     => $deliveryDate,
                             'status_sanwil'     => $itemStatusSawmill,
                             'status_kd'         => $statusKd,
@@ -835,7 +813,6 @@ class ProductionMonitoringController extends Controller
                             'is_done'           => (($itemQtyPacking + $stokSample) >= $target && $target > 0) || $po->status === 'completed',
                         ];
                     }
-
 
                     if (empty($items)) {
                         continue;
@@ -860,7 +837,6 @@ class ProductionMonitoringController extends Controller
                 'data'     => $result,
                 'total_po' => count($result),
             ]);
-
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
@@ -984,7 +960,6 @@ class ProductionMonitoringController extends Controller
                 'stages'     => $result,
                 'rejects'    => $rejects,
             ]);
-
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
@@ -1227,61 +1202,11 @@ class ProductionMonitoringController extends Controller
             return response()->download($tempFile, $filename, [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ])->deleteFileAfterSend(true);
-
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     }
 
-    private function hasAnyProductionActivityForItem(int $productionOrderId, int $itemId, ProductionOrderDetail $poDetail): bool
-    {
-        if (!empty($poDetail->current_stage) || (float) $poDetail->qty_produced > 0) {
-            return true;
-        }
-
-        if (DB::table('moulding_productions')->where('production_order_detail_id', $poDetail->id)->exists()
-            || DB::table('mesin_productions')->where('production_order_detail_id', $poDetail->id)->exists()
-            || DB::table('rustik_komponen_productions')->where('production_order_detail_id', $poDetail->id)->exists()) {
-            return true;
-        }
-
-        $poIds = [$productionOrderId];
-
-        foreach ($this->hilirStageTypes as $txTypes) {
-            foreach ($txTypes as $txType) {
-                $searchIds = $this->getSearchIds($txType, $poIds);
-                if (empty($searchIds)) {
-                    continue;
-                }
-                if (InventoryLog::where('transaction_type', $txType)
-                    ->whereIn('reference_id', $searchIds)
-                    ->where('direction', 'IN')
-                    ->where('item_id', $itemId)
-                    ->exists()) {
-                    return true;
-                }
-            }
-        }
-
-        $qcFinalSearchIds = $this->getSearchIds('QC_FINAL', $poIds);
-        if (!empty($qcFinalSearchIds)) {
-            if (InventoryLog::where('transaction_type', 'QC_FINAL')
-                ->whereIn('reference_id', $qcFinalSearchIds)
-                ->where('direction', 'IN')
-                ->where('item_id', $itemId)
-                ->exists()) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // =============================================
-    // GET: Daftar gudang yang punya stok item ini, untuk dipilih sebagai
-    // sumber pada aksi "Ambil dari Gudang" (produk sample yang bisa dipenuhi
-    // langsung dari stok tanpa lewat pipeline produksi sample).
-    // =============================================
     public function gudangSourceItems($productionOrderDetailId)
     {
         try {
@@ -1309,13 +1234,6 @@ class ProductionMonitoringController extends Controller
         }
     }
 
-    // =============================================
-    // POST: Catat item sample yang dipenuhi langsung dari stok gudang
-    // (skip pipeline produksi sample). Stok keluar dari gudang sumber,
-    // masuk ke Gudang Packing (supaya bisa langsung dikirim via Delivery
-    // Order), dicatat dengan transaction_type GUDANG_LANGSUNG supaya tetap
-    // bisa dibedakan dari hasil packing pipeline biasa di riwayat/audit.
-    // =============================================
     public function ambilDariGudang(Request $request, $productionOrderDetailId)
     {
         $data = $request->validate([
@@ -1443,26 +1361,14 @@ class ProductionMonitoringController extends Controller
         }
     }
 
-    public function refreshInitialStock($productionOrderDetailId)
+    public function initialStockInfo($productionOrderDetailId, InitialStockClaimService $claimService)
     {
         try {
             $detail = ProductionOrderDetail::findOrFail($productionOrderDetailId);
 
-            if ($this->hasAnyProductionActivityForItem($detail->production_order_id, $detail->item_id, $detail)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Tidak bisa diperbarui otomatis — item ini sudah ada progres produksi.',
-                ], 422);
-            }
-
-            $detail->update([
-                'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
-            ]);
-
             return response()->json([
                 'success' => true,
-                'message' => 'Stok awal berhasil diperbarui.',
-                'data'    => ['initial_stock_snapshot' => (float) $detail->initial_stock_snapshot],
+                'data'    => $claimService->info($detail),
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
@@ -1471,24 +1377,45 @@ class ProductionMonitoringController extends Controller
         }
     }
 
-    public function setInitialStockManual(Request $request, $productionOrderDetailId)
+    public function setInitialStockManual(Request $request, $productionOrderDetailId, InitialStockClaimService $claimService)
     {
         $validated = $request->validate([
             'value' => 'required|numeric|min:0',
         ]);
 
         try {
-            $detail = ProductionOrderDetail::findOrFail($productionOrderDetailId);
+            return DB::transaction(function () use ($validated, $productionOrderDetailId, $claimService) {
+                $detail = ProductionOrderDetail::lockForUpdate()->findOrFail($productionOrderDetailId);
+                ProductionOrderDetail::where('item_id', $detail->item_id)->lockForUpdate()->get(['id']);
 
-            $detail->update([
-                'initial_stock_snapshot' => $validated['value'],
-            ]);
+                $value = (float) $validated['value'];
+                $info = $claimService->info($detail);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Stok awal berhasil disimpan.',
-                'data'    => ['initial_stock_snapshot' => (float) $detail->initial_stock_snapshot],
-            ]);
+                if ($value > $info['current'] && $value > $info['free']) {
+                    $fmt = fn ($n) => rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+                    $claimText = collect($info['claims'])
+                        ->map(fn ($c) => $c['so_number'] . ' (' . $fmt($c['qty']) . ')')
+                        ->implode(', ');
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Stok awal melebihi stok bebas. Stok fisik ' . $fmt($info['physical_total'])
+                            . ($claimText !== '' ? ', sudah dipakai ' . $claimText : '')
+                            . ', sisa ' . $fmt($info['free']) . '.',
+                        'data'    => $info,
+                    ], 422);
+                }
+
+                $detail->update([
+                    'initial_stock_snapshot' => $value,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Stok awal berhasil disimpan.',
+                    'data'    => ['initial_stock_snapshot' => (float) $detail->initial_stock_snapshot],
+                ]);
+            });
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan.'], 404);
         } catch (\Exception $e) {

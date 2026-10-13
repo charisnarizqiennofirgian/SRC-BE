@@ -1,0 +1,22 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('delivery_order_details', function (Blueprint $table) {
+            $table->string('box_group', 20)->nullable()->after('remark');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('delivery_order_details', function (Blueprint $table) {
+            $table->dropColumn('box_group');
+        });
+    }
+};

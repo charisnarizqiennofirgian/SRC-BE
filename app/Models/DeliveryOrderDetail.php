@@ -22,6 +22,7 @@ class DeliveryOrderDetail extends Model
         'quantity_boxes',
         'quantity_crates',
         'remark',
+        'box_group',
         'nw_per_box',
         'gw_per_box',
         'm3_per_carton',

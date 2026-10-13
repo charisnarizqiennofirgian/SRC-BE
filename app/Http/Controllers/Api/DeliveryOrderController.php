@@ -172,7 +172,7 @@ class DeliveryOrderController extends Controller
         return response()->json([
             'success' => true,
             'message' => "Keterangan DO {$do->do_number} berhasil disimpan.",
-            'data'    => $do->load('details:id,delivery_order_id,item_name,quantity_boxes,quantity_shipped,remark'),
+            'data'    => $do->load('details:id,delivery_order_id,item_name,quantity_boxes,quantity_shipped,remark,box_group'),
         ]);
     }
 
@@ -185,7 +185,7 @@ class DeliveryOrderController extends Controller
         $quantityBoxes   = $detail['quantity_boxes'] ?? null;
         $quantityShipped = $detail['quantity_shipped'] ?? 0;
 
-        return [
+        return $this->applyBoxMember([
             'nw_per_box'             => $nwPerBox,
             'gw_per_box'             => $gwPerBox,
             'm3_per_carton'          => $m3PerCarton,
@@ -198,7 +198,45 @@ class DeliveryOrderController extends Controller
             'total_gw'               => ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null,
             'total_m3'               => ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null,
             'total_wood_consumed'    => ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null,
-        ];
+            'box_group'              => $detail['box_group'] ?? null,
+        ], !empty($detail['_box_member']));
+    }
+
+    private function normalizeBoxGroup($group): ?string
+    {
+        $group = mb_strtoupper(trim((string) $group));
+        return $group === '' ? null : mb_substr($group, 0, 20);
+    }
+
+    private function markBoxGroups(array $details): array
+    {
+        $seen = [];
+        foreach ($details as $i => $detail) {
+            $group = $this->normalizeBoxGroup($detail['box_group'] ?? null);
+            $details[$i]['box_group'] = $group;
+            $details[$i]['_box_member'] = $group !== null && isset($seen[$group]);
+            if ($group !== null) {
+                $seen[$group] = true;
+            }
+        }
+        return $details;
+    }
+
+    private function applyBoxMember(array $values, bool $isMember): array
+    {
+        if (!$isMember) {
+            return $values;
+        }
+        return array_merge($values, [
+            'quantity_boxes'  => null,
+            'quantity_crates' => null,
+            'nw_per_box'      => null,
+            'gw_per_box'      => null,
+            'm3_per_carton'   => null,
+            'total_nw'        => null,
+            'total_gw'        => null,
+            'total_m3'        => null,
+        ]);
     }
 
     public function store(Request $request)
@@ -295,6 +333,7 @@ class DeliveryOrderController extends Controller
             if (is_string($details)) {
                 $details = json_decode($details, true);
             }
+            $details = $this->markBoxGroups((array) $details);
 
             $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
             if (!$packingWarehouseId) {
@@ -978,6 +1017,7 @@ class DeliveryOrderController extends Controller
                 if (is_string($details)) {
                     $details = json_decode($details, true);
                 }
+                $details = $this->markBoxGroups((array) $details);
 
                 $packingWarehouseId = Warehouse::where('code', 'PACKING')->value('id');
                 if ($packingWarehouseId) {
@@ -1000,7 +1040,8 @@ class DeliveryOrderController extends Controller
                         $quantityBoxes = $detail['quantity_boxes'] ?? $doDetail->quantity_boxes;
                         $quantityShipped = $detail['quantity_shipped'] ?? $doDetail->quantity_shipped;
 
-                        $doDetail->update([
+                        $doDetail->update($this->applyBoxMember([
+                            'box_group' => $detail['box_group'] ?? null,
                             'quantity_shipped' => $quantityShipped,
                             'quantity_boxes' => $quantityBoxes,
                             'quantity_crates' => $detail['quantity_crates'] ?? $doDetail->quantity_crates,
@@ -1013,7 +1054,7 @@ class DeliveryOrderController extends Controller
                             'total_gw' => ($gwPerBox && $quantityBoxes) ? $gwPerBox * $quantityBoxes : null,
                             'total_m3' => ($m3PerCarton && $quantityBoxes) ? $m3PerCarton * $quantityBoxes : null,
                             'total_wood_consumed' => ($woodPerPcs && $quantityShipped) ? $woodPerPcs * $quantityShipped : null,
-                        ]);
+                        ], !empty($detail['_box_member'])));
                         $keptDetailIds[] = $doDetail->id;
                     } else {
                         $item = Item::with('unit')->find($detail['item_id']);

@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Inventory;
 use App\Models\MesinProduction;
 use App\Models\MouldingProduction;
 use App\Models\ProductionOrder;
@@ -55,7 +54,7 @@ class ProductionOrderDetailSyncService
                 'item_id'                => $detail->item_id,
                 'qty_planned'            => $detail->quantity,
                 'qty_produced'           => 0,
-                'initial_stock_snapshot' => Inventory::getAvailableFinishedStock($detail->item_id),
+                'initial_stock_snapshot' => 0,
             ]);
             $result['added'][] = $newDetail;
         }
