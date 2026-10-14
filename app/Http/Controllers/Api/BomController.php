@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Validator;
 
 class BomController extends Controller
 {
-    // Untuk halaman index: list produk yang sudah punya BOM
     public function index()
     {
         $rows = ProductBom::selectRaw('parent_item_id as item_id, COUNT(*) as components_count')
@@ -32,7 +31,6 @@ class BomController extends Controller
         ]);
     }
 
-    // Import Excel BOM
     public function import(Request $request)
     {
         $validator = Validator::make($request->all(), [

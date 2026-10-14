@@ -321,11 +321,33 @@ class ProductionMonitoringController extends Controller
                     }
 
                     $qtyRuskomp = 0;
+                    $ruskompComponents = [];
                     if (!empty($detailIds)) {
                         $qtyRuskomp = (float) DB::table('rustik_komponen_productions')
                             ->whereIn('production_order_detail_id', $detailIds)
                             ->whereNotNull('qty_produk_jadi')
                             ->sum('qty_produk_jadi');
+
+                        $ruskompComponentSums = DB::table('rustik_komponen_outputs')
+                            ->join('rustik_komponen_productions', 'rustik_komponen_productions.id', '=', 'rustik_komponen_outputs.rustik_komponen_production_id')
+                            ->whereIn('rustik_komponen_productions.production_order_detail_id', $detailIds)
+                            ->select('rustik_komponen_outputs.item_id', DB::raw('SUM(rustik_komponen_outputs.qty) as total_qty'))
+                            ->groupBy('rustik_komponen_outputs.item_id')
+                            ->get();
+
+                        $ruskompItemsById = \App\Models\Item::whereIn('id', $ruskompComponentSums->pluck('item_id')->toArray())
+                            ->get(['id', 'name', 'code'])
+                            ->keyBy('id');
+
+                        foreach ($ruskompComponentSums as $cs) {
+                            $compItem = $ruskompItemsById->get($cs->item_id);
+                            $ruskompComponents[] = [
+                                'item_id'   => $cs->item_id,
+                                'item_name' => $compItem->name ?? '(item tidak ditemukan)',
+                                'item_code' => $compItem->code ?? '',
+                                'qty'       => (float) $cs->total_qty,
+                            ];
+                        }
                     }
 
                     $mouldingBomChecklist = [];
@@ -527,6 +549,7 @@ class ProductionMonitoringController extends Controller
                         'mesin_selesai'     => $matchedPoDetail?->mesin_completed_at !== null,
 
                         'qty_ruskomp'       => $pipelineRemaining['ruskomp'],
+                        'ruskomp_components' => $ruskompComponents,
                         'qty_assembling'    => $pipelineRemaining['assembling'],
                         'qty_sanding'       => $pipelineRemaining['sanding'],
                         'qty_rustik'        => $pipelineRemaining['rustik'],

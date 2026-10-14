@@ -17,9 +17,9 @@ class CategoryController extends Controller
             $search = $request->input('search') ?: $request->input('q');
             $all = $request->query('all');
             $limit = $request->input('limit');
-            
+
             $query = Category::query();
-            
+
             if ($search) {
                 $query->where('name', 'like', "%{$search}%")
                       ->orWhere('description', 'like', "%{$search}%");
@@ -36,11 +36,10 @@ class CategoryController extends Controller
                     'data' => $categories
                 ], 200);
             }
-            
+
             $categories = $query->paginate($perPage);
-            
+
             return response()->json($categories, 200);
-            
         } catch (\Exception $e) {
             Log::error('Error saat mengambil data kategori: ' . $e->getMessage());
             return response()->json([
@@ -112,7 +111,6 @@ class CategoryController extends Controller
                 'message' => 'Kategori berhasil diperbarui.',
                 'data' => $category
             ], 200);
-
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -131,12 +129,12 @@ class CategoryController extends Controller
     {
         try {
             $isUsed = Item::where('category_id', $category->id)->exists();
-            
+
             if ($isUsed) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Gagal menghapus. Kategori ini sedang digunakan oleh Master Barang.'
-                ], 409); // 409 Conflict
+                ], 409);
             }
 
             $category->delete();
@@ -145,7 +143,6 @@ class CategoryController extends Controller
                 'success' => true,
                 'message' => 'Kategori berhasil dihapus.'
             ], 200);
-            
         } catch (\Exception $e) {
             Log::error('Error saat menghapus kategori: ' . $e->getMessage());
             return response()->json([

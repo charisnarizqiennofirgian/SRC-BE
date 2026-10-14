@@ -41,8 +41,6 @@ class CandyProductionController extends Controller
         Log::info('=== KD PRODUCTION START ===');
 
         return DB::transaction(function () use ($data) {
-
-            // === GUDANG KD ===
             $kdWarehouse = Warehouse::where('code', 'RSTK')->first();
             if (!$kdWarehouse) {
                 throw ValidationException::withMessages([
@@ -53,9 +51,6 @@ class CandyProductionController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? 'TANPA-PO';
 
-            // === NOMOR DOKUMEN ===
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
-            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
             $prefix = 'KD-' . now()->format('Ym') . '-';
             $last   = KdProduction::where('document_number', 'like', $prefix . '%')
                 ->orderByDesc('document_number')
@@ -63,7 +58,6 @@ class CandyProductionController extends Controller
             $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
             $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            // === SIMPAN HEADER KD ===
             $kdProduction = KdProduction::create([
                 'document_number'       => $documentNumber,
                 'date'                  => $data['date'],
@@ -73,9 +67,6 @@ class CandyProductionController extends Controller
                 'created_by'            => Auth::id(),
             ]);
 
-            // === PROSES SETIAP ITEM ===
-            // KD cuma memindahkan RST dari Gudang Sanwil (basah) ke Gudang KD (kering) — item-nya
-            // SAMA PERSIS, gak ada transformasi ke item lain (pola sama seperti Mesin S4S->MESIN).
             foreach ($data['items'] as $index => $itemData) {
                 $sourceWarehouseId = $itemData['warehouse_id'];
                 $itemId            = $itemData['item_id'];
@@ -83,7 +74,6 @@ class CandyProductionController extends Controller
 
                 Log::info("Item #{$index}: item={$itemId}, qty={$qty}");
 
-                // Cek stok di gudang asal
                 $sourceInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $sourceWarehouseId)
                     ->lockForUpdate()
@@ -98,7 +88,6 @@ class CandyProductionController extends Controller
                     ]);
                 }
 
-                // Kurangi stok di gudang asal (OUT)
                 $sourceInventory->decrement('qty_pcs', $qty);
 
                 InventoryLog::create([
@@ -117,7 +106,6 @@ class CandyProductionController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Tambah stok di Gudang KD (IN) — item yang sama
                 $targetInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $kdWarehouse->id)
                     ->lockForUpdate()
@@ -150,7 +138,6 @@ class CandyProductionController extends Controller
                 ]);
             }
 
-            // === UPDATE STAGE PO ===
             if ($productionOrder) {
                 $this->poProgress->markOnProgress($productionOrder->id);
             }

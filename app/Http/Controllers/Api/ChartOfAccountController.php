@@ -180,22 +180,16 @@ class ChartOfAccountController extends Controller
         return Excel::download(new ChartOfAccountTemplateExport(), 'template_coa.xlsx');
     }
 
-    /**
-     * Import COA - Support 2 format:
-     * 1. Format Standard (4 kolom): Code | Name | Type | Currency
-     * 2. Format Klien (2 kolom): No.Id | Name (auto-detect type dari kode)
-     */
     public function import(Request $request)
     {
         $request->validate([
-            'file' => 'required|mimes:xlsx,xls|max:5120', // Hanya Excel, hapus CSV
+            'file' => 'required|mimes:xlsx,xls|max:5120',
         ]);
 
         try {
             $file = $request->file('file');
             $extension = strtolower($file->getClientOriginalExtension());
 
-            // Validasi extension sekali lagi
             if (!in_array($extension, ['xlsx', 'xls'])) {
                 return response()->json([
                     'success' => false,
@@ -203,7 +197,6 @@ class ChartOfAccountController extends Controller
                 ], 400);
             }
 
-            // Cek apakah file bisa dibaca
             if (!$file->isValid()) {
                 return response()->json([
                     'success' => false,
@@ -240,9 +233,7 @@ class ChartOfAccountController extends Controller
             }
 
             return response()->json($response);
-
         } catch (\Maatwebsite\Excel\Validators\ValidationException $e) {
-            // Excel validation error
             Log::error('Excel Validation Error: ' . json_encode($e->failures()));
 
             return response()->json([
@@ -250,16 +241,13 @@ class ChartOfAccountController extends Controller
                 'message' => 'Validasi Excel gagal. Periksa format data di file Excel.',
                 'errors' => $e->failures()
             ], 422);
-
         } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
-            // File tidak bisa dibaca
             Log::error('Excel Reader Error: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
                 'message' => 'File Excel tidak valid atau corrupt. Pastikan file berformat .xlsx atau .xls dan bisa dibuka di Microsoft Excel.',
             ], 400);
-
         } catch (\Exception $e) {
             Log::error('Error import COA: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
@@ -279,9 +267,6 @@ class ChartOfAccountController extends Controller
         return Excel::download(new ChartOfAccountExport(), $filename);
     }
 
-    /**
-     * Normalize type untuk backward compatibility
-     */
     private function normalizeType(string $type): ?string
     {
         $mapping = [

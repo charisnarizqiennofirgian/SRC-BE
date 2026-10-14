@@ -46,7 +46,6 @@ class DokumenController extends Controller
 
     public function upload(Request $request)
     {
-        // File Buyer wajib PDF & wajib pilih buyer — kategori lain tetap bebas semua tipe file seperti semula
         $isFileBuyer = $request->input('kategori') === 'File Buyer';
 
         $request->validate([
@@ -92,18 +91,15 @@ class DokumenController extends Controller
             'keterangan' => 'nullable|string|max:500',
         ]);
 
-        // Hapus file lama dari disk
         if (Storage::disk('dokumen')->exists($dokumen->path_file)) {
             Storage::disk('dokumen')->delete($dokumen->path_file);
         }
 
-        // Simpan file baru
         $file      = $request->file('file');
         $ekstensi  = $file->getClientOriginalExtension();
         $namaSimpa = Str::slug($dokumen->nama_file) . '_' . time() . '.' . $ekstensi;
         $path      = $file->storeAs('', $namaSimpa, 'dokumen');
 
-        // Update record — nama_file & kategori tetap, hanya file yang ganti
         $dokumen->update([
             'nama_asli'     => $file->getClientOriginalName(),
             'path_file'     => $path,
@@ -157,7 +153,6 @@ class DokumenController extends Controller
     {
         $dokumen = Dokumen::findOrFail($id);
 
-        // Cek hak hapus — hanya uploader atau admin
         if ($dokumen->diupload_oleh !== Auth::id()) {
             $user = Auth::user();
             if (!$user instanceof User || (!$user->hasRole('super-admin') && !$user->hasRole('admin'))) {
