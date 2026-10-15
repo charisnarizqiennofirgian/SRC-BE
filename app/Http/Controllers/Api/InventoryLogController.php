@@ -39,34 +39,28 @@ class InventoryLogController extends Controller
             ->orderBy('time', 'asc')
             ->orderBy('id', 'asc');
 
-            // Filter tanggal (wajib)
             if ($request->filled('start_date') && $request->filled('end_date')) {
                 $query->whereBetween('date', [$request->start_date, $request->end_date]);
             }
 
-            // Filter gudang
             if ($request->filled('warehouse_id')) {
                 $query->where('warehouse_id', $request->warehouse_id);
             }
 
-            // Filter tipe transaksi
             if ($request->filled('transaction_type')) {
                 $query->where('transaction_type', $request->transaction_type);
             }
 
-            // Filter item
             if ($request->filled('item_id')) {
                 $query->where('item_id', $request->item_id);
             }
 
-            // Hitung summary (sebelum pagination)
             $summaryQuery = clone $query;
             $summary = [
                 'total_masuk' => (clone $summaryQuery)->where('direction', 'IN')->sum('qty'),
                 'total_keluar' => (clone $summaryQuery)->where('direction', 'OUT')->sum('qty'),
             ];
 
-            // Hitung saldo awal jika filter item dipilih
             $saldoAwal = 0;
             $showSaldo = $request->filled('item_id');
 
@@ -80,13 +74,11 @@ class InventoryLogController extends Controller
 
             $logs = $query->paginate($request->input('per_page', 50));
 
-            // Transform data dengan running balance jika filter item dipilih
             $runningBalance = $saldoAwal;
             $logs->getCollection()->transform(function ($log) use ($showSaldo, &$runningBalance) {
                 $masuk = $log->direction === 'IN' ? (float) $log->qty : null;
                 $keluar = $log->direction === 'OUT' ? (float) $log->qty : null;
 
-                // Hitung running balance
                 if ($showSaldo) {
                     if ($masuk) {
                         $runningBalance += $masuk;
@@ -124,7 +116,6 @@ class InventoryLogController extends Controller
                 ],
                 'show_saldo' => $showSaldo,
             ]);
-
         } catch (\Exception $e) {
             Log::error('Gagal mengambil laporan mutasi: ' . $e->getMessage());
             return response()->json([
@@ -189,7 +180,6 @@ class InventoryLogController extends Controller
             $query = Item::select('id', 'code', 'name')
                 ->orderBy('name');
 
-            // Searchable: filter berdasarkan keyword
             if ($request->filled('search')) {
                 $search = $request->search;
                 $query->where(function ($q) use ($search) {
@@ -198,7 +188,6 @@ class InventoryLogController extends Controller
                 });
             }
 
-            // Limit hasil untuk performa
             $items = $query->limit(50)->get();
 
             return response()->json([

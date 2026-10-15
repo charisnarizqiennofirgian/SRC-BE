@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\Log;
 
 class ItemDimensionHistoryController extends Controller
 {
-    // GET /items/{id}/dimension-history
     public function index($itemId)
     {
         $item = Item::findOrFail($itemId);
@@ -40,7 +39,6 @@ class ItemDimensionHistoryController extends Controller
         ]);
     }
 
-    // PUT /items/{id}/dimensions
     public function update(Request $request, $itemId)
     {
         $request->validate([
@@ -52,7 +50,6 @@ class ItemDimensionHistoryController extends Controller
 
         $item = Item::findOrFail($itemId);
 
-        // Ambil dimensi lama dari specifications
         $spec  = $item->specifications ?? [];
         $old_p = (float) ($spec['p'] ?? $item->length_mm  ?? 0);
         $old_l = (float) ($spec['l'] ?? $item->width_mm   ?? 0);
@@ -62,7 +59,6 @@ class ItemDimensionHistoryController extends Controller
         $new_l = (float) $request->l;
         $new_t = (float) $request->t;
 
-        // Kalau tidak ada perubahan, skip
         if ($old_p == $new_p && $old_l == $new_l && $old_t == $new_t) {
             return response()->json([
                 'success' => false,
@@ -72,7 +68,6 @@ class ItemDimensionHistoryController extends Controller
 
         DB::beginTransaction();
         try {
-            // Catat history
             ItemDimensionHistory::create([
                 'item_id'    => $item->id,
                 'changed_by' => Auth::id(),
@@ -85,7 +80,6 @@ class ItemDimensionHistoryController extends Controller
                 'notes'      => $request->notes,
             ]);
 
-            // Update specifications
             $spec['p'] = $new_p;
             $spec['l'] = $new_l;
             $spec['t'] = $new_t;
@@ -109,7 +103,6 @@ class ItemDimensionHistoryController extends Controller
                     'new_t'   => $new_t,
                 ],
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Gagal update dimensi: ' . $e->getMessage());

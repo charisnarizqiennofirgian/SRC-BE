@@ -100,7 +100,6 @@ class JournalEntryController extends Controller
                 'message' => 'Jurnal manual berhasil disimpan',
                 'data' => $journalEntry->load(['lines.account', 'createdBy'])
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error creating manual journal: ' . $e->getMessage());
@@ -113,9 +112,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ OPENING BALANCE
-     */
     public function storeOpeningBalance(Request $request)
     {
         $request->validate([
@@ -128,7 +124,6 @@ class JournalEntryController extends Controller
             'entries.*.description'=> 'nullable|string',
         ]);
 
-        // Cek apakah sudah ada opening balance
         $existing = JournalEntry::where('is_opening_balance', true)->first();
         if ($existing) {
             return response()->json([
@@ -137,7 +132,6 @@ class JournalEntryController extends Controller
             ], 400);
         }
 
-        // Validasi balance
         $totalDebit  = collect($request->entries)->sum('debit');
         $totalCredit = collect($request->entries)->sum('credit');
 
@@ -165,7 +159,6 @@ class JournalEntryController extends Controller
                 null
             );
 
-            // Flag sebagai opening balance
             $journalEntry->update(['is_opening_balance' => true]);
 
             DB::commit();
@@ -175,7 +168,6 @@ class JournalEntryController extends Controller
                 'message' => 'Opening Balance berhasil disimpan!',
                 'data'    => $journalEntry->load(['lines.account', 'createdBy'])
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Error creating opening balance: ' . $e->getMessage());
@@ -186,9 +178,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ IMPORT OPENING BALANCE DARI EXCEL
-     */
     public function importOpeningBalance(Request $request)
     {
         $request->validate([
@@ -206,7 +195,6 @@ class JournalEntryController extends Controller
         $import = new OpeningBalanceImport();
         Excel::import($import, $request->file('file'));
 
-        // Kalau tidak ada entry sama sekali — kembalikan debug info agar mudah didiagnosa
         if (count($import->entries) === 0 && count($import->errors) === 0) {
             return response()->json([
                 'success' => false,
@@ -277,9 +265,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ HAPUS OPENING BALANCE
-     */
     public function destroyOpeningBalance()
     {
         DB::beginTransaction();
@@ -310,9 +295,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ DOWNLOAD TEMPLATE OPENING BALANCE
-     */
     public function downloadTemplate()
     {
         return Excel::download(
@@ -321,9 +303,6 @@ class JournalEntryController extends Controller
         );
     }
 
-    /**
-     * ✅ CEK STATUS OPENING BALANCE
-     */
     public function checkOpeningBalance()
     {
         $journal = JournalEntry::where('is_opening_balance', true)
@@ -338,9 +317,6 @@ class JournalEntryController extends Controller
             ]
         ]);
     }
-    /**
-     * ✅ UNPOST JURNAL
-     */
     public function unpost(Request $request, $id)
     {
         try {
@@ -365,9 +341,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ REPOST JURNAL
-     */
     public function repost($id)
     {
         try {
@@ -388,9 +361,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ VOID JURNAL
-     */
     public function void(Request $request, $id)
     {
         try {
@@ -414,9 +384,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ UPDATE JURNAL MANUAL
-     */
     public function updateManual(Request $request, $id)
     {
         try {
@@ -452,9 +419,6 @@ class JournalEntryController extends Controller
         }
     }
 
-    /**
-     * ✅ GET HISTORY
-     */
     public function history($id)
     {
         try {

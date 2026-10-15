@@ -32,6 +32,7 @@ class DokumenSalesOrderController extends Controller
             'so_status' => $so->status,
             'is_deleted' => $so->trashed(),
             'print_status' => $entry['status'],
+            'has_paper' => $entry['has_paper'],
             'last_action' => $last?->action,
             'last_action_at' => $last?->created_at?->copy()->timezone('Asia/Jakarta')->format('Y-m-d H:i'),
             'last_action_by' => $last?->user?->name,
@@ -100,6 +101,7 @@ class DokumenSalesOrderController extends Controller
                 'so_number' => $e['so']->so_number,
                 'buyer_name' => $e['so']->buyer?->name,
                 'print_status' => $e['status'],
+                'has_paper' => $e['has_paper'],
             ])->values(),
         ]);
     }
@@ -132,24 +134,34 @@ class DokumenSalesOrderController extends Controller
         return response()->json(['success' => true, 'data' => $data]);
     }
 
-    public function printed(string $id)
+    private function recordFinal(string $id, string $action, string $successMessage)
     {
         $so = SalesOrder::without('details')->findOrFail($id);
 
         if (!$this->service->isFinal($so)) {
             return response()->json([
                 'success' => false,
-                'message' => 'SO ini belum final (masih Draft / dibatalkan), tidak bisa dicatat sebagai dicetak.',
+                'message' => 'SO ini belum final (masih Draft / dibatalkan), tidak bisa dicatat.',
             ], 422);
         }
 
-        $log = DB::transaction(fn () => $this->service->record($so, SalesOrderPrint::ACTION_PRINT, Auth::id()));
+        $log = DB::transaction(fn () => $this->service->record($so, $action, Auth::id()));
 
         return response()->json([
             'success' => true,
-            'message' => 'Cetak SO tercatat.',
-            'data' => ['printed_at' => $log->created_at->copy()->timezone('Asia/Jakarta')->format('Y-m-d H:i')],
+            'message' => $successMessage,
+            'data' => ['recorded_at' => $log->created_at->copy()->timezone('Asia/Jakarta')->format('Y-m-d H:i')],
         ]);
+    }
+
+    public function printed(string $id)
+    {
+        return $this->recordFinal($id, SalesOrderPrint::ACTION_PRINT, 'Cetak SO tercatat.');
+    }
+
+    public function acknowledged(string $id)
+    {
+        return $this->recordFinal($id, SalesOrderPrint::ACTION_ACKNOWLEDGED, 'SO ditandai selesai (tanpa cetak).');
     }
 
     public function withdrawn(string $id)
@@ -168,7 +180,9 @@ class DokumenSalesOrderController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Kertas SO ditandai sudah ditarik dari lapangan.',
+            'message' => $this->service->hasPaper($so->id)
+                ? 'Kertas SO ditandai sudah ditarik dari lapangan.'
+                : 'Pembatalan SO sudah dikonfirmasi.',
         ]);
     }
 

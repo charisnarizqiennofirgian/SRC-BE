@@ -13,10 +13,9 @@ class InventoryController extends Controller
     {
         $warehouseId = $request->input('warehouse_id');
         $categoryId  = $request->input('category_id');
-        $itemType    = $request->input('item_type'); //
+        $itemType    = $request->input('item_type');
         $search      = $request->input('search');
         $perPage     = min($request->input('per_page', 50), 9999);
-
 
         $query = Inventory::query()
             ->select([
@@ -30,26 +29,22 @@ class InventoryController extends Controller
             ->where('qty_pcs', '>', 0)
             ->groupBy('item_id', 'warehouse_id');
 
-        // Filter by warehouse
         if ($warehouseId) {
             $query->where('warehouse_id', $warehouseId);
         }
 
-        // Filter by category
         if ($categoryId) {
             $query->whereHas('item', function ($q) use ($categoryId) {
                 $q->where('category_id', $categoryId);
             });
         }
 
-        // ✅ TAMBAH: Filter by item type (material/component)
         if ($itemType) {
             $query->whereHas('item', function ($q) use ($itemType) {
                 $q->where('type', $itemType);
             });
         }
 
-        // Search by item name or code
         if ($search) {
             $query->whereHas('item', function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
@@ -61,15 +56,14 @@ class InventoryController extends Controller
             ->orderBy('latest_id', 'desc')
             ->paginate($perPage);
 
-        // ✅ Format response biar konsisten
         $inventories->getCollection()->transform(function ($inv) {
             return [
                 'id'           => $inv->latest_id,
                 'warehouse_id' => $inv->warehouse_id,
                 'item_id'      => $inv->item_id,
-                'qty'          => $inv->total_qty, //  Total dari semua baris
-                'ref_po_id'    => $inv->ref_po_ids, // Gabungan PO (23, 45, 67)
-                'ref_product_id' => null, // Karena bisa beda-beda
+                'qty'          => $inv->total_qty,
+                'ref_po_id'    => $inv->ref_po_ids,
+                'ref_product_id' => null,
                 'item'         => $inv->item,
                 'warehouse'    => $inv->warehouse,
             ];
