@@ -16,14 +16,10 @@ use Illuminate\Validation\ValidationException;
 
 class PackingController extends Controller
 {
-    // Gudang yang bisa jadi sumber komponen untuk "Rakit dari Komponen" saat packing
     private const COMPONENT_WAREHOUSE_CODES = [
         'S4S', 'MESIN', 'RUSKOMP', 'ASSEMBLING', 'SANDING', 'RUSTIK', 'FINISHING', 'QC_FINAL',
     ];
 
-    // =============================================
-    // GET: Available POs
-    // =============================================
     public function getAvailablePos()
     {
         $pos = ProductionOrder::where('status', '!=', 'completed')
@@ -51,10 +47,6 @@ class PackingController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // =============================================
-    // GET: Item komponen yang bisa dipakai untuk "Rakit dari Komponen"
-    // Diambil dari semua gudang tahap produksi (S4S/MESIN/RUSKOMP/ASSEMBLING/dst)
-    // =============================================
     public function getComponentSourceItems()
     {
         $warehouses = Warehouse::whereIn('code', self::COMPONENT_WAREHOUSE_CODES)->get();
@@ -82,10 +74,6 @@ class PackingController extends Controller
         return response()->json(['success' => true, 'data' => $inventories]);
     }
 
-    // =============================================
-    // POST: Simpan proses packing
-    // Output: stok keluar dari gudang sumber → masuk Gudang Packing
-    // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -97,7 +85,6 @@ class PackingController extends Controller
             'items.*.item_id'     => ['required', 'integer', 'exists:items,id'],
             'items.*.qty'         => ['required', 'numeric', 'min:1'],
 
-            // Opsional: rakit dari komponen langsung saat packing (skip input manual di menu Assembling)
             'items.*.components'                => ['nullable', 'array'],
             'items.*.components.*.item_id'      => ['required_with:items.*.components', 'integer', 'exists:items,id'],
             'items.*.components.*.warehouse_id' => ['required_with:items.*.components', 'integer', 'exists:warehouses,id'],
@@ -120,9 +107,6 @@ class PackingController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // === NOMOR DOKUMEN ===
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
-            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
             $prefix = 'PKG-' . now()->format('Ym') . '-';
             $last   = InventoryLog::where('transaction_type', 'PACKING')
                 ->where('direction', 'IN')
@@ -137,13 +121,6 @@ class PackingController extends Controller
                 $qty      = $item['qty'];
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // === RAKIT DARI KOMPONEN (opsional) ===
-                // Kalau item ini diisi komponen, komponen langsung dikonsumsi (dikurangi dari
-                // gudang masing-masing) sebagai BAGIAN dari transaksi packing ini — TIDAK dibuatkan
-                // record AssemblingProduction terpisah, supaya tidak ikut kehitung di kolom
-                // "Assembling" Dashboard Monitoring (produk ini memang tidak lewat proses Assembling
-                // manual). Jejak pemakaian komponennya tetap tercatat di InventoryLog (transaction_type
-                // PACKING), cuma atribusinya langsung ke Packing, bukan Assembling.
                 if (!empty($item['components'])) {
                     foreach ($item['components'] as $cIndex => $component) {
                         $cItemId      = $component['item_id'];
@@ -184,7 +161,6 @@ class PackingController extends Controller
                                     "items.components.{$cIndex}.finishing" => [
                                         "'{$cItemName}' stok {$label} tidak cukup. Tersedia: {$availableFinishing}, dibutuhkan: {$cQty}."
                                     ],
-                            'finishing'        => $cFinishing,
                                 ]);
                             }
                             $cInputItem->{$bucket} = $availableFinishing - $cQty;
@@ -208,6 +184,7 @@ class PackingController extends Controller
                             'reference_type'   => 'ProductionOrder',
                             'reference_id'     => $data['ref_po_id'],
                             'reference_number' => $documentNumber,
+                            'finishing'        => $cFinishing,
                             'notes'            => "Komponen dipakai untuk merakit & mengemas '{$itemName}' ({$documentNumber}) - PO: {$poNumber}",
                             'user_id'          => Auth::id(),
                         ]);
@@ -217,7 +194,6 @@ class PackingController extends Controller
 
                     Log::info("Rakit dari komponen (packing): {$itemName} - {$qty} pcs dari " . count($item['components']) . ' komponen');
                 } else {
-                    // === ALUR BIASA: KURANGI STOK GUDANG SUMBER ===
                     $sourceInv = Inventory::where('item_id', $itemId)
                         ->where('warehouse_id', $sourceWarehouse->id)
                         ->lockForUpdate()
@@ -252,7 +228,6 @@ class PackingController extends Controller
                     ]);
                 }
 
-                // === TAMBAH STOK GUDANG PACKING ===
                 $packingInv = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehousePacking->id)
                     ->lockForUpdate()
@@ -289,7 +264,6 @@ class PackingController extends Controller
                 Log::info("Packing: {$itemName} - {$qty} pcs | {$sourceLabel} → Gudang Packing");
             }
 
-            // Update stage PO
             if ($productionOrder) {
                 $productionOrder->current_stage = 'packing';
                 $productionOrder->status        = 'in_progress';
@@ -309,9 +283,6 @@ class PackingController extends Controller
         });
     }
 
-    // =============================================
-    // POST: Selesai Packing → PO completed
-    // =============================================
     public function selesaiPacking(Request $request, $poId)
     {
         $productionOrder = ProductionOrder::findOrFail($poId);

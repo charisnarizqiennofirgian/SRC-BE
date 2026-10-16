@@ -57,7 +57,6 @@ class OperatorMesinController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // GET /operator-mesin/po-detail-items/{poId}
     public function getPoDetailItems(Request $request, $poId)
     {
         ProductionOrder::findOrFail($poId);
@@ -80,11 +79,6 @@ class OperatorMesinController extends Controller
         return response()->json(['success' => true, 'data' => $details]);
     }
 
-    // Sementara: tampilkan SEMUA item Komponen yang punya stok (sama seperti Stock Index),
-    // bukan cuma yang stoknya ada di gudang S4S. qty_available tetap dihitung khusus dari S4S
-    // (bukan total semua gudang) karena itu yang benar-benar bisa dipakai sebagai input Mesin —
-    // item yang qty_available = 0 di sini artinya stoknya sudah pindah ke gudang lain (mis. sudah
-    // pernah diproses Mesin sebelumnya) dan tidak akan lolos validasi kalau tetap dipaksa input > 0.
     public function getS4sItems(Request $request)
     {
         $warehouseS4S = Warehouse::where('code', 'S4S')->first();
@@ -117,7 +111,6 @@ class OperatorMesinController extends Controller
         return response()->json(['success' => true, 'data' => $items]);
     }
 
-    // store() — payload: production_order_detail_id + lines[]
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -134,7 +127,6 @@ class OperatorMesinController extends Controller
             'lines.*.finishing'       => ['required', 'string', 'in:natural,warna'],
             'lines.*.output_item_id'  => ['required', 'integer', 'exists:items,id'],
             'lines.*.output_qty'      => ['required', 'numeric', 'min:1'],
-            // Reject komponen saja; item = input_item
             'lines.*.reject_qty'      => ['nullable', 'numeric', 'min:0.01'],
             'lines.*.reject_notes'    => ['nullable', 'string'],
         ]);
@@ -146,7 +138,6 @@ class OperatorMesinController extends Controller
         app(StageCompletionService::class)->ensureNotCompleted($detail->load('item'), 'mesin');
 
         return DB::transaction(function () use ($data, $detail) {
-
             $warehouseS4S    = Warehouse::where('code', 'S4S')->first();
             $warehouseMesin  = Warehouse::where('code', 'MESIN')->first();
             $warehouseReject = Warehouse::where('code', 'REJECT')->first();
@@ -158,10 +149,6 @@ class OperatorMesinController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris) — COUNT meleset kalau ada
-            // baris di bulan ini yang sudah dihapus (mis. revert Moulding/Mesin), karena total baris
-            // berkurang padahal nomor tertinggi yang pernah dipakai tetap sama, jadi COUNT+1 bisa
-            // menghasilkan nomor yang sudah pernah dipakai sebelumnya.
             $prefix = 'MSN-' . now()->format('Ym') . '-';
             $last   = MesinProduction::where('document_number', 'like', $prefix . '%')
                 ->orderByDesc('document_number')
@@ -191,7 +178,6 @@ class OperatorMesinController extends Controller
                 $machineName = $machine?->name ?? '-';
                 $usedMachineNames[$machineName] = true;
 
-                // === INPUT: kurangi Komponen dari S4S ===
                 $sourceInv    = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $warehouseS4S->id)
                     ->lockForUpdate()
@@ -206,9 +192,6 @@ class OperatorMesinController extends Controller
                     ]);
                 }
 
-                // Komponen: validasi & kurangi breakdown natural/warna sesuai finishing baris ini
-                // Ditulis ke items (global, kompatibilitas) dan inventories (per gudang, sumber baru
-                // untuk Stock Index yang di-filter gudang)
                 $inputItem = Item::lockForUpdate()->find($itemId);
                 $sourceInvExtra = [];
                 if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
@@ -251,7 +234,6 @@ class OperatorMesinController extends Controller
                     'finishing'           => $finishing,
                 ]);
 
-                // === OUTPUT: tambah Komponen ke Gudang MESIN, link ke input ===
                 $outInv = Inventory::where('item_id', $line['output_item_id'])
                     ->where('warehouse_id', $warehouseMesin->id)
                     ->lockForUpdate()
@@ -291,15 +273,12 @@ class OperatorMesinController extends Controller
                     'qty'                      => $line['output_qty'],
                 ]);
 
-                // Komponen: tambah breakdown natural/warna item hasil (finishing sama dengan input,
-                // karena item hasil mesin tetap item yang sama, cuma pindah gudang S4S → MESIN)
                 if ((int) $line['output_item_id'] === (int) $itemId) {
                     if ($inputItem && $inputItem->type === Item::TYPE_COMPONENT) {
                         $inputItem->{$bucket} = (float) $inputItem->{$bucket} + $line['output_qty'];
                         $inputItem->stock     = (float) $inputItem->qty_natural + (float) $inputItem->qty_warna;
                         $inputItem->save();
 
-                        // Inventories per gudang: item sama, cuma pindah S4S → MESIN
                         $outInv->{$bucket} = (float) $outInv->{$bucket} + $line['output_qty'];
                         $outInv->save();
                     }
@@ -319,7 +298,6 @@ class OperatorMesinController extends Controller
                     }
                 }
 
-                // === REJECT (opsional): selalu Komponen input yang rusak ===
                 if (!empty($line['reject_qty'])) {
                     $rjInv = Inventory::where('item_id', $itemId)
                         ->where('warehouse_id', $warehouseReject->id)
@@ -363,7 +341,6 @@ class OperatorMesinController extends Controller
                 }
             }
 
-            // Update current_stage hanya untuk detail produk yang dipilih
             $detail->update(['current_stage' => 'mesin']);
 
             if ($productionOrder && $productionOrder->status !== 'in_progress') {

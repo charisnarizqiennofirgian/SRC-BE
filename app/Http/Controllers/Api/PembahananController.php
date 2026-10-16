@@ -26,9 +26,6 @@ class PembahananController extends Controller
         $this->poProgress = $poProgress;
     }
 
-    // =============================================
-    // GET: Available POs untuk dropdown
-    // =============================================
     public function getAvailableProductionOrders(Request $request)
     {
         $pos = ProductionOrder::where('status', '!=', 'completed')
@@ -48,9 +45,6 @@ class PembahananController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // =============================================
-    // GET: Stok tersedia di gudang sumber
-    // =============================================
     public function sourceInventories(Request $request)
     {
         $request->validate([
@@ -77,9 +71,6 @@ class PembahananController extends Controller
         return response()->json(['success' => true, 'data' => $inventories]);
     }
 
-    // =============================================
-    // POST: Simpan proses pembahanan
-    // =============================================
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -96,7 +87,6 @@ class PembahananController extends Controller
         return DB::transaction(function () use ($data) {
             Log::info('=== PEMBAHANAN START ===', $data);
 
-            // === GUDANG TUJUAN: Gudang Pembahanan ===
             $targetWarehouse = Warehouse::where('code', 'BUFFER')->first();
             if (!$targetWarehouse) {
                 throw ValidationException::withMessages([
@@ -107,9 +97,6 @@ class PembahananController extends Controller
             $productionOrder = ProductionOrder::find($data['ref_po_id']);
             $poNumber        = $productionOrder?->po_number ?? '-';
 
-            // === NOMOR DOKUMEN ===
-            // Pakai MAX nomor urut yang sudah dipakai (bukan COUNT baris), supaya tidak bentrok kalau
-            // ada baris bulan ini yang sudah dihapus (lihat insiden serupa di OperatorMesinController).
             $prefix = 'PBH-' . now()->format('Ym') . '-';
             $last   = PembahananProduction::where('document_number', 'like', $prefix . '%')
                 ->orderByDesc('document_number')
@@ -117,7 +104,6 @@ class PembahananController extends Controller
             $runningNumber  = $last ? ((int) substr($last, strlen($prefix))) + 1 : 1;
             $documentNumber = $prefix . str_pad($runningNumber, 3, '0', STR_PAD_LEFT);
 
-            // === SIMPAN HEADER ===
             $pembahanan = PembahananProduction::create([
                 'document_number'       => $documentNumber,
                 'date'                  => $data['date'],
@@ -128,14 +114,12 @@ class PembahananController extends Controller
                 'created_by'            => Auth::id(),
             ]);
 
-            // === PROSES SETIAP ITEM ===
             foreach ($data['items'] as $index => $itemData) {
                 $itemId = $itemData['item_id'];
                 $qty    = $itemData['qty'];
 
                 $itemName = Item::find($itemId)?->name ?? "ID {$itemId}";
 
-                // Cek stok di gudang sumber
                 $sourceInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $data['source_warehouse_id'])
                     ->lockForUpdate()
@@ -151,7 +135,6 @@ class PembahananController extends Controller
                     ]);
                 }
 
-                // Kurangi stok sumber (OUT)
                 $sourceInventory->decrement('qty_pcs', $qty);
 
                 InventoryLog::create([
@@ -170,7 +153,6 @@ class PembahananController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Tambah stok di Gudang Pembahanan (IN)
                 $targetInventory = Inventory::where('item_id', $itemId)
                     ->where('warehouse_id', $targetWarehouse->id)
                     ->lockForUpdate()
@@ -203,7 +185,6 @@ class PembahananController extends Controller
                     'user_id'          => Auth::id(),
                 ]);
 
-                // Simpan detail item
                 PembahananProductionItem::create([
                     'pembahanan_production_id' => $pembahanan->id,
                     'item_id'                  => $itemId,
@@ -213,7 +194,6 @@ class PembahananController extends Controller
                 Log::info("Item #{$index} processed: {$itemName} - {$qty} pcs");
             }
 
-            // === UPDATE STAGE PO ===
             if ($productionOrder) {
                 $productionOrder->current_stage = 'pembahanan';
                 $productionOrder->status        = 'in_progress';

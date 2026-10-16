@@ -66,8 +66,6 @@ class MaterialController extends Controller
             }
 
             if ($request->query('all')) {
-
-                // category_ids: query langsung tanpa cache karena kombinasi ID terlalu dinamis untuk di-invalidate
                 if ($request->filled('category_ids')) {
                     $categoryIds = array_filter(
                         array_map('intval', explode(',', $request->category_ids))
@@ -82,7 +80,6 @@ class MaterialController extends Controller
                     return response()->json(['success' => true, 'data' => $items]);
                 }
 
-                // Buat cache key unik berdasarkan category_name filter
                 $cacheKey = 'materials_all';
                 if ($request->filled('category_name')) {
                     $cacheKey = 'materials_all_cat_' . Str::slug($request->category_name);
@@ -149,10 +146,10 @@ class MaterialController extends Controller
                     'kubikasi',
                     'tanggal_terima',
                     'no_skshhk',
-                    'merk',
                     'no_kapling',
                     'mutu',
                     'price',
+                    'merk',
                     'nama_produk',
                     'cutting_t',
                     'cutting_l',
@@ -202,13 +199,11 @@ class MaterialController extends Controller
                 $query->latest();
             }
 
-            // Jika ada limit, return simple array (untuk optimasi dropdown)
             if ($limit) {
                 $items = $query->limit((int) $limit)->get();
                 return response()->json(['success' => true, 'data' => $items]);
             }
 
-            // Kalau per_page >= 500, return semua sekaligus (untuk dropdown)
             if ($perPage >= 500) {
                 $items = $query->get();
                 return response()->json(['success' => true, 'data' => $items]);
@@ -258,12 +253,12 @@ class MaterialController extends Controller
                 'diameter' => 'nullable|numeric|min:0',
                 'panjang' => 'nullable|numeric|min:0',
                 'kubikasi' => 'nullable|numeric|min:0',
-                'merk' => 'nullable|string|max:255',
                 'tanggal_terima' => 'nullable|date',
                 'no_skshhk' => 'nullable|string|max:255',
                 'no_kapling' => 'nullable|string|max:255',
                 'mutu' => 'nullable|string|max:255',
                 'price' => 'nullable|numeric|min:0',
+                'merk' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -439,12 +434,12 @@ class MaterialController extends Controller
                 'diameter' => 'nullable|numeric|min:0',
                 'panjang' => 'nullable|numeric|min:0',
                 'kubikasi' => 'nullable|numeric|min:0',
-                'merk' => 'nullable|string|max:255',
                 'tanggal_terima' => 'nullable|date',
                 'no_skshhk' => 'nullable|string|max:255',
                 'no_kapling' => 'nullable|string|max:255',
                 'mutu' => 'nullable|string|max:255',
                 'price' => 'nullable|numeric|min:0',
+                'merk' => 'nullable|string|max:255',
             ],
             [
                 'name.required' => 'Nama barang wajib diisi.',
@@ -672,7 +667,7 @@ class MaterialController extends Controller
                 '',
                 '',
                 '',
-                '0' // harga
+                '0'
             ];
 
             $example2 = [
@@ -700,7 +695,7 @@ class MaterialController extends Controller
                 '',
                 '',
                 '',
-                '0' // harga
+                '0'
             ];
 
             $example3 = [
@@ -728,7 +723,7 @@ class MaterialController extends Controller
                 '3358693',
                 '2412502005843',
                 'A',
-                '0' // harga
+                '0'
             ];
 
             $content = implode(';', $headers) . "\n";
@@ -853,9 +848,6 @@ class MaterialController extends Controller
         }
     }
 
-    /**
-     * Quick store item Jeblosan baru dari form Sawmill
-     */
     public function quickStoreJeblosan(Request $request)
     {
         $data = $request->validate([
@@ -918,9 +910,6 @@ class MaterialController extends Controller
         ], 201);
     }
 
-    /**
-     * Quick store item Kayu RST baru dari form Sawmill
-     */
     public function quickStoreRst(Request $request)
     {
         $data = $request->validate([
@@ -947,16 +936,13 @@ class MaterialController extends Controller
             ['short_name' => 'PCS']
         );
 
-        // Auto-generate nama unik
         $t = $data['tebal_mm'];
         $l = $data['lebar_mm'] ?? 0;
         $p = $data['panjang_mm'] ?? 0;
         $uniqueName = trim($data['nama_dasar']) . " {$t}x{$l}x{$p}";
 
-        // Auto-generate kode jika tidak diisi
         $kode = $data['kode_barang'] ?? 'RST-' . strtoupper(substr(md5($uniqueName . now()), 0, 8));
 
-        // Hitung volume m3 (dimensi dalam mm, dibagi 1 miliar)
         $volumeM3 = ($t > 0 && $l > 0 && $p > 0)
             ? round(($t * $l * $p) / 1_000_000_000, 6)
             : 0;
@@ -1003,10 +989,6 @@ class MaterialController extends Controller
         ], 201);
     }
 
-    /**
-     * Quick store Produk Jadi baru dari form Sales Order (Rincian Barang) —
-     * dipakai saat produk yang buyer pesan belum ada di Master Data.
-     */
     public function quickStoreProduk(Request $request)
     {
         $data = $request->validate([

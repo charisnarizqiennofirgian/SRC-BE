@@ -90,8 +90,6 @@ class MouldingController extends Controller
         return response()->json(['success' => true, 'data' => $pos]);
     }
 
-    // GET /produksi/moulding/po-detail-items/{poId}
-    // Return list produk dalam PO beserta status moulding-nya
     public function getPoDetailItems(Request $request, $poId)
     {
         $po = ProductionOrder::with('salesOrder.details')->findOrFail($poId);
@@ -100,8 +98,6 @@ class MouldingController extends Controller
             ->with('item')
             ->get();
 
-        // Auto-repair: PO lama mungkin tidak punya production_order_details.
-        // Jika kosong tapi SO masih punya detail items, buat records-nya sekarang.
         if ($details->isEmpty() && $po->salesOrder && $po->salesOrder->details->isNotEmpty()) {
             DB::beginTransaction();
             try {
@@ -125,7 +121,6 @@ class MouldingController extends Controller
                 ->get();
         }
 
-        // Map SO details by id untuk fallback nama ketika item di-soft-delete
         $soDetails = $po->salesOrder
             ? $po->salesOrder->details->keyBy('id')
             : collect();
@@ -150,7 +145,6 @@ class MouldingController extends Controller
         return response()->json(['success' => true, 'data' => $mapped]);
     }
 
-    // store() — payload: production_order_detail_id + groups[] dengan inputs[] per group
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -173,7 +167,6 @@ class MouldingController extends Controller
             'groups.*.reject_notes'        => ['nullable', 'string'],
         ]);
 
-        // Pastikan detail ini milik PO yang dipilih
         $detail = ProductionOrderDetail::where('id', $data['production_order_detail_id'])
             ->where('production_order_id', $data['ref_po_id'])
             ->firstOrFail();
@@ -181,7 +174,6 @@ class MouldingController extends Controller
         app(StageCompletionService::class)->ensureNotCompleted($detail->load('item'), 'moulding');
 
         return DB::transaction(function () use ($data, $detail) {
-
             $warehouseS4S    = Warehouse::where('code', 'S4S')->first();
             $warehouseReject = Warehouse::where('code', 'REJECT')->first();
 
@@ -286,9 +278,6 @@ class MouldingController extends Controller
                     ]);
                 }
 
-                // Komponen: pecah stok ke qty_natural / qty_warna sesuai finishing hasil moulding
-                // Ditulis ke DUA tempat: items (global, dipertahankan untuk kompatibilitas) dan
-                // inventories (per gudang, sumber data baru untuk Stock Index yang di-filter gudang)
                 $outputItem = Item::lockForUpdate()->find($group['output_item_id']);
                 if ($outputItem && $outputItem->type === Item::TYPE_COMPONENT) {
                     $bucket = $group['finishing'] === 'warna' ? 'qty_warna' : 'qty_natural';
@@ -360,10 +349,8 @@ class MouldingController extends Controller
                 }
             }
 
-            // Update current_stage hanya untuk detail produk yang dipilih
             $detail->update(['current_stage' => 'moulding']);
 
-            // Update status PO jadi in_progress (tapi tidak update current_stage PO di sini)
             if ($productionOrder && $productionOrder->status !== 'in_progress') {
                 $productionOrder->update(['status' => 'in_progress']);
             }
